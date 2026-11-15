@@ -45,7 +45,9 @@ class Engine:
     def taste_center(self) -> np.ndarray:
         if not self.owned_idx:
             raise RuntimeError("no owned rows in index — run build.py first")
-        weights = np.array([self.weights.get(self.ids[i], 1.0) for i in self.owned_idx], dtype=np.float32)
+        has_rated = any(self.ids[i] in self.weights for i in self.owned_idx)
+        default_weight = 0.0 if has_rated else 1.0
+        weights = np.array([self.weights.get(self.ids[i], default_weight) for i in self.owned_idx], dtype=np.float32)
         if np.all(weights <= 0):
             weights = np.ones(len(self.owned_idx), dtype=np.float32)
         v = (self.M[self.owned_idx] * weights[:, None]).sum(axis=0)
@@ -87,8 +89,27 @@ class Engine:
     def defining_shows(self, k: int = 15) -> list[dict]:
         c = self.taste_center()
         sims = self.M[self.owned_idx] @ c
-        order = np.argsort(-sims)[:k]
-        return [self._result(self.owned_idx[j], float(sims[j]), seed=None) for j in order]
+        has_rated = any(self.rows[i].get("tier") is not None for i in self.owned_idx)
+        if not has_rated:
+            order = np.argsort(-sims)[:k]
+            return [self._result(self.owned_idx[j], float(sims[j]), seed=None) for j in order]
+
+        scored = []
+        fallback = []
+        for j, i in enumerate(self.owned_idx):
+            r = self.rows[i]
+            tier = r.get("tier")
+            sim = float(sims[j])
+            if tier in ("S", "A", "B"):
+                w = self.weights.get(self.ids[i], 1.0)
+                scored.append((w * sim, j, sim))
+            elif tier not in ("C", "D"):
+                fallback.append((sim, j, sim))
+
+        scored.sort(key=lambda x: -x[0])
+        fallback.sort(key=lambda x: -x[0])
+        combined = scored + fallback
+        return [self._result(self.owned_idx[j], sim, seed=None) for _, j, sim in combined[:k]]
 
     def owned_tag_summary(self, k: int = 20) -> list[tuple[str, int]]:
         counts: dict[str, int] = {}
