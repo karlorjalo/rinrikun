@@ -41,6 +41,13 @@ def test_api_weights_endpoints(tmp_path):
         assert post_res.status_code == 200
         assert post_res.json() == {"id": "al:1", "tier": "S", "weight": 2.0}
 
+        # Check /api/ratings endpoint
+        ratings_res = client.get("/api/ratings")
+        assert ratings_res.status_code == 200
+        assert len(ratings_res.json()) == 1
+        assert ratings_res.json()[0]["id"] == "al:1"
+        assert ratings_res.json()[0]["tier"] == "S"
+
         # 3. Check unrated_only queue
         unrated_res = client.get("/api/review-queue?unrated_only=true")
         assert unrated_res.status_code == 200

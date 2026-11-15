@@ -145,6 +145,16 @@ class Engine:
             out.append(self._result(idx, sim, seed=None))
         return out
 
+    def rated_shows(self) -> list[dict]:
+        c = self.taste_center() if self.owned_idx else None
+        out = []
+        for i, r in enumerate(self.rows):
+            if r.get("tier") is not None:
+                sim = float(self.M[i] @ c) if c is not None else 0.0
+                out.append(self._result(i, sim, seed=None))
+        tier_order = {"S": 0, "A": 1, "B": 2, "C": 3, "D": 4}
+        return sorted(out, key=lambda x: (tier_order.get(x.get("tier"), 99), -(x.get("similarity") or 0.0)))
+
     def tier_summary(self) -> dict[str, int]:
         counts = {"S": 0, "A": 0, "B": 0, "C": 0, "D": 0, "unrated": 0}
         for i in self.owned_idx:

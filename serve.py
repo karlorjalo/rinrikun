@@ -59,6 +59,11 @@ def review_queue(unrated_only: bool = False):
     return engine.review_queue(unrated_only=unrated_only)
 
 
+@app.get("/api/ratings")
+def get_ratings():
+    return engine.rated_shows()
+
+
 @app.get("/api/watched")
 def get_watched():
     return engine.manual_shows()

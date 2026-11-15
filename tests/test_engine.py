@@ -124,6 +124,11 @@ def test_weighted_taste_center_and_tiers(tmp_path):
     rq = e.review_queue(unrated_only=True)
     assert len(rq) == 1
     assert rq[0]["id"] == "al:2"
+    # rated shows
+    rated = e.rated_shows()
+    assert len(rated) == 2
+    assert rated[0]["id"] == "al:0" and rated[0]["tier"] == "S"
+    assert rated[1]["id"] == "al:1" and rated[1]["tier"] == "D"
     # reset tier
     e.set_show_tier("al:0", None)
     assert e.by_id["al:0"]["tier"] is None
