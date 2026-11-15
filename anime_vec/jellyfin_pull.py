@@ -6,20 +6,21 @@ import os as _os
 from pathlib import Path as _Path
 
 JELLYFIN = "http://localhost:8096"
-USER_ID = "F56C05D6-C1CF-4B39-AE56-F7892FD5347C"
 
 
-def _api_key() -> str:
-    key = _os.environ.get("JELLYFIN_API_KEY")
-    if key:
-        return key
+def _secrets() -> dict:
     f = _Path(__file__).resolve().parent.parent / "secrets.json"
-    if f.exists():
-        return _json.loads(f.read_text(encoding="utf-8"))["jellyfin_api_key"]
-    raise RuntimeError("Set JELLYFIN_API_KEY env var or create secrets.json with {\"jellyfin_api_key\": ...}")
+    d = _json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    d.setdefault("jellyfin_api_key", _os.environ.get("JELLYFIN_API_KEY"))
+    d.setdefault("jellyfin_user_id", _os.environ.get("JELLYFIN_USER_ID"))
+    missing = [k for k in ("jellyfin_api_key", "jellyfin_user_id") if not d[k]]
+    if missing:
+        raise RuntimeError(f"missing secrets: {missing} — set env vars or secrets.json")
+    return d
 
 
-API_KEY = _api_key()
+API_KEY = _secrets()["jellyfin_api_key"]
+USER_ID = _secrets()["jellyfin_user_id"]
 
 FIELDS = "Genres,Tags,Studios,CommunityRating,ProviderIds,ProductionYear,Overview"
 

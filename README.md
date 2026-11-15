@@ -12,8 +12,8 @@ Semantic taste map for your anime library: embeds your Jellyfin library plus a p
 
 ```
 python -m pip install -r requirements.txt
-# Jellyfin API key: either set JELLYFIN_API_KEY or create secrets.json:
-# {"jellyfin_api_key": "..."}
+# secrets.json (gitignored): {"jellyfin_api_key": "...", "jellyfin_user_id": "..."}
+# or set JELLYFIN_API_KEY + JELLYFIN_USER_ID env vars.
 # Jellyfin URL / user id live in anime_vec/jellyfin_pull.py (localhost by default).
 ```
 
