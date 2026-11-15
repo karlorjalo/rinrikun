@@ -227,3 +227,11 @@ def test_deduplicate_library_and_pool_counterparts(tmp_path):
     e.set_show_tier("al:100", "A")
     assert e.by_id["jf:1"]["tier"] == "A"
     assert e.by_id["al:100"]["tier"] == "A"
+
+    # 5. Vector map excludes counterpart duplicate
+    vm = e.get_vector_map()
+    assert len(vm["points"]) == 1
+    assert vm["points"][0]["id"] == "jf:1"
+
+    # 6. eff_M bridges jf:1 to al:100's vector
+    assert np.allclose(e.eff_M[e.ids.index("jf:1")], e.M[e.ids.index("al:100")])

@@ -42,10 +42,19 @@ class Engine:
         self.owned_idx = [i for i, r in enumerate(self.rows) if r["owned"] and r["id"] not in self.duplicate_of]
         self.weights = {r["id"]: r.get("weight", 1.0) for r in self.rows if r.get("tier") is not None}
 
-        # Compute 2D projection for vector space visualization
-        if len(self.rows) >= 2 and self.M.ndim == 2 and self.M.shape[1] >= 2:
-            self.mean_M = self.M.mean(axis=0)
-            X = self.M - self.mean_M
+        # Effective embedding matrix: bridge Japanese library rows to their English AniList counterpart vectors
+        self.eff_M = np.array(self.M, copy=True)
+        for i, r in enumerate(self.rows):
+            if r["source"] == "library" and r["id"] in self.counterparts:
+                for cp_id in self.counterparts[r["id"]]:
+                    if cp_id in self.by_id:
+                        self.eff_M[i] = self.M[self.ids.index(cp_id)]
+                        break
+
+        # Compute 2D projection for vector space visualization using effective matrix
+        if len(self.rows) >= 2 and self.eff_M.ndim == 2 and self.eff_M.shape[1] >= 2:
+            self.mean_M = self.eff_M.mean(axis=0)
+            X = self.eff_M - self.mean_M
             cov = X.T @ X
             _, v = np.linalg.eigh(cov)
             self.pca_basis = v[:, -2:]
@@ -55,7 +64,7 @@ class Engine:
             self.c_span = np.maximum(self.c_max - self.c_min, 1e-6)
             self.coords_2d = ((raw_coords - self.c_min) / self.c_span).astype(np.float32)
         else:
-            dim = self.M.shape[1] if self.M.ndim == 2 else 0
+            dim = self.eff_M.shape[1] if self.eff_M.ndim == 2 else 0
             self.mean_M = np.zeros(dim, dtype=np.float32)
             self.pca_basis = np.zeros((dim, 2), dtype=np.float32)
             self.c_min = np.zeros(2, dtype=np.float32)
@@ -70,18 +79,21 @@ class Engine:
         weights = np.array([self.weights.get(self.ids[i], default_weight) for i in self.owned_idx], dtype=np.float32)
         if np.all(weights <= 0):
             weights = np.ones(len(self.owned_idx), dtype=np.float32)
-        v = (self.M[self.owned_idx] * weights[:, None]).sum(axis=0)
+        v = (self.eff_M[self.owned_idx] * weights[:, None]).sum(axis=0)
         return v / max(np.linalg.norm(v), 1e-9)
 
     def similar_to(self, row_id: str, k: int = 24) -> list[dict]:
         if k <= 0:
             return []
+        if row_id not in self.by_id:
+            raise ValueError(f"unknown id {row_id}")
         i = self.ids.index(row_id)
-        sims = self.M @ self.M[i]
+        sims = self.eff_M @ self.eff_M[i]
         order = np.argsort(-sims)
         out = []
+        exclude_ids = {row_id} | set(self.counterparts.get(row_id, []))
         for j in order:
-            if j == i:
+            if self.ids[j] in exclude_ids:
                 continue
             out.append(self._result(j, float(sims[j]), seed=self.rows[i]))
             if len(out) >= k:
@@ -95,24 +107,25 @@ class Engine:
         if seed_id is not None:
             if seed_id not in self.by_id:
                 raise KeyError(f"unknown seed id {seed_id}")
-            q = self.M[self.ids.index(seed_id)]
-            sims = self.M @ q
+            q = self.eff_M[self.ids.index(seed_id)]
+            sims = self.eff_M @ q
             order = np.argsort(-sims)
             out = []
+            exclude_ids = {seed_id} | set(self.counterparts.get(seed_id, []))
             for j in order:
                 r = self.rows[j]
-                if self.ids[j] == seed_id or r["owned"]:
+                if self.ids[j] in exclude_ids or r["owned"]:
                     continue
                 out.append(self._result(j, float(sims[j]), seed=None))
                 if len(out) >= k:
                     break
             return out
 
-        cand_indices = [j for j, r in enumerate(self.rows) if not r["owned"]]
+        cand_indices = [j for j, r in enumerate(self.rows) if not r["owned"] and r["id"] not in self.duplicate_of]
         if not cand_indices:
             return []
 
-        cand_M = self.M[cand_indices]
+        cand_M = self.eff_M[cand_indices]
         c = self.taste_center()
         c_sims = cand_M @ c
 
@@ -124,15 +137,17 @@ class Engine:
 
         d_indices = [i for i in self.owned_idx if self.rows[i].get("tier") == "D"]
 
-        S_M = self.M[s_indices]
+        S_M = self.eff_M[s_indices]
         s_all_sims = cand_M @ S_M.T
         s_best_idx = s_all_sims.argmax(axis=1)
         s_peak_sims = s_all_sims.max(axis=1)
 
         d_penalty = np.zeros(len(cand_indices), dtype=np.float32)
         if d_indices:
-            D_M = self.M[d_indices]
-            d_penalty = np.maximum(0.0, (cand_M @ D_M.T).max(axis=1))
+            D_M = self.eff_M[d_indices]
+            raw_d_sims = (cand_M @ D_M.T).max(axis=1)
+            # Soft threshold: only apply negative push if candidate similarity to D-tier > 0.75
+            d_penalty = np.maximum(0.0, raw_d_sims - 0.75) / 0.25
 
         mode = (mode or "hybrid").lower()
         if mode == "center":
@@ -144,7 +159,7 @@ class Engine:
             return out
 
         elif mode == "peak":
-            scores = s_peak_sims - 0.25 * d_penalty
+            scores = s_peak_sims - 0.15 * d_penalty
             order = np.argsort(-scores)[:k]
             out = []
             for rank in order:
@@ -155,7 +170,7 @@ class Engine:
             return out
 
         elif mode == "diverse":
-            base_scores = 0.5 * c_sims + 0.5 * s_peak_sims - 0.2 * d_penalty
+            base_scores = 0.5 * c_sims + 0.5 * s_peak_sims - 0.15 * d_penalty
             selected = []
             unselected = set(range(len(cand_indices)))
             lambda_param = 0.65
@@ -183,7 +198,7 @@ class Engine:
             return out
 
         else: # "hybrid"
-            scores = 0.5 * c_sims + 0.5 * s_peak_sims - 0.2 * d_penalty
+            scores = 0.5 * c_sims + 0.5 * s_peak_sims - 0.15 * d_penalty
             order = np.argsort(-scores)[:k]
             out = []
             for rank in order:
@@ -196,7 +211,7 @@ class Engine:
 
     def defining_shows(self, k: int = 15) -> list[dict]:
         c = self.taste_center()
-        sims = self.M[self.owned_idx] @ c
+        sims = self.eff_M[self.owned_idx] @ c
         has_rated = any(self.rows[i].get("tier") is not None for i in self.owned_idx)
         if not has_rated:
             order = np.argsort(-sims)[:k]
@@ -250,7 +265,7 @@ class Engine:
         r["manual_watched"] = 1 if watched else 0
         if r["source"] != "library":
             r["owned"] = 1 if watched else 0
-        self.owned_idx = [i for i, row in enumerate(self.rows) if row["owned"]]
+        self.owned_idx = [i for i, row in enumerate(self.rows) if row["owned"] and row["id"] not in self.duplicate_of]
 
     def manual_shows(self) -> list[dict]:
         manual_ids = self.store.get_manual_watched_ids()
@@ -258,7 +273,7 @@ class Engine:
         out = []
         for i, r in enumerate(self.rows):
             if r["id"] in manual_ids:
-                sim = float(self.M[i] @ c) if c is not None else 0.0
+                sim = float(self.eff_M[i] @ c) if c is not None else 0.0
                 out.append(self._result(i, sim, seed=None))
         return out
 
@@ -296,14 +311,14 @@ class Engine:
         def sort_key(r):
             is_unrated = 0 if r.get("tier") is None else 1
             idx = self.ids.index(r["id"])
-            sim = float(self.M[idx] @ c) if c is not None else 0.0
+            sim = float(self.eff_M[idx] @ c) if c is not None else 0.0
             return (is_unrated, -sim)
 
         sorted_rows = sorted(owned_rows, key=sort_key)
         out = []
         for r in sorted_rows:
             idx = self.ids.index(r["id"])
-            sim = float(self.M[idx] @ c) if c is not None else 0.0
+            sim = float(self.eff_M[idx] @ c) if c is not None else 0.0
             out.append(self._result(idx, sim, seed=None))
         return out
 
@@ -313,7 +328,7 @@ class Engine:
         for i in self.owned_idx:
             r = self.rows[i]
             if r.get("tier") is not None:
-                sim = float(self.M[i] @ c) if c is not None else 0.0
+                sim = float(self.eff_M[i] @ c) if c is not None else 0.0
                 out.append(self._result(i, sim, seed=None))
         tier_order = {"S": 0, "A": 1, "B": 2, "C": 3, "D": 4}
         return sorted(out, key=lambda x: (tier_order.get(x.get("tier"), 99), -(x.get("similarity") or 0.0)))
@@ -342,7 +357,7 @@ class Engine:
         return out
 
     def project_2d(self, vec: np.ndarray) -> tuple[float, float]:
-        if len(self.rows) < 2 or self.M.ndim != 2 or self.M.shape[1] < 2:
+        if len(self.rows) < 2 or self.eff_M.ndim != 2 or self.eff_M.shape[1] < 2:
             return (0.5, 0.5)
         raw = (vec - self.mean_M) @ self.pca_basis
         proj = (raw - self.c_min) / self.c_span
@@ -353,6 +368,14 @@ class Engine:
         c_proj = self.project_2d(c) if c is not None else None
         points = []
         for i, r in enumerate(self.rows):
+            if r["id"] in self.duplicate_of:
+                continue
+            poster = r.get("poster")
+            if (not poster or "localhost" in poster or "127.0.0.1" in poster) and r.get("source") == "library":
+                for cp_id in self.counterparts.get(r["id"], []):
+                    if cp_id in self.by_id and self.by_id[cp_id].get("poster"):
+                        poster = self.by_id[cp_id]["poster"]
+                        break
             points.append({
                 "id": r["id"],
                 "x": round(float(self.coords_2d[i, 0]), 3),
@@ -360,7 +383,7 @@ class Engine:
                 "title": r.get("title", ""),
                 "title_native": r.get("title_native", ""),
                 "year": r.get("year"),
-                "poster": r.get("poster"),
+                "poster": poster,
                 "genres": r.get("genres", [])[:2],
                 "owned": r.get("owned", 0),
                 "tier": r.get("tier"),

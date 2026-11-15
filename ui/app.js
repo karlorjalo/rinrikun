@@ -513,24 +513,44 @@ async function getVectorMap() {
 }
 
 const posterImgCache = new Map();
+const posterListeners = new Map();
 
 function getPosterImage(url, onLoaded) {
   if (!url) return null;
   if (posterImgCache.has(url)) {
     const entry = posterImgCache.get(url);
     if (entry && entry.complete && entry.naturalWidth > 0) return entry;
+    if (entry === false) return null;
+    if (onLoaded) {
+      const list = posterListeners.get(url) || [];
+      list.push(onLoaded);
+      posterListeners.set(url, list);
+    }
     return null;
   }
+
   const img = new Image();
-  img.crossOrigin = "anonymous";
-  img.src = url;
+  if (onLoaded) {
+    posterListeners.set(url, [onLoaded]);
+  }
   img.onload = () => {
     posterImgCache.set(url, img);
-    onLoaded?.();
+    const list = posterListeners.get(url) || [];
+    posterListeners.delete(url);
+    list.forEach((cb) => {
+      try { cb(); } catch (e) {}
+    });
   };
   img.onerror = () => {
     posterImgCache.set(url, false);
+    posterListeners.delete(url);
   };
+  img.src = url;
+
+  if (img.complete && img.naturalWidth > 0) {
+    posterImgCache.set(url, img);
+    return img;
+  }
   posterImgCache.set(url, img);
   return null;
 }
@@ -557,6 +577,91 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   const box = canvas.parentElement;
   let hoveredPoint = null;
 
+  // Zoom & Pan state
+  let scale = 1.0;
+  let panX = 0;
+  let panY = 0;
+  let isDragging = false;
+  let hasDragged = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let pinchStartDist = 0;
+  let pinchStartScale = 1.0;
+  let animFrame = null;
+
+  function scheduleDraw() {
+    if (!animFrame) {
+      animFrame = requestAnimationFrame(() => {
+        animFrame = null;
+        draw();
+      });
+    }
+  }
+
+  // Inject Zoom Controls into canvas box if not present
+  let zoomBox = box.querySelector(".vector-zoom-controls");
+  if (!zoomBox) {
+    zoomBox = document.createElement("div");
+    zoomBox.className = "vector-zoom-controls";
+    zoomBox.innerHTML = `
+      <button class="vector-zoom-btn btn-zoom-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
+      <button class="vector-zoom-btn btn-zoom-out" title="Zoom out (−)" aria-label="Zoom out">−</button>
+      <button class="vector-zoom-btn btn-zoom-reset" title="Reset view (↺)" aria-label="Reset view">↺</button>
+      <div class="vector-zoom-level">100%</div>
+    `;
+    box.appendChild(zoomBox);
+  }
+  const zoomLevelEl = zoomBox.querySelector(".vector-zoom-level");
+  const btnZoomIn = zoomBox.querySelector(".btn-zoom-in");
+  const btnZoomOut = zoomBox.querySelector(".btn-zoom-out");
+  const btnZoomReset = zoomBox.querySelector(".btn-zoom-reset");
+
+  let hintPill = box.querySelector(".vector-hint-pill");
+  if (!hintPill) {
+    hintPill = document.createElement("div");
+    hintPill.className = "vector-hint-pill";
+    hintPill.textContent = "Scroll to zoom · Drag to pan";
+    box.appendChild(hintPill);
+  }
+
+  function dismissHint() {
+    if (hintPill) hintPill.classList.add("fade-out");
+  }
+  setTimeout(dismissHint, 3500);
+
+  function applyZoom(factor, mx, my) {
+    const rect = box.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
+    if (w === 0 || h === 0) return;
+    const newScale = Math.max(0.65, Math.min(12.0, scale * factor));
+    if (Math.abs(newScale - scale) < 0.001) return;
+    panX = mx - w / 2 - ((mx - panX - w / 2) / scale) * newScale;
+    panY = my - h / 2 - ((my - panY - h / 2) / scale) * newScale;
+    scale = newScale;
+    dismissHint();
+    scheduleDraw();
+  }
+
+  btnZoomIn.onclick = (e) => {
+    e.stopPropagation();
+    const rect = box.getBoundingClientRect();
+    applyZoom(1.35, rect.width / 2, rect.height / 2);
+  };
+  btnZoomOut.onclick = (e) => {
+    e.stopPropagation();
+    const rect = box.getBoundingClientRect();
+    applyZoom(1 / 1.35, rect.width / 2, rect.height / 2);
+  };
+  btnZoomReset.onclick = (e) => {
+    e.stopPropagation();
+    scale = 1.0;
+    panX = 0;
+    panY = 0;
+    dismissHint();
+    scheduleDraw();
+  };
+
   // View toggle pills (Posters vs Dots)
   const viewPills = box.parentElement.querySelectorAll(`.vector-view-pills[data-canvas="${canvasId}"] button`);
   viewPills.forEach((btn) => {
@@ -564,7 +669,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       viewPills.forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       canvas.dataset.view = btn.dataset.view;
-      draw();
+      scheduleDraw();
     };
   });
 
@@ -573,12 +678,25 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     return raw || "#b35c72";
   }
 
+  function toScreen(x, y, w, h, pad, plotW, plotH) {
+    const baseX = pad + x * plotW;
+    const baseY = pad + (1.0 - y) * plotH;
+    return {
+      x: (baseX - w / 2) * scale + w / 2 + panX,
+      y: (baseY - h / 2) * scale + h / 2 + panY,
+    };
+  }
+
   function draw() {
     if (!canvas.isConnected) return;
     const rect = box.getBoundingClientRect();
     const w = rect.width;
     const h = rect.height;
     if (w === 0 || h === 0) return;
+
+    if (zoomLevelEl) {
+      zoomLevelEl.textContent = `${Math.round(scale * 100)}%`;
+    }
 
     const dpr = window.devicePixelRatio || 1;
     if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
@@ -606,47 +724,49 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     // 1. Draw Catalog points
     ctx.fillStyle = catalogColor;
     ctx.beginPath();
+    const catR = Math.max(1.3, Math.min(3.2, 1.6 * Math.sqrt(scale)));
     for (let i = 0; i < points.length; i++) {
       const pt = points[i];
       if (pt.owned || highlightSet.has(pt.id)) continue;
-      const px = pad + pt.x * plotW;
-      const py = pad + (1.0 - pt.y) * plotH;
-      ctx.moveTo(px + 1.6, py);
-      ctx.arc(px, py, 1.6, 0, Math.PI * 2);
+      const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
+      if (px < -20 || px > w + 20 || py < -20 || py > h + 20) continue;
+      ctx.moveTo(px + catR, py);
+      ctx.arc(px, py, catR, 0, Math.PI * 2);
     }
     ctx.fill();
 
     // 2. Draw Library points
     ctx.fillStyle = libraryColor;
     ctx.beginPath();
+    const libR = Math.max(2.4, Math.min(5.0, 2.8 * Math.sqrt(scale)));
     for (let i = 0; i < points.length; i++) {
       const pt = points[i];
       if (!pt.owned || highlightSet.has(pt.id)) continue;
-      const px = pad + pt.x * plotW;
-      const py = pad + (1.0 - pt.y) * plotH;
-      ctx.moveTo(px + 2.8, py);
-      ctx.arc(px, py, 2.8, 0, Math.PI * 2);
+      const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
+      if (px < -20 || px > w + 20 || py < -20 || py > h + 20) continue;
+      ctx.moveTo(px + libR, py);
+      ctx.arc(px, py, libR, 0, Math.PI * 2);
     }
     ctx.fill();
 
     // 3. Draw Taste Center marker
     if (center) {
-      const cx = pad + center.x * plotW;
-      const cy = pad + (1.0 - center.y) * plotH;
-      ctx.fillStyle = isDark ? "#ffffff" : "#1c1917";
-      ctx.beginPath();
-      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.3)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 6, 0, Math.PI * 2);
-      ctx.stroke();
+      const { x: cx, y: cy } = toScreen(center.x, center.y, w, h, pad, plotW, plotH);
+      if (cx >= -20 && cx <= w + 20 && cy >= -20 && cy <= h + 20) {
+        ctx.fillStyle = isDark ? "#ffffff" : "#1c1917";
+        ctx.beginPath();
+        ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.3)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
 
     // 4. Draw Highlighted points (Posters or Pink Dots)
     if (viewMode === "posters") {
-      // Sort so hovered point is drawn on top
       const highlightedPoints = points.filter((pt) => highlightSet.has(pt.id));
       highlightedPoints.sort((a, b) => {
         if (hoveredPoint && a.id === hoveredPoint.id) return 1;
@@ -656,12 +776,13 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
 
       for (let i = 0; i < highlightedPoints.length; i++) {
         const pt = highlightedPoints[i];
-        const px = pad + pt.x * plotW;
-        const py = pad + (1.0 - pt.y) * plotH;
-        const isHovered = hoveredPoint && hoveredPoint.id === pt.id;
+        const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
+        if (px < -60 || px > w + 60 || py < -60 || py > h + 60) continue;
 
-        const pw = isHovered ? 36 : 24;
-        const ph = isHovered ? 52 : 35;
+        const isHovered = hoveredPoint && hoveredPoint.id === pt.id;
+        const scaleBoost = Math.max(1.0, Math.min(1.8, Math.sqrt(scale)));
+        const pw = Math.round(isHovered ? 40 * Math.min(1.3, scaleBoost) : 24 * scaleBoost);
+        const ph = Math.round(isHovered ? 58 * Math.min(1.3, scaleBoost) : 35 * scaleBoost);
         const x0 = px - pw / 2;
         const y0 = py - ph / 2;
 
@@ -684,7 +805,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
         else ctx.rect(x0, y0, pw, ph);
         ctx.clip();
 
-        const img = pt.poster ? getPosterImage(pt.poster, () => draw()) : null;
+        const img = pt.poster ? getPosterImage(pt.poster, () => scheduleDraw()) : null;
         if (img) {
           ctx.drawImage(img, x0, y0, pw, ph);
         } else {
@@ -704,8 +825,8 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       for (let i = 0; i < points.length; i++) {
         const pt = points[i];
         if (!highlightSet.has(pt.id)) continue;
-        const px = pad + pt.x * plotW;
-        const py = pad + (1.0 - pt.y) * plotH;
+        const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
+        if (px < -20 || px > w + 20 || py < -20 || py > h + 20) continue;
 
         ctx.fillStyle = accentColor;
         ctx.globalAlpha = 0.25;
@@ -727,13 +848,14 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
 
     // 5. Draw Hover Crosshair / Ring (for non-posters or dots)
     if (hoveredPoint && (viewMode !== "posters" || !highlightSet.has(hoveredPoint.id))) {
-      const px = pad + hoveredPoint.x * plotW;
-      const py = pad + (1.0 - hoveredPoint.y) * plotH;
-      ctx.strokeStyle = accentColor;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(px, py, 11, 0, Math.PI * 2);
-      ctx.stroke();
+      const { x: px, y: py } = toScreen(hoveredPoint.x, hoveredPoint.y, w, h, pad, plotW, plotH);
+      if (px >= -20 && px <= w + 20 && py >= -20 && py <= h + 20) {
+        ctx.strokeStyle = accentColor;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(px, py, 11, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
 
     ctx.restore();
@@ -749,17 +871,20 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     const viewMode = canvas.dataset.view || "posters";
 
     let best = null;
-    let bestDistSq = 14 * 14;
+    let bestDistSq = 18 * 18;
 
     // Check highlighted points first
     for (let i = 0; i < points.length; i++) {
       const pt = points[i];
       if (!highlightSet.has(pt.id)) continue;
-      const px = pad + pt.x * plotW;
-      const py = pad + (1.0 - pt.y) * plotH;
+      const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
+      if (px < -60 || px > w + 60 || py < -60 || py > h + 60) continue;
 
       if (viewMode === "posters") {
-        if (Math.abs(px - mx) <= 15 && Math.abs(py - my) <= 22) {
+        const scaleBoost = Math.max(1.0, Math.min(1.8, Math.sqrt(scale)));
+        const pw = Math.round(24 * scaleBoost);
+        const ph = Math.round(35 * scaleBoost);
+        if (Math.abs(px - mx) <= pw / 2 + 4 && Math.abs(py - my) <= ph / 2 + 4) {
           return pt;
         }
       }
@@ -775,8 +900,8 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     for (let i = 0; i < points.length; i++) {
       const pt = points[i];
       if (!pt.owned) continue;
-      const px = pad + pt.x * plotW;
-      const py = pad + (1.0 - pt.y) * plotH;
+      const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
+      if (px < -30 || px > w + 30 || py < -30 || py > h + 30) continue;
       const dSq = (px - mx) ** 2 + (py - my) ** 2;
       if (dSq < bestDistSq) {
         bestDistSq = dSq;
@@ -788,8 +913,8 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     // Check all points
     for (let i = 0; i < points.length; i++) {
       const pt = points[i];
-      const px = pad + pt.x * plotW;
-      const py = pad + (1.0 - pt.y) * plotH;
+      const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
+      if (px < -30 || px > w + 30 || py < -30 || py > h + 30) continue;
       const dSq = (px - mx) ** 2 + (py - my) ** 2;
       if (dSq < bestDistSq) {
         bestDistSq = dSq;
@@ -799,15 +924,40 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     return best;
   }
 
+  function onMouseDown(e) {
+    if (e.button !== 0) return;
+    isDragging = true;
+    hasDragged = false;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    canvas.classList.add("is-dragging");
+  }
+
   function onMouseMove(e) {
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
 
+    if (isDragging) {
+      const dx = e.clientX - dragStartX;
+      const dy = e.clientY - dragStartY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        hasDragged = true;
+        dismissHint();
+      }
+      panX += dx;
+      panY += dy;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      tooltip.hidden = true;
+      scheduleDraw();
+      return;
+    }
+
     const pt = findNearest(mx, my);
     if (pt !== hoveredPoint) {
       hoveredPoint = pt;
-      draw();
+      scheduleDraw();
     }
 
     if (pt) {
@@ -850,38 +1000,117 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       tooltip.style.left = `${Math.max(8, tx)}px`;
       tooltip.style.top = `${Math.max(8, ty)}px`;
     } else {
-      canvas.style.cursor = "crosshair";
+      canvas.style.cursor = "grab";
       tooltip.hidden = true;
     }
   }
 
-  function onMouseLeave() {
-    hoveredPoint = null;
-    tooltip.hidden = true;
-    draw();
-  }
-
-  function onClick() {
-    if (hoveredPoint) {
+  function onMouseUp() {
+    if (!isDragging) return;
+    isDragging = false;
+    canvas.classList.remove("is-dragging");
+    if (!hasDragged && hoveredPoint) {
       openModal(hoveredPoint);
     }
   }
 
-  canvas.addEventListener("mousemove", onMouseMove);
-  canvas.addEventListener("mouseleave", onMouseLeave);
-  canvas.addEventListener("click", onClick);
+  function onMouseLeave() {
+    isDragging = false;
+    canvas.classList.remove("is-dragging");
+    hoveredPoint = null;
+    tooltip.hidden = true;
+    scheduleDraw();
+  }
 
-  const ro = new ResizeObserver(() => draw());
+  function onWheel(e) {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    applyZoom(factor, mx, my);
+  }
+
+  function onTouchStart(e) {
+    if (e.touches.length === 1) {
+      isDragging = true;
+      hasDragged = false;
+      dragStartX = e.touches[0].clientX;
+      dragStartY = e.touches[0].clientY;
+    } else if (e.touches.length === 2) {
+      isDragging = false;
+      pinchStartDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      pinchStartScale = scale;
+    }
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    if (e.touches.length === 1 && isDragging) {
+      const dx = e.touches[0].clientX - dragStartX;
+      const dy = e.touches[0].clientY - dragStartY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        hasDragged = true;
+        dismissHint();
+      }
+      panX += dx;
+      panY += dy;
+      dragStartX = e.touches[0].clientX;
+      dragStartY = e.touches[0].clientY;
+      tooltip.hidden = true;
+      scheduleDraw();
+    } else if (e.touches.length === 2 && pinchStartDist > 0) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const rect = canvas.getBoundingClientRect();
+      const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+      const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+      const factor = dist / pinchStartDist;
+      applyZoom(factor * (pinchStartScale / scale), midX, midY);
+      pinchStartDist = dist;
+      pinchStartScale = scale;
+    }
+  }
+
+  function onTouchEnd(e) {
+    if (e.touches.length === 0) {
+      isDragging = false;
+      pinchStartDist = 0;
+    }
+  }
+
+  canvas.addEventListener("wheel", onWheel, { passive: false });
+  canvas.addEventListener("mousedown", onMouseDown);
+  canvas.addEventListener("mousemove", onMouseMove);
+  canvas.addEventListener("mouseup", onMouseUp);
+  canvas.addEventListener("mouseleave", onMouseLeave);
+  canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+  canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+  canvas.addEventListener("touchend", onTouchEnd);
+
+  const ro = new ResizeObserver(() => scheduleDraw());
   ro.observe(box);
 
-  draw();
+  scheduleDraw();
 
   activeVectorMaps.set(canvasId, {
     draw,
+    scheduleDraw,
     destroy: () => {
+      if (animFrame) cancelAnimationFrame(animFrame);
+      canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("mousedown", onMouseDown);
       canvas.removeEventListener("mousemove", onMouseMove);
+      canvas.removeEventListener("mouseup", onMouseUp);
       canvas.removeEventListener("mouseleave", onMouseLeave);
-      canvas.removeEventListener("click", onClick);
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
       ro.disconnect();
     }
   });
