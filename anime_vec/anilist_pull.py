@@ -10,8 +10,19 @@ QUERY = """query ($page: Int) { Page(page: $page, perPage: 50) { pageInfo { last
 media(type: ANIME, sort: POPULARITY_DESC, isAdult: false) {
 id title { romaji english native } format seasonYear genres
 tags { name rank } studios(isMain: true) { nodes { name } }
-description(asHtml: false) averageScore coverImage { medium } } } }"""
+description(asHtml: false) averageScore coverImage { medium }
+relations { edges { relationType node { id type } } } } } }"""
 MAX_PAGES = 80  # ~4000 anime
+# Relation types that connect two entries of the same franchise
+FRANCHISE_RELATIONS = {"SEQUEL", "PREQUEL", "PARENT", "SIDE_STORY", "SUMMARY", "ALTERNATIVE"}
+
+
+def franchise_relations(m: dict) -> list[int]:
+    """Return the AniList ids of the anime that are in the same franchise as this media."""
+    edges = (m.get("relations") or {}).get("edges") or []
+    return sorted({e["node"]["id"] for e in edges
+                   if e.get("relationType") in FRANCHISE_RELATIONS
+                   and (e.get("node") or {}).get("type") == "ANIME"})
 
 
 def row_from_media(m: dict) -> dict:
@@ -33,6 +44,7 @@ def row_from_media(m: dict) -> dict:
         "tmdbid": None,
         "anilist_id": m["id"],
         "poster": (m.get("coverImage") or {}).get("medium"),
+        "relations": franchise_relations(m),
     }
 
 
@@ -57,17 +69,26 @@ def _fetch_and_cache(page: int, cache: Path) -> None:
     time.sleep(1.2)
 
 
+def _read_cache(cache: Path) -> dict | None:
+    """Return the cached page. Return None if the file is corrupt or older than the current query."""
+    try:
+        page_data = json.loads(cache.read_text(encoding="utf-8"))["data"]["Page"]
+        media = page_data["media"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+    if media and "relations" not in media[0]:
+        return None
+    return page_data
+
+
 def fetch_pool(max_pages: int = MAX_PAGES, force: bool = False) -> list[dict]:
     CACHE_DIR.mkdir(exist_ok=True)
     rows: list[dict] = []
     page = 1
     while page <= max_pages:
         cache = CACHE_DIR / f"page_{page}.json"
-        if force or not cache.exists():
-            _fetch_and_cache(page, cache)
-        try:
-            page_data = json.loads(cache.read_text(encoding="utf-8"))["data"]["Page"]
-        except (json.JSONDecodeError, KeyError, TypeError):
+        page_data = None if force or not cache.exists() else _read_cache(cache)
+        if page_data is None:
             cache.unlink(missing_ok=True)
             _fetch_and_cache(page, cache)
             page_data = json.loads(cache.read_text(encoding="utf-8"))["data"]["Page"]

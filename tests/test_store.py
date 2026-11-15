@@ -69,3 +69,29 @@ def test_show_weights_store(tmp_path):
     rows2 = s.load_rows()
     assert rows2[0]["tier"] is None
     assert rows2[0]["weight"] == 1.0
+
+
+def test_relations_roundtrip(tmp_path):
+    s = Store(tmp_path / "r.db")
+    s.upsert_rows([make_row(1, relations=[5, 9]), make_row(2)])
+    rows = s.load_rows()
+    assert rows[0]["relations"] == [5, 9]
+    assert rows[1]["relations"] == []
+
+
+def test_old_database_gets_relations_column(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    con = sqlite3.connect(str(path))
+    con.execute("CREATE TABLE shows (id TEXT PRIMARY KEY, source TEXT, title TEXT, title_native TEXT, "
+                "year INTEGER, format TEXT, genres TEXT, tags TEXT, tag_ranks TEXT, studios TEXT, "
+                "overview TEXT, score REAL, owned INTEGER, tmdbid TEXT, anilist_id INTEGER, "
+                "poster TEXT, text_hash TEXT, embedding BLOB)")
+    con.execute("INSERT INTO shows (id, source, title, genres, tags, tag_ranks, studios, owned) "
+                "VALUES ('al:1', 'anilist', 'Old', '[]', '[]', '[]', '[]', 0)")
+    con.commit()
+    con.close()
+    s = Store(path)
+    assert s.load_rows()[0]["relations"] == []
+    s.upsert_rows([make_row(1, relations=[2])])
+    assert s.load_rows()[0]["relations"] == [2]

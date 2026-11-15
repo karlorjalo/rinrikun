@@ -66,3 +66,28 @@ def test_errors_response_not_cached(tmp_path, monkeypatch):
         anilist_pull.fetch_pool(max_pages=1)
     assert "no data for page 1" in str(exc_info.value.__cause__)
     assert not (tmp_path / "page_1.json").exists()
+
+
+def test_row_from_media_keeps_franchise_relations():
+    m = dict(MEDIA, relations={"edges": [
+        {"relationType": "SEQUEL", "node": {"id": 7, "type": "ANIME"}},
+        {"relationType": "PREQUEL", "node": {"id": 3, "type": "ANIME"}},
+        {"relationType": "ADAPTATION", "node": {"id": 99, "type": "MANGA"}},
+        {"relationType": "CHARACTER", "node": {"id": 50, "type": "ANIME"}},
+    ]})
+    assert row_from_media(m)["relations"] == [3, 7]
+    assert row_from_media(MEDIA)["relations"] == []
+
+
+def test_cache_without_relations_refetches(tmp_path, monkeypatch):
+    monkeypatch.setattr(anilist_pull, "CACHE_DIR", tmp_path)
+    _fake_time(monkeypatch)
+    old_page = {"data": {"Page": {"pageInfo": {"lastPage": 1}, "media": [MEDIA]}}}
+    new_media = dict(MEDIA, relations={"edges": [{"relationType": "SEQUEL", "node": {"id": 7, "type": "ANIME"}}]})
+    new_page = {"data": {"Page": {"pageInfo": {"lastPage": 1}, "media": [new_media]}}}
+    (tmp_path / "page_1.json").write_text(json.dumps(old_page), encoding="utf-8")
+    monkeypatch.setattr(anilist_pull, "_graphql", lambda page, timeout=60: new_page)
+
+    rows = anilist_pull.fetch_pool()
+    assert rows[0]["relations"] == [7]
+    assert json.loads((tmp_path / "page_1.json").read_text(encoding="utf-8")) == new_page
