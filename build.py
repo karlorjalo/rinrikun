@@ -28,6 +28,11 @@ def main(refresh_anilist: bool = False):
             flagged += 1
     print(f"pool rows matched to library: {flagged}")
 
+    manual_ids = store.get_manual_watched_ids()
+    for r in pool_rows:
+        if r["id"] in manual_ids:
+            r["owned"] = 1
+
     store.upsert_rows(lib_rows + pool_rows)
 
     rows = store.load_rows()

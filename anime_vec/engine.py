@@ -5,6 +5,7 @@ from anime_vec.embed import blob_to_vec
 
 class Engine:
     def __init__(self, store):
+        self.store = store
         self.rows = store.load_rows()
         self.rows = [r for r in self.rows if store.get_embedding(r["id"])]
         self.ids = [r["id"] for r in self.rows]
@@ -80,6 +81,26 @@ class Engine:
                 era = f"{(int(y) // 10) * 10}s"
                 counts[era] = counts.get(era, 0) + 1
         return sorted(counts.items(), key=lambda x: x[0], reverse=True)
+
+    def set_watched(self, show_id: str, watched: bool):
+        if show_id not in self.by_id:
+            raise KeyError(f"unknown show id {show_id}")
+        self.store.set_manual_watched(show_id, watched)
+        r = self.by_id[show_id]
+        r["manual_watched"] = 1 if watched else 0
+        if r["source"] != "library":
+            r["owned"] = 1 if watched else 0
+        self.owned_idx = [i for i, row in enumerate(self.rows) if row["owned"]]
+
+    def manual_shows(self) -> list[dict]:
+        manual_ids = self.store.get_manual_watched_ids()
+        c = self.taste_center() if self.owned_idx else None
+        out = []
+        for i, r in enumerate(self.rows):
+            if r["id"] in manual_ids:
+                sim = float(self.M[i] @ c) if c is not None else 0.0
+                out.append(self._result(i, sim, seed=None))
+        return out
 
     def _result(self, j: int, sim: float, seed) -> dict:
         r = self.rows[j]

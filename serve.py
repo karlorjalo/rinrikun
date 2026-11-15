@@ -27,8 +27,24 @@ def profile():
         "genre_summary": engine.owned_genre_summary(10),
         "era_summary": engine.owned_era_summary(),
         "owned_count": len(engine.owned_idx),
+        "manual_count": len(store.get_manual_watched_ids()),
         "total_count": len(engine.rows),
     }
+
+
+@app.get("/api/watched")
+def get_watched():
+    return engine.manual_shows()
+
+
+@app.post("/api/watched")
+def post_watched(payload: dict):
+    show_id = payload.get("id")
+    if not show_id or show_id not in engine.by_id:
+        raise HTTPException(404, "unknown show id")
+    watched = bool(payload.get("watched", True))
+    engine.set_watched(show_id, watched)
+    return {"id": show_id, "watched": watched, "owned": engine.by_id[show_id]["owned"]}
 
 
 @app.get("/api/similar")
@@ -57,7 +73,8 @@ def recommend(k: int = Query(20, le=100, ge=1), seed: str | None = None):
 @app.get("/api/shows")
 def shows():
     return [{"id": r["id"], "title": r["title"], "title_native": r["title_native"],
-             "year": r["year"], "poster": r["poster"], "owned": r["owned"]} for r in engine.rows]
+             "year": r["year"], "poster": r["poster"], "owned": r["owned"],
+             "manual_watched": r.get("manual_watched", 0)} for r in engine.rows]
 
 
 @app.get("/favicon.ico")

@@ -34,3 +34,19 @@ def test_upsert_preserves_hash_and_embedding(tmp_path):
     assert s.get_hash("al:1") == "h1"
     rows = s.load_rows()
     assert rows[0]["title"] == "New"
+
+
+def test_manual_watched_store(tmp_path):
+    s = Store(tmp_path / "w.db")
+    s.upsert_rows([make_row(1, owned=0)])
+    assert s.get_manual_watched_ids() == set()
+    s.set_manual_watched("al:1", watched=True)
+    assert s.get_manual_watched_ids() == {"al:1"}
+    rows = s.load_rows()
+    assert rows[0]["owned"] == 1
+    assert rows[0]["manual_watched"] == 1
+    s.set_manual_watched("al:1", watched=False)
+    assert s.get_manual_watched_ids() == set()
+    rows2 = s.load_rows()
+    assert rows2[0]["owned"] == 0
+    assert rows2[0]["manual_watched"] == 0

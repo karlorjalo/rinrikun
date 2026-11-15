@@ -86,3 +86,20 @@ def test_genre_and_era_summaries(tmp_path):
     assert genres == [("Drama", 3)]
     eras = e.owned_era_summary()
     assert eras == [("2020s", 3)]
+
+
+def test_engine_manual_watched(tmp_path):
+    e, rows = make_engine(tmp_path)
+    # al:3 is originally unowned
+    assert not e.by_id["al:3"]["owned"]
+    assert len(e.manual_shows()) == 0
+    e.set_watched("al:3", watched=True)
+    assert e.by_id["al:3"]["owned"] == 1
+    assert e.by_id["al:3"]["manual_watched"] == 1
+    manuals = e.manual_shows()
+    assert len(manuals) == 1
+    assert manuals[0]["id"] == "al:3"
+    # Unmark
+    e.set_watched("al:3", watched=False)
+    assert e.by_id["al:3"]["owned"] == 0
+    assert len(e.manual_shows()) == 0
