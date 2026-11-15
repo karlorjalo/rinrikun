@@ -93,6 +93,7 @@ class Engine:
         centered = bridged - self.corpus_mean
         self.eff_M = centered / np.clip(np.linalg.norm(centered, axis=1, keepdims=True), 1e-9, None)
         self.tag_M = self._build_tag_matrix()
+        self.franchise = self._build_franchises()
 
         # Compute 2D projection for vector space visualization using effective matrix
         if len(self.rows) >= 2 and self.eff_M.ndim == 2 and self.eff_M.shape[1] >= 2:
@@ -152,17 +153,10 @@ class Engine:
                 raise KeyError(f"unknown seed id {seed_id}")
             q = self.eff_M[self.pos[seed_id]]
             sims = self.eff_M @ q
-            order = np.argsort(-sims)
-            out = []
             exclude_ids = {seed_id} | set(self.counterparts.get(seed_id, []))
-            for j in order:
-                r = self.rows[j]
-                if self.ids[j] in exclude_ids or r["owned"]:
-                    continue
-                out.append(self._result(j, float(sims[j]), seed=None))
-                if len(out) >= k:
-                    break
-            return out
+            allowed = [j for j in np.argsort(-sims)
+                       if self.ids[j] not in exclude_ids and not self.rows[j]["owned"]]
+            return [self._result(j, float(sims[j]), seed=None) for j in self._one_per_franchise(allowed, k)]
 
         cand_indices = [j for j, r in enumerate(self.rows) if not r["owned"] and r["id"] not in self.duplicate_of]
         if not cand_indices:
@@ -173,7 +167,7 @@ class Engine:
 
         if mode == "center":
             c_sims = cand_M @ self.taste_center()
-            order = np.argsort(-c_sims)[:k]
+            order = self._one_per_franchise(np.argsort(-c_sims), k, cand_indices)
             return [self._result(cand_indices[j], float(c_sims[j]), seed=None) for j in order]
 
         d_penalty = np.zeros(len(cand_indices), dtype=np.float32)
@@ -192,7 +186,7 @@ class Engine:
             s_all_sims = cand_M @ self.eff_M[s_indices].T
             s_best_idx = s_all_sims.argmax(axis=1)
             s_peak_sims = s_all_sims.max(axis=1)
-            order = np.argsort(-(s_peak_sims - 0.15 * d_penalty))[:k]
+            order = self._one_per_franchise(np.argsort(-(s_peak_sims - 0.15 * d_penalty)), k, cand_indices)
             return [self._result(cand_indices[j], float(s_peak_sims[j]), seed=None,
                                  matched_favorite=self._favorite_title(s_indices[s_best_idx[j]]))
                     for j in order]
@@ -211,7 +205,8 @@ class Engine:
             lambda_param = 0.65
             selected: list[int] = []
             unselected = set(range(len(cand_indices)))
-            for _ in range(min(k, len(cand_indices))):
+            cand_franchise = [self.franchise[self.ids[i]] for i in cand_indices]
+            while unselected and len(selected) < k:
                 if not selected:
                     pick = int(np.argmax(base))
                 else:
@@ -220,14 +215,63 @@ class Engine:
                     mmr = lambda_param * base[unsel_list] - (1.0 - lambda_param) * sims_to_sel
                     pick = unsel_list[int(np.argmax(mmr))]
                 selected.append(pick)
-                unselected.remove(pick)
+                # Remove the other entries of the same franchise from the pool
+                unselected -= {j for j in unselected if cand_franchise[j] == cand_franchise[pick]}
             order = selected
         else:
-            order = np.argsort(-scores)[:k]
+            order = self._one_per_franchise(np.argsort(-scores), k, cand_indices)
 
         return [self._result(cand_indices[j], float(text_sims[j]), seed=None,
                              matched_favorite=self._favorite_title(liked[best[j]]))
                 for j in order]
+
+    def _one_per_franchise(self, order, k: int, index_map: list[int] | None = None) -> list[int]:
+        """Keep the first k entries of an ordered list, with a maximum of one entry for each franchise.
+
+        If index_map is given, the entries of the list are positions in index_map.
+        """
+        seen = set()
+        out = []
+        for j in order:
+            row_index = index_map[j] if index_map is not None else j
+            f = self.franchise[self.ids[row_index]]
+            if f in seen:
+                continue
+            seen.add(f)
+            out.append(int(j))
+            if len(out) >= k:
+                break
+        return out
+
+    def _build_franchises(self) -> dict[str, str]:
+        """Group the rows into franchises with the AniList relations (sequel, prequel, side story).
+
+        Two rows are in the same franchise if a chain of relations connects them. The chain can go
+        through anime that are not in the index.
+        """
+        parent: dict[int, int] = {}
+
+        def find(a: int) -> int:
+            parent.setdefault(a, a)
+            while parent[a] != a:
+                parent[a] = parent[parent[a]]
+                a = parent[a]
+            return a
+
+        for r in self.rows:
+            if r.get("anilist_id") is not None:
+                for other in r.get("relations") or []:
+                    parent[find(r["anilist_id"])] = find(other)
+
+        franchise: dict[str, str] = {}
+        for r in self.rows:
+            if r.get("anilist_id") is not None:
+                franchise[r["id"]] = f"al:{find(r['anilist_id'])}"
+        for i, r in enumerate(self.rows):
+            if r["id"] not in franchise:
+                # A library row uses the franchise of its AniList counterpart
+                franchise[r["id"]] = franchise.get(self._tag_source(i)["id"], r["id"])
+        return franchise
 
     def _favorite_title(self, i: int) -> str:
         r = self.rows[i]

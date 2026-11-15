@@ -341,3 +341,42 @@ def test_liked_shows_ignore_low_tiers(tmp_path):
     liked, w = e._liked()
     assert [e.ids[i] for i in liked] == ["al:0"]
     assert list(w) == [2.0]
+
+
+def _franchise_engine(tmp_path):
+    from anime_vec.store import Store
+    s = Store(tmp_path / "f.db")
+    # al:10, al:11 and al:12 are one franchise. al:12 connects through al:99, which is not in the index.
+    specs = [
+        ("al:1", [1, 0, 0, 0], 1, []),
+        ("al:10", [1, 0.02, 0, 0], 0, [11]),
+        ("al:11", [1, 0.04, 0, 0], 0, [10, 99]),
+        ("al:12", [1, 0.06, 0, 0], 0, [99]),
+        ("al:20", [0.8, 0.6, 0, 0], 0, []),
+        ("al:21", [0, 0, 1, 0], 0, []),
+        ("al:22", [0, 0, 0, 1], 0, []),
+    ]
+    for rid, vec, owned, relations in specs:
+        s.upsert_rows([{"id": rid, "source": "anilist", "title": rid, "title_native": "",
+                        "year": 2020, "format": "tv", "genres": [], "tags": [], "tag_ranks": [],
+                        "studios": [], "overview": "O", "score": 7.0, "owned": owned, "tmdbid": None,
+                        "anilist_id": int(rid.split(":")[1]), "poster": None, "relations": relations}])
+        s.save_embedding(rid, np.array(vec, dtype=np.float32).tobytes())
+    return Engine(s)
+
+
+def test_franchise_groups_follow_relation_chains(tmp_path):
+    e = _franchise_engine(tmp_path)
+    assert e.franchise["al:10"] == e.franchise["al:11"] == e.franchise["al:12"]
+    assert e.franchise["al:20"] != e.franchise["al:10"]
+    assert e.franchise["al:21"] != e.franchise["al:22"]
+
+
+def test_recommend_gives_one_result_for_each_franchise(tmp_path):
+    e = _franchise_engine(tmp_path)
+    same = {"al:10", "al:11", "al:12"}
+    for kwargs in ({"mode": "hybrid"}, {"mode": "peak"}, {"mode": "diverse"}, {"mode": "center"},
+                   {"seed_id": "al:1"}):
+        ids = [r["id"] for r in e.recommend(k=4, **kwargs)]
+        assert len(ids) == 4, kwargs
+        assert len(same & set(ids)) == 1, kwargs
