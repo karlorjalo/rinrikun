@@ -52,8 +52,27 @@
     <div id="sresults" class="cards"></div>
   </section>
   <section id="tab-recs" hidden>
-    <button id="recenter">From taste center</button>
-    <span id="seedlabel"></span>
+    <div id="recs-seed-bar"></div>
+    <div class="recs-filter-row">
+      <div class="filter-group">
+        <span class="filter-label">Format:</span>
+        <div class="filter-pills" id="recs-format-pills">
+          <button class="pill active" data-format="all">All</button>
+          <button class="pill" data-format="tv">TV</button>
+          <button class="pill" data-format="movie">Movie</button>
+          <button class="pill" data-format="ova">OVA</button>
+        </div>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">Min Score:</span>
+        <div class="filter-pills" id="recs-score-pills">
+          <button class="pill active" data-score="0">Any</button>
+          <button class="pill" data-score="7.0">★ 7.0+</button>
+          <button class="pill" data-score="7.5">★ 7.5+</button>
+          <button class="pill" data-score="8.0">★ 8.0+</button>
+        </div>
+      </div>
+    </div>
     <div id="rresults" class="cards"></div>
   </section>
 </main>

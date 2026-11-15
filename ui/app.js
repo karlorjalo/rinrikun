@@ -428,18 +428,99 @@ async function runSimilar(t) {
 }
 
 let seed = null;
+let rawRecs = [];
+let recsFormatFilter = "all";
+let recsMinScore = 0;
+
 function useSeed(r) {
   seed = r;
-  $("#seedlabel").textContent = `seeding from: ${r.title}`;
   document.querySelector('[data-tab="recs"]').click();
 }
 
-async function recs() {
-  const url = seed ? `/api/recommend?seed=${encodeURIComponent(seed.id)}` : "/api/recommend";
-  const res = await (await fetch(url)).json();
+function renderRecsSeedBar() {
+  const bar = $("#recs-seed-bar");
+  if (!bar) return;
+  if (seed) {
+    bar.innerHTML = `
+      <div class="recs-seed-card">
+        <div class="recs-seed-left">
+          <span class="seed-badge">Custom Seed</span>
+          <span class="seed-text">Recommendations anchored to: <b>${esc(seed.title)}</b></span>
+        </div>
+        <button id="recenter-btn" class="btn-action">Reset to Taste Center ↺</button>
+      </div>`;
+    $("#recenter-btn").onclick = () => {
+      seed = null;
+      recs();
+    };
+  } else {
+    bar.innerHTML = `
+      <div class="recs-seed-card">
+        <div class="recs-seed-left">
+          <span class="seed-badge seed-badge-center">Taste Center</span>
+          <span class="seed-text">Recommendations calculated from your overall library centroid (unowned AniList pool)</span>
+        </div>
+      </div>`;
+  }
+}
+
+function initRecsFilters() {
+  const fPills = $("#recs-format-pills");
+  if (fPills) {
+    fPills.querySelectorAll(".pill").forEach((btn) => {
+      btn.onclick = () => {
+        fPills.querySelectorAll(".pill").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        recsFormatFilter = btn.dataset.format;
+        renderRecsGrid();
+      };
+    });
+  }
+
+  const sPills = $("#recs-score-pills");
+  if (sPills) {
+    sPills.querySelectorAll(".pill").forEach((btn) => {
+      btn.onclick = () => {
+        sPills.querySelectorAll(".pill").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        recsMinScore = parseFloat(btn.dataset.score);
+        renderRecsGrid();
+      };
+    });
+  }
+}
+
+function renderRecsGrid() {
   const box = $("#rresults");
+  if (!box) return;
   box.innerHTML = "";
-  res.forEach((r) => box.appendChild(card(r)));
+
+  const filtered = rawRecs.filter((r) => {
+    if (recsFormatFilter !== "all") {
+      const fmt = (r.format || "").toLowerCase();
+      if (recsFormatFilter === "tv" && !fmt.includes("tv") && fmt !== "series") return false;
+      if (recsFormatFilter === "movie" && !fmt.includes("movie")) return false;
+      if (recsFormatFilter === "ova" && !fmt.includes("ova") && !fmt.includes("special")) return false;
+    }
+    if (recsMinScore > 0) {
+      if (r.score == null || r.score < recsMinScore) return false;
+    }
+    return true;
+  });
+
+  if (!filtered.length) {
+    box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 0;">No recommendations match the selected filters. Try lowering the score threshold or selecting All Formats.</p>`;
+    return;
+  }
+
+  filtered.forEach((r) => box.appendChild(card(r)));
+}
+
+async function recs() {
+  renderRecsSeedBar();
+  const url = seed ? `/api/recommend?k=40&seed=${encodeURIComponent(seed.id)}` : "/api/recommend?k=40";
+  rawRecs = await (await fetch(url)).json();
+  renderRecsGrid();
 }
 
 document.querySelectorAll("nav button").forEach((b) => {
@@ -451,10 +532,10 @@ document.querySelectorAll("nav button").forEach((b) => {
     if (b.dataset.tab === "recs") recs();
   };
 });
-$("#recenter").onclick = () => { seed = null; $("#seedlabel").textContent = ""; recs(); };
 
 profile();
 initSearch();
+initRecsFilters();
 
 const THEME_KEY = "rinrikun-theme";
 const SUN = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
