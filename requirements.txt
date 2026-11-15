@@ -1,5 +1,6 @@
 fastembed>=0.3,<2
 numpy
+scikit-learn
 fastapi
 uvicorn
 pytest

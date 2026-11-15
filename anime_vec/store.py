@@ -19,6 +19,15 @@ CREATE TABLE IF NOT EXISTS show_weights (
   weight REAL NOT NULL,
   updated_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS layout (
+  id TEXT PRIMARY KEY,
+  x REAL NOT NULL,
+  y REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
 """
 
 TIER_WEIGHTS = {
@@ -70,6 +79,20 @@ class Store:
 
     def delete_weight(self, show_id: str):
         self.con.execute("DELETE FROM show_weights WHERE id=?", (show_id,))
+        self.con.commit()
+
+    def get_layout(self, signature: str) -> dict[str, tuple[float, float]] | None:
+        """Return the cached map layout, or None if the cache is for other embeddings."""
+        t = self.con.execute("SELECT value FROM meta WHERE key='layout_signature'").fetchone()
+        if not t or t[0] != signature:
+            return None
+        return {r[0]: (r[1], r[2]) for r in self.con.execute("SELECT id, x, y FROM layout")}
+
+    def save_layout(self, signature: str, coords: dict[str, tuple[float, float]]):
+        self.con.execute("DELETE FROM layout")
+        self.con.executemany("INSERT INTO layout (id, x, y) VALUES (?, ?, ?)",
+                             [(k, float(v[0]), float(v[1])) for k, v in coords.items()])
+        self.con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('layout_signature', ?)", (signature,))
         self.con.commit()
 
     def upsert_rows(self, rows: list[dict]):

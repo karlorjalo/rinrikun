@@ -49,6 +49,10 @@ def main(refresh_anilist: bool = False):
             store.save_embedding(r["id"], vec_to_blob(v))
             store.save_hash(r["id"], text_hash(r))
         print(f"  {min(i + 64, len(todo))}/{len(todo)}")
+    # The engine computes the map layout and keeps it in the database, thus the server starts quickly
+    print("computing the map layout")
+    from anime_vec.engine import Engine
+    Engine(store)
     print(f"done -> {DB}")
 
 

@@ -1,5 +1,8 @@
+import hashlib
+
 import numpy as np
 
+from anime_vec import layout
 from anime_vec.embed import blob_to_vec
 from anime_vec.store import TIER_WEIGHTS
 
@@ -95,25 +98,32 @@ class Engine:
         self.tag_M = self._build_tag_matrix()
         self.franchise = self._build_franchises()
 
-        # Compute 2D projection for vector space visualization using effective matrix
-        if len(self.rows) >= 2 and self.eff_M.ndim == 2 and self.eff_M.shape[1] >= 2:
-            self.mean_M = self.eff_M.mean(axis=0)
-            X = self.eff_M - self.mean_M
-            cov = X.T @ X
-            _, v = np.linalg.eigh(cov)
-            self.pca_basis = v[:, -2:]
-            raw_coords = X @ self.pca_basis
-            self.c_min = raw_coords.min(axis=0)
-            self.c_max = raw_coords.max(axis=0)
-            self.c_span = np.maximum(self.c_max - self.c_min, 1e-6)
-            self.coords_2d = ((raw_coords - self.c_min) / self.c_span).astype(np.float32)
-        else:
-            dim = self.eff_M.shape[1] if self.eff_M.ndim == 2 else 0
-            self.mean_M = np.zeros(dim, dtype=np.float32)
-            self.pca_basis = np.zeros((dim, 2), dtype=np.float32)
-            self.c_min = np.zeros(2, dtype=np.float32)
-            self.c_span = np.ones(2, dtype=np.float32)
-            self.coords_2d = np.zeros((len(self.rows), 2), dtype=np.float32)
+        self.coords_2d = self._build_layout(unique)
+
+    def _build_layout(self, unique: list[int]) -> np.ndarray:
+        """Return the 2D map position of each row, in the square from 0 to 1."""
+        coords = np.full((len(self.rows), 2), 0.5, dtype=np.float32)
+        if len(unique) >= 2:
+            X = self.eff_M[unique]
+            if layout.can_use_tsne(len(unique)):
+                # t-SNE is slow, thus keep the result in the database until the embeddings change
+                ids = [self.ids[i] for i in unique]
+                signature = hashlib.sha1(
+                    layout.VERSION.encode() + "\n".join(ids).encode() + np.ascontiguousarray(X).tobytes()
+                ).hexdigest()
+                cached = self.store.get_layout(signature)
+                if cached is not None and all(i in cached for i in ids):
+                    points = np.array([cached[i] for i in ids], dtype=np.float32)
+                else:
+                    points = layout.fit_unit_square(layout.tsne_layout(X))
+                    self.store.save_layout(signature, dict(zip(ids, points.tolist())))
+            else:
+                points = layout.fit_unit_square(layout.pca_layout(X))
+            coords[unique] = points
+        # A duplicate pool row is at the position of its library row
+        for dup_id, lib_id in self.duplicate_of.items():
+            coords[self.pos[dup_id]] = coords[self.pos[lib_id]]
+        return coords
 
     def taste_center(self) -> np.ndarray:
         if not self.owned_idx:
@@ -465,16 +475,22 @@ class Engine:
             out["matched_favorite"] = matched_favorite
         return out
 
-    def project_2d(self, vec: np.ndarray) -> tuple[float, float]:
-        if len(self.rows) < 2 or self.eff_M.ndim != 2 or self.eff_M.shape[1] < 2:
-            return (0.5, 0.5)
-        raw = (vec - self.mean_M) @ self.pca_basis
-        proj = (raw - self.c_min) / self.c_span
-        return (float(np.clip(proj[0], 0.0, 1.0)), float(np.clip(proj[1], 0.0, 1.0)))
+    def center_2d(self, k: int = 5) -> tuple[float, float] | None:
+        """Return the map position of the taste center.
+
+        The layout has no formula for a new vector. Thus the position is the mean position of the
+        k shows that are nearest to the taste center.
+        """
+        if not self.owned_idx:
+            return None
+        unique = [i for i, r in enumerate(self.rows) if r["id"] not in self.duplicate_of]
+        sims = self.eff_M[unique] @ self.taste_center()
+        nearest = [unique[j] for j in np.argsort(-sims)[:k]]
+        x, y = self.coords_2d[nearest].mean(axis=0)
+        return (float(x), float(y))
 
     def get_vector_map(self) -> dict:
-        c = self.taste_center() if self.owned_idx else None
-        c_proj = self.project_2d(c) if c is not None else None
+        c_proj = self.center_2d()
         points = []
         for i, r in enumerate(self.rows):
             if r["id"] in self.duplicate_of:
@@ -487,8 +503,8 @@ class Engine:
                         break
             points.append({
                 "id": r["id"],
-                "x": round(float(self.coords_2d[i, 0]), 3),
-                "y": round(float(self.coords_2d[i, 1]), 3),
+                "x": round(float(self.coords_2d[i, 0]), 4),
+                "y": round(float(self.coords_2d[i, 1]), 4),
                 "title": r.get("title", ""),
                 "title_native": r.get("title_native", ""),
                 "year": r.get("year"),
@@ -498,6 +514,6 @@ class Engine:
                 "tier": r.get("tier"),
             })
         return {
-            "center": {"x": round(c_proj[0], 3), "y": round(c_proj[1], 3)} if c_proj else None,
+            "center": {"x": round(c_proj[0], 4), "y": round(c_proj[1], 4)} if c_proj else None,
             "points": points,
         }

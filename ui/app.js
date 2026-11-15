@@ -679,8 +679,10 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   }
 
   function toScreen(x, y, w, h, pad, plotW, plotH) {
-    const baseX = pad + x * plotW;
-    const baseY = pad + (1.0 - y) * plotH;
+    // One scale for the two axes: a stretched map gives false distances
+    const side = Math.min(plotW, plotH);
+    const baseX = (w - side) / 2 + x * side;
+    const baseY = (h - side) / 2 + (1.0 - y) * side;
     return {
       x: (baseX - w / 2) * scale + w / 2 + panX,
       y: (baseY - h / 2) * scale + h / 2 + panY,
