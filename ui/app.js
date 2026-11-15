@@ -964,21 +964,22 @@ function initReviewDeck() {
     if (tag === "INPUT" || tag === "TEXTAREA") return;
 
     const key = e.key.toUpperCase();
-    if (key === "1" || key === "S") {
-      e.preventDefault();
-      rateReviewShow("S");
-    } else if (key === "2" || key === "A") {
-      e.preventDefault();
-      rateReviewShow("A");
-    } else if (key === "3" || key === "B") {
-      e.preventDefault();
-      rateReviewShow("B");
-    } else if (key === "4" || key === "C") {
-      e.preventDefault();
-      rateReviewShow("C");
-    } else if (key === "5" || key === "D") {
+    const code = e.code || "";
+    if (key === "1" || code === "Digit1" || code === "Numpad1" || key === "D") {
       e.preventDefault();
       rateReviewShow("D");
+    } else if (key === "2" || code === "Digit2" || code === "Numpad2" || key === "C") {
+      e.preventDefault();
+      rateReviewShow("C");
+    } else if (key === "3" || code === "Digit3" || code === "Numpad3" || key === "B") {
+      e.preventDefault();
+      rateReviewShow("B");
+    } else if (key === "4" || code === "Digit4" || code === "Numpad4" || key === "A") {
+      e.preventDefault();
+      rateReviewShow("A");
+    } else if (key === "5" || code === "Digit5" || code === "Numpad5" || key === "S") {
+      e.preventDefault();
+      rateReviewShow("S");
     } else if (e.key === "Backspace" || e.key === "ArrowLeft") {
       e.preventDefault();
       undoReview();
