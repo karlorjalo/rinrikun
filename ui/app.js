@@ -32,12 +32,19 @@ function card(r, why) {
        <div class="poster-fallback" aria-hidden="true">${esc((r.title || "?")[0])}</div>`
     : `<div class="poster-fallback show" aria-hidden="true">${esc((r.title || "?")[0])}</div>`;
 
+  let badgeHtml = "";
+  if (r.manual_watched) {
+    badgeHtml = '<span class="badge badge-manual">watched</span>';
+  } else if (r.owned) {
+    badgeHtml = '<span class="badge">owned</span>';
+  }
+
   d.innerHTML = `
     <div class="poster-box">
       ${posterHtml}
     </div>
     <div class="card-content">
-      <div class="t">${esc(r.title)} ${r.owned ? '<span class="badge">owned</span>' : ""}</div>
+      <div class="t">${esc(r.title)} ${badgeHtml}</div>
       <div class="m submeta">${metaParts.join(" · ")}</div>
       <div class="m stats">${statParts.join(" · ")}</div>
       <div class="simbar" title="${simVal ?? 0}% match"><i style="width:${Math.max(0, Math.min(100, simVal ?? 0))}%"></i></div>
@@ -89,7 +96,13 @@ async function openModal(r) {
     : `<div class="poster-fallback show" aria-hidden="true">${esc((r.title || "?")[0])}</div>`;
 
   const metaItems = [];
-  metaItems.push(r.owned ? '<span class="badge">owned</span>' : '<span class="badge badge-unowned">in pool</span>');
+  if (r.source === "library" || (r.owned && !r.manual_watched)) {
+    metaItems.push('<span class="badge">library</span>');
+  } else if (r.manual_watched) {
+    metaItems.push('<span class="badge badge-manual">watched</span>');
+  } else {
+    metaItems.push('<span class="badge badge-unowned">pool</span>');
+  }
   if (r.format) metaItems.push(`<span>${esc(r.format.toUpperCase())}</span>`);
   if (r.year) metaItems.push(`<span>${r.year}</span>`);
   if (r.genres && r.genres.length) metaItems.push(`<span>${esc(r.genres.slice(0, 3).join(", "))}</span>`);
@@ -107,6 +120,13 @@ async function openModal(r) {
     ? `<a href="https://anilist.co/anime/${r.anilist_id}" target="_blank" rel="noopener noreferrer" class="btn-action">AniList ↗</a>`
     : "";
 
+  const isLibrary = r.source === "library";
+  const watchedBtn = isLibrary
+    ? ""
+    : `<button class="btn-action btn-watched ${r.manual_watched ? 'active' : ''}" id="modal-toggle-watched">
+         ${r.manual_watched ? '✓ Watched · Remove' : '+ Add to Watched'}
+       </button>`;
+
   modal.innerHTML = `
     <div class="modal-inner">
       <button class="modal-close" onclick="closeModal()" aria-label="Close dialog">✕</button>
@@ -121,6 +141,7 @@ async function openModal(r) {
           <div class="modal-actions">
             <button class="btn-action primary" id="modal-find-sim">Find Similar</button>
             <button class="btn-action" id="modal-seed-rec">Recommend Like This</button>
+            ${watchedBtn}
             ${anilistLink}
           </div>
         </div>
@@ -131,6 +152,14 @@ async function openModal(r) {
         ${tags ? `<h4>Tags</h4><div class="modal-tags">${tags}</div>` : ""}
       </div>
     </div>`;
+
+  if ($("#modal-toggle-watched")) {
+    $("#modal-toggle-watched").onclick = async () => {
+      const next = !r.manual_watched;
+      await toggleWatched(r, next);
+      openModal(r);
+    };
+  }
 
   $("#modal-find-sim").onclick = () => {
     closeModal();
@@ -143,6 +172,31 @@ async function openModal(r) {
   };
 
   modal.showModal();
+}
+
+async function toggleWatched(r, next) {
+  try {
+    await fetch("/api/watched", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: r.id, watched: next })
+    });
+    r.manual_watched = next ? 1 : 0;
+    r.owned = next ? 1 : 0;
+    const t = titles.find((x) => x.id === r.id);
+    if (t) {
+      t.manual_watched = r.manual_watched;
+      t.owned = r.owned;
+    }
+    if (!$("#tab-watched").hidden) {
+      watched();
+    }
+    if (!$("#tab-profile").hidden) {
+      profile();
+    }
+  } catch (e) {
+    console.error("Failed to toggle watched status", e);
+  }
 }
 
 function closeModal() {
@@ -298,7 +352,14 @@ async function initSearch() {
       item.dataset.idx = i;
 
       const showNative = t.title_native && t.title_native.trim().toLowerCase() !== (t.title || "").trim().toLowerCase();
-      const sub = [showNative ? esc(t.title_native) : null, t.year || null, t.owned ? "owned" : null].filter(Boolean).join(" · ");
+      const sub = [showNative ? esc(t.title_native) : null, t.year || null].filter(Boolean).join(" · ");
+
+      let badge = "";
+      if (t.manual_watched) {
+        badge = '<span class="badge badge-manual">watched</span>';
+      } else if (t.owned) {
+        badge = '<span class="badge">owned</span>';
+      }
 
       const thumbHtml = t.poster
         ? `<img src="${esc(t.poster)}" alt="" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
@@ -308,7 +369,7 @@ async function initSearch() {
       item.innerHTML = `
         <div class="qitem-thumb">${thumbHtml}</div>
         <div class="qitem-info">
-          <div class="qitem-title">${esc(t.title)} ${t.owned ? '<span class="badge">owned</span>' : ""}</div>
+          <div class="qitem-title">${esc(t.title)} ${badge}</div>
           ${sub ? `<div class="qitem-sub">${sub}</div>` : ""}
         </div>`;
 
@@ -405,10 +466,11 @@ async function runSimilar(t) {
   const header = $("#similar-header");
   if (header) {
     header.hidden = false;
+    const simBadge = t.manual_watched ? '<span class="badge badge-manual">watched</span>' : (t.owned ? '<span class="badge">owned</span>' : "");
     header.innerHTML = `
       <div class="result-seed-bar">
         <div class="seed-info">
-          <h3 class="seed-title">${esc(t.title)} ${t.owned ? '<span class="badge">owned</span>' : ""}</h3>
+          <h3 class="seed-title">${esc(t.title)} ${simBadge}</h3>
         </div>
         <div class="seed-actions">
           <button class="btn-action" id="sim-view-details">Details</button>
@@ -513,6 +575,21 @@ async function recs() {
   renderRecsGrid();
 }
 
+async function watched() {
+  const list = await (await fetch("/api/watched")).json();
+  const badge = $("#watched-count-badge");
+  if (badge) badge.textContent = `${list.length} ${list.length === 1 ? "show" : "shows"}`;
+  const box = $("#wresults");
+  box.innerHTML = "";
+  if (!list.length) {
+    box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:48px 20px;">No manually added shows yet. When you watch a show outside your local library, find it and click "+ Add to Watched".</p>`;
+    return;
+  }
+  list.forEach((r) => {
+    box.appendChild(card(r, "manually added"));
+  });
+}
+
 document.querySelectorAll("nav button").forEach((b) => {
   b.onclick = () => {
     document.querySelectorAll("nav button").forEach((x) => x.classList.remove("on"));
@@ -520,6 +597,8 @@ document.querySelectorAll("nav button").forEach((b) => {
     for (const s of document.querySelectorAll("main section")) s.hidden = true;
     $(`#tab-${b.dataset.tab}`).hidden = false;
     if (b.dataset.tab === "recs") recs();
+    if (b.dataset.tab === "watched") watched();
+    if (b.dataset.tab === "profile") profile();
   };
 });
 

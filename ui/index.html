@@ -33,6 +33,7 @@
     <button data-tab="profile" class="on">Profile</button>
     <button data-tab="similar">Similar</button>
     <button data-tab="recs">Recommendations</button>
+    <button data-tab="watched">Watched</button>
   </nav>
 </header>
 <main>
@@ -75,6 +76,13 @@
       </div>
     </div>
     <div id="rresults" class="cards"></div>
+  </section>
+  <section id="tab-watched" hidden>
+    <div class="watched-head">
+      <h2>Manually added shows</h2>
+      <div class="watched-count-badge" id="watched-count-badge">0 shows</div>
+    </div>
+    <div id="wresults" class="cards"></div>
   </section>
 </main>
 <dialog id="detail-modal"></dialog>
