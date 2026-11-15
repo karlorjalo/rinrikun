@@ -103,3 +103,27 @@ def test_engine_manual_watched(tmp_path):
     e.set_watched("al:3", watched=False)
     assert e.by_id["al:3"]["owned"] == 0
     assert len(e.manual_shows()) == 0
+
+
+def test_weighted_taste_center_and_tiers(tmp_path):
+    e, rows = make_engine(tmp_path)
+    # Owned rows are al:0, al:1, al:2
+    initial_center = e.taste_center()
+    e.set_show_tier("al:0", "S") # weight 2.0
+    e.set_show_tier("al:1", "D") # weight 0.0
+    new_center = e.taste_center()
+    # al:0 should have higher similarity to new_center than to initial_center
+    v0 = e.M[0]
+    assert (v0 @ new_center) > (v0 @ initial_center)
+    # summary
+    ts = e.tier_summary()
+    assert ts["S"] == 1
+    assert ts["D"] == 1
+    assert ts["unrated"] == 1
+    # review queue
+    rq = e.review_queue(unrated_only=True)
+    assert len(rq) == 1
+    assert rq[0]["id"] == "al:2"
+    # reset tier
+    e.set_show_tier("al:0", None)
+    assert e.by_id["al:0"]["tier"] is None

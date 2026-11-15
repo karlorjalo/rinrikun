@@ -13,7 +13,21 @@ CREATE TABLE IF NOT EXISTS watched_manual (
   id TEXT PRIMARY KEY,
   created_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS show_weights (
+  id TEXT PRIMARY KEY,
+  tier TEXT NOT NULL,
+  weight REAL NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
 """
+
+TIER_WEIGHTS = {
+    "S": 2.0,
+    "A": 1.5,
+    "B": 1.0,
+    "C": 0.3,
+    "D": 0.0,
+}
 
 
 class Store:
@@ -32,6 +46,25 @@ class Store:
         else:
             self.con.execute("DELETE FROM watched_manual WHERE id=?", (show_id,))
             self.con.execute("UPDATE shows SET owned=0 WHERE id=? AND source != 'library'", (show_id,))
+        self.con.commit()
+
+    def get_weights(self) -> dict[str, dict]:
+        cur = self.con.execute("SELECT id, tier, weight FROM show_weights")
+        return {r[0]: {"tier": r[1], "weight": float(r[2])} for r in cur.fetchall()}
+
+    def set_weight(self, show_id: str, tier: str, weight: float | None = None):
+        tier_upper = tier.upper()
+        if weight is None:
+            weight = TIER_WEIGHTS.get(tier_upper, 1.0)
+        self.con.execute(
+            "INSERT OR REPLACE INTO show_weights (id, tier, weight, updated_at) "
+            "VALUES (?, ?, ?, datetime('now'))",
+            (show_id, tier_upper, weight),
+        )
+        self.con.commit()
+
+    def delete_weight(self, show_id: str):
+        self.con.execute("DELETE FROM show_weights WHERE id=?", (show_id,))
         self.con.commit()
 
     def upsert_rows(self, rows: list[dict]):
@@ -53,6 +86,7 @@ class Store:
 
     def load_rows(self) -> list[dict]:
         manual_ids = self.get_manual_watched_ids()
+        weights = self.get_weights()
         cur = self.con.execute(
             "SELECT id,source,title,title_native,year,format,genres,tags,tag_ranks,studios,"
             "overview,score,owned,tmdbid,anilist_id,poster,text_hash FROM shows ORDER BY id")
@@ -61,11 +95,15 @@ class Store:
             row_id = t[0]
             is_manual = row_id in manual_ids
             owned = 1 if (t[12] or is_manual) else 0
+            w_info = weights.get(row_id)
+            tier = w_info["tier"] if w_info else None
+            weight = w_info["weight"] if w_info else 1.0
             out.append({"id": t[0], "source": t[1], "title": t[2], "title_native": t[3],
                         "year": t[4], "format": t[5], "genres": json.loads(t[6]),
                         "tags": json.loads(t[7]), "tag_ranks": json.loads(t[8]),
                         "studios": json.loads(t[9]), "overview": t[10], "score": t[11],
                         "owned": owned, "manual_watched": 1 if is_manual else 0,
+                        "tier": tier, "weight": weight,
                         "tmdbid": t[13], "anilist_id": t[14],
                         "poster": t[15], "text_hash": t[16]})
         return out

@@ -26,10 +26,30 @@ def profile():
         "tag_summary": engine.owned_tag_summary(20),
         "genre_summary": engine.owned_genre_summary(10),
         "era_summary": engine.owned_era_summary(),
+        "tier_summary": engine.tier_summary(),
         "owned_count": len(engine.owned_idx),
         "manual_count": len(store.get_manual_watched_ids()),
         "total_count": len(engine.rows),
     }
+
+
+@app.get("/api/weights")
+def get_weights():
+    return store.get_weights()
+
+
+@app.post("/api/weights")
+def post_weights(payload: dict):
+    show_id = payload.get("id")
+    if not show_id or show_id not in engine.by_id:
+        raise HTTPException(404, "unknown show id")
+    tier = payload.get("tier")
+    return engine.set_show_tier(show_id, tier)
+
+
+@app.get("/api/review-queue")
+def review_queue(unrated_only: bool = False):
+    return engine.review_queue(unrated_only=unrated_only)
 
 
 @app.get("/api/watched")
@@ -74,7 +94,8 @@ def recommend(k: int = Query(20, le=100, ge=1), seed: str | None = None):
 def shows():
     return [{"id": r["id"], "title": r["title"], "title_native": r["title_native"],
              "year": r["year"], "poster": r["poster"], "owned": r["owned"],
-             "manual_watched": r.get("manual_watched", 0)} for r in engine.rows]
+             "manual_watched": r.get("manual_watched", 0),
+             "tier": r.get("tier"), "weight": r.get("weight", 1.0)} for r in engine.rows]
 
 
 @app.get("/favicon.ico")

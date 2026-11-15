@@ -50,3 +50,22 @@ def test_manual_watched_store(tmp_path):
     rows2 = s.load_rows()
     assert rows2[0]["owned"] == 0
     assert rows2[0]["manual_watched"] == 0
+
+
+def test_show_weights_store(tmp_path):
+    s = Store(tmp_path / "weights.db")
+    s.upsert_rows([make_row(1, owned=1)])
+    assert s.get_weights() == {}
+    s.set_weight("al:1", "S")
+    w = s.get_weights()
+    assert "al:1" in w
+    assert w["al:1"]["tier"] == "S"
+    assert w["al:1"]["weight"] == 2.0
+    rows = s.load_rows()
+    assert rows[0]["tier"] == "S"
+    assert rows[0]["weight"] == 2.0
+    s.delete_weight("al:1")
+    assert s.get_weights() == {}
+    rows2 = s.load_rows()
+    assert rows2[0]["tier"] is None
+    assert rows2[0]["weight"] == 1.0

@@ -1,6 +1,7 @@
 import numpy as np
 
 from anime_vec.embed import blob_to_vec
+from anime_vec.store import TIER_WEIGHTS
 
 
 class Engine:
@@ -13,11 +14,15 @@ class Engine:
         M = np.array([blob_to_vec(store.get_embedding(r["id"])) for r in self.rows], dtype=np.float32)
         self.M = M / np.clip(np.linalg.norm(M, axis=1, keepdims=True), 1e-9, None)
         self.owned_idx = [i for i, r in enumerate(self.rows) if r["owned"]]
+        self.weights = {r["id"]: r.get("weight", 1.0) for r in self.rows if r.get("tier") is not None}
 
     def taste_center(self) -> np.ndarray:
         if not self.owned_idx:
             raise RuntimeError("no owned rows in index — run build.py first")
-        v = self.M[self.owned_idx].mean(axis=0)
+        weights = np.array([self.weights.get(self.ids[i], 1.0) for i in self.owned_idx], dtype=np.float32)
+        if np.all(weights <= 0):
+            weights = np.ones(len(self.owned_idx), dtype=np.float32)
+        v = (self.M[self.owned_idx] * weights[:, None]).sum(axis=0)
         return v / max(np.linalg.norm(v), 1e-9)
 
     def similar_to(self, row_id: str, k: int = 12) -> list[dict]:
@@ -101,6 +106,54 @@ class Engine:
                 sim = float(self.M[i] @ c) if c is not None else 0.0
                 out.append(self._result(i, sim, seed=None))
         return out
+
+    def set_show_tier(self, show_id: str, tier: str | None) -> dict:
+        if show_id not in self.by_id:
+            raise KeyError(f"unknown show id {show_id}")
+        r = self.by_id[show_id]
+        if tier:
+            tier_upper = tier.upper()
+            w = TIER_WEIGHTS.get(tier_upper, 1.0)
+            self.store.set_weight(show_id, tier_upper, w)
+            r["tier"] = tier_upper
+            r["weight"] = w
+            self.weights[show_id] = w
+        else:
+            self.store.delete_weight(show_id)
+            r["tier"] = None
+            r["weight"] = 1.0
+            self.weights.pop(show_id, None)
+        return {"id": show_id, "tier": r["tier"], "weight": r["weight"]}
+
+    def review_queue(self, unrated_only: bool = False) -> list[dict]:
+        c = self.taste_center() if self.owned_idx else None
+        owned_rows = [self.rows[i] for i in self.owned_idx]
+        if unrated_only:
+            owned_rows = [r for r in owned_rows if r.get("tier") is None]
+
+        def sort_key(r):
+            is_unrated = 0 if r.get("tier") is None else 1
+            idx = self.ids.index(r["id"])
+            sim = float(self.M[idx] @ c) if c is not None else 0.0
+            return (is_unrated, -sim)
+
+        sorted_rows = sorted(owned_rows, key=sort_key)
+        out = []
+        for r in sorted_rows:
+            idx = self.ids.index(r["id"])
+            sim = float(self.M[idx] @ c) if c is not None else 0.0
+            out.append(self._result(idx, sim, seed=None))
+        return out
+
+    def tier_summary(self) -> dict[str, int]:
+        counts = {"S": 0, "A": 0, "B": 0, "C": 0, "D": 0, "unrated": 0}
+        for i in self.owned_idx:
+            tier = self.rows[i].get("tier")
+            if tier and tier in counts:
+                counts[tier] += 1
+            else:
+                counts["unrated"] += 1
+        return counts
 
     def _result(self, j: int, sim: float, seed) -> dict:
         r = self.rows[j]
