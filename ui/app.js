@@ -4,14 +4,44 @@ const esc = (s) => (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 function card(r, why) {
   const d = document.createElement("div");
   d.className = "card";
+
+  const showNative = r.title_native && r.title_native.trim().toLowerCase() !== (r.title || "").trim().toLowerCase();
+  const metaParts = [];
+  if (showNative) metaParts.push(esc(r.title_native));
+  if (r.year) metaParts.push(r.year);
+  if (r.genres && r.genres.length) metaParts.push(esc(r.genres.slice(0, 2).join(", ")));
+
+  const simVal = r.similarity != null ? Math.round(r.similarity) : null;
+  const scoreVal = r.score != null ? Number(r.score).toFixed(1) : null;
+
+  const statParts = [];
+  if (simVal != null) statParts.push(`<span class="affinity">${simVal}% match</span>`);
+  if (scoreVal) statParts.push(`<span class="score">★ ${scoreVal}</span>`);
+
+  let tagHtml = "";
+  if (why) {
+    tagHtml = `<span class="chip chip-why">${esc(why)}</span>`;
+  } else if (r.shared_tags && r.shared_tags.length) {
+    tagHtml = r.shared_tags.slice(0, 3).map((t) => `<span class="chip chip-shared" title="Shared tag">${esc(t)}</span>`).join("");
+  } else if (r.tags && r.tags.length) {
+    tagHtml = r.tags.slice(0, 3).map((t) => `<span class="chip">${esc(t)}</span>`).join("");
+  }
+
+  const posterHtml = r.poster
+    ? `<img src="${esc(r.poster)}" loading="lazy" alt="${esc(r.title)}" onerror="this.style.display='none'; this.nextElementSibling.classList.add('show');">
+       <div class="poster-fallback" aria-hidden="true">${esc((r.title || "?")[0])}</div>`
+    : `<div class="poster-fallback show" aria-hidden="true">${esc((r.title || "?")[0])}</div>`;
+
   d.innerHTML = `
-    <img src="${esc(r.poster || "")}" loading="lazy" onerror="this.style.visibility='hidden'">
-    <div>
+    <div class="poster-box">
+      ${posterHtml}
+    </div>
+    <div class="card-content">
       <div class="t">${esc(r.title)} ${r.owned ? '<span class="badge">owned</span>' : ""}</div>
-      <div class="m">${esc(r.title_native)} ${r.year || ""} · ${esc((r.genres || []).slice(0, 3).join(", "))}</div>
-      <div class="m">sim ${r.similarity}% · score ${r.score ?? "?"}</div>
-      <div class="simbar"><i style="width:${Math.max(0, Math.min(100, r.similarity))}%"></i></div>
-      <div class="m" style="margin-top:6px;">${why || (r.shared_tags || []).map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div>
+      <div class="m submeta">${metaParts.join(" · ")}</div>
+      <div class="m stats">${statParts.join(" · ")}</div>
+      <div class="simbar" title="${simVal ?? 0}% match"><i style="width:${Math.max(0, Math.min(100, simVal ?? 0))}%"></i></div>
+      <div class="m tagrow">${tagHtml}</div>
     </div>`;
   d.onclick = () => useSeed(r);
   return d;

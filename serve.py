@@ -49,6 +49,11 @@ def shows():
              "owned": r["owned"]} for r in engine.rows]
 
 
+@app.get("/favicon.ico")
+def favicon():
+    return FileResponse(ROOT / "ui" / "favicon.svg")
+
+
 @app.get("/")
 def index():
     return FileResponse(ROOT / "ui" / "index.html")
