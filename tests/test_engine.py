@@ -132,3 +132,44 @@ def test_weighted_taste_center_and_tiers(tmp_path):
     # reset tier
     e.set_show_tier("al:0", None)
     assert e.by_id["al:0"]["tier"] is None
+
+
+def test_deduplicate_library_and_pool_counterparts(tmp_path):
+    from anime_vec.store import Store
+    s = Store(tmp_path / "dedup.db")
+    v = np.ones(4, dtype=np.float32) / 2
+    # Jellyfin row
+    s.upsert_rows([{
+        "id": "jf:1", "source": "library", "title": "Bokutachi no Remake", "title_native": "ぼくたちのリメイク",
+        "year": 2021, "format": "series", "genres": [], "tags": [], "tag_ranks": [], "studios": [],
+        "overview": "O", "score": 7.5, "owned": 1, "tmdbid": "1", "anilist_id": None, "poster": None,
+    }])
+    # AniList row matching the same show, flagged owned=1 by build.py
+    s.upsert_rows([{
+        "id": "al:100", "source": "anilist", "title": "Bokutachi no Remake", "title_native": "ぼくたちのリメイク",
+        "year": 2021, "format": "tv", "genres": [], "tags": [], "tag_ranks": [], "studios": [],
+        "overview": "O", "score": 7.5, "owned": 1, "tmdbid": None, "anilist_id": 100, "poster": None,
+    }])
+    s.save_embedding("jf:1", v.tobytes())
+    s.save_embedding("al:100", v.tobytes())
+
+    e = Engine(s)
+    # 1. owned_idx should only contain the primary library row (len 1, not 2)
+    assert len(e.owned_idx) == 1
+    assert e.ids[e.owned_idx[0]] == "jf:1"
+
+    # 2. review queue should only contain 1 item
+    rq = e.review_queue(unrated_only=False)
+    assert len(rq) == 1
+    assert rq[0]["id"] == "jf:1"
+
+    # 3. Rating jf:1 sets tier on both jf:1 and al:100
+    e.set_show_tier("jf:1", "S")
+    assert e.by_id["jf:1"]["tier"] == "S"
+    assert e.by_id["al:100"]["tier"] == "S"
+    assert len(e.rated_shows()) == 1
+
+    # 4. Rating al:100 updates jf:1
+    e.set_show_tier("al:100", "A")
+    assert e.by_id["jf:1"]["tier"] == "A"
+    assert e.by_id["al:100"]["tier"] == "A"

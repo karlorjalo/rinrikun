@@ -13,7 +13,33 @@ class Engine:
         self.by_id = {r["id"]: r for r in self.rows}
         M = np.array([blob_to_vec(store.get_embedding(r["id"])) for r in self.rows], dtype=np.float32)
         self.M = M / np.clip(np.linalg.norm(M, axis=1, keepdims=True), 1e-9, None)
-        self.owned_idx = [i for i, r in enumerate(self.rows) if r["owned"]]
+
+        # Identify pool rows that match library rows to avoid duplicating watched items
+        lib_rows = [r for r in self.rows if r["source"] == "library"]
+        self.duplicate_of: dict[str, str] = {}
+        self.counterparts: dict[str, list[str]] = {}
+        if lib_rows:
+            from anime_vec.match import OwnershipMatcher
+            matcher = OwnershipMatcher([(r["id"], r["title_native"], r["title"]) for r in lib_rows])
+            for r in self.rows:
+                if r["source"] == "anilist" and r.get("owned") and not r.get("manual_watched"):
+                    hit = matcher.match(r["title"], r["title_native"])
+                    if hit:
+                        self.duplicate_of[r["id"]] = hit
+                        self.counterparts.setdefault(hit, []).append(r["id"])
+                        self.counterparts.setdefault(r["id"], []).append(hit)
+
+        # Synchronize weights across counterparts on load
+        for sid, tier_info in store.get_weights().items():
+            tier = tier_info.get("tier")
+            w = tier_info.get("weight", 1.0)
+            if tier:
+                for c_id in self.counterparts.get(sid, []):
+                    if c_id in self.by_id and not self.by_id[c_id].get("tier"):
+                        self.by_id[c_id]["tier"] = tier
+                        self.by_id[c_id]["weight"] = w
+
+        self.owned_idx = [i for i, r in enumerate(self.rows) if r["owned"] and r["id"] not in self.duplicate_of]
         self.weights = {r["id"]: r.get("weight", 1.0) for r in self.rows if r.get("tier") is not None}
 
     def taste_center(self) -> np.ndarray:
@@ -110,20 +136,27 @@ class Engine:
     def set_show_tier(self, show_id: str, tier: str | None) -> dict:
         if show_id not in self.by_id:
             raise KeyError(f"unknown show id {show_id}")
-        r = self.by_id[show_id]
-        if tier:
-            tier_upper = tier.upper()
-            w = TIER_WEIGHTS.get(tier_upper, 1.0)
-            self.store.set_weight(show_id, tier_upper, w)
-            r["tier"] = tier_upper
-            r["weight"] = w
-            self.weights[show_id] = w
-        else:
-            self.store.delete_weight(show_id)
-            r["tier"] = None
-            r["weight"] = 1.0
-            self.weights.pop(show_id, None)
-        return {"id": show_id, "tier": r["tier"], "weight": r["weight"]}
+        target_ids = [show_id] + self.counterparts.get(show_id, [])
+        tier_upper = tier.upper() if tier else None
+        w = TIER_WEIGHTS.get(tier_upper, 1.0) if tier_upper else 1.0
+
+        for sid in target_ids:
+            if sid not in self.by_id:
+                continue
+            r = self.by_id[sid]
+            if tier_upper:
+                self.store.set_weight(sid, tier_upper, w)
+                r["tier"] = tier_upper
+                r["weight"] = w
+                self.weights[sid] = w
+            else:
+                self.store.delete_weight(sid)
+                r["tier"] = None
+                r["weight"] = 1.0
+                self.weights.pop(sid, None)
+
+        primary = self.by_id[show_id]
+        return {"id": show_id, "tier": primary["tier"], "weight": primary["weight"]}
 
     def review_queue(self, unrated_only: bool = False) -> list[dict]:
         c = self.taste_center() if self.owned_idx else None
@@ -148,7 +181,8 @@ class Engine:
     def rated_shows(self) -> list[dict]:
         c = self.taste_center() if self.owned_idx else None
         out = []
-        for i, r in enumerate(self.rows):
+        for i in self.owned_idx:
+            r = self.rows[i]
             if r.get("tier") is not None:
                 sim = float(self.M[i] @ c) if c is not None else 0.0
                 out.append(self._result(i, sim, seed=None))
