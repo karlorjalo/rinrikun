@@ -70,7 +70,13 @@ function formatOverview(text) {
     .replace(/\n/g, "<br>");
 }
 
-function openModal(r) {
+async function openModal(r) {
+  if (r.overview === undefined && r.id) {
+    try {
+      const full = await (await fetch(`/api/show/${encodeURIComponent(r.id)}`)).json();
+      r = { ...r, ...full };
+    } catch (e) {}
+  }
   currentModalShow = r;
   const modal = $("#detail-modal");
   const showNative = r.title_native && r.title_native.trim().toLowerCase() !== (r.title || "").trim().toLowerCase();
@@ -161,26 +167,162 @@ async function profile() {
 }
 
 let titles = [];
+let searchSelectedIndex = -1;
+let currentSimilarShow = null;
+
 async function initSearch() {
   titles = await (await fetch("/api/shows")).json();
   const q = $("#q");
+  const qlist = $("#qlist");
+  const qClear = $("#q-clear");
+
+  // Populate suggestions in empty state
+  const ownedSample = titles.filter((t) => t.owned && t.title);
+  const shuffled = ownedSample.sort(() => 0.5 - Math.random()).slice(0, 5);
+  const suggBox = $("#similar-suggestions");
+  if (suggBox) {
+    suggBox.innerHTML = shuffled.map((t) => `<button class="suggestion-chip">${esc(t.title)}</button>`).join("");
+    suggBox.querySelectorAll("button").forEach((btn, idx) => {
+      btn.onclick = () => {
+        runSimilar(shuffled[idx]);
+      };
+    });
+  }
+
+  function renderDropdown(matches) {
+    qlist.innerHTML = "";
+    searchSelectedIndex = -1;
+    if (!matches.length) {
+      qlist.innerHTML = `<div class="qitem" style="color:var(--muted);cursor:default;">No titles found</div>`;
+      qlist.hidden = false;
+      return;
+    }
+    matches.forEach((t, i) => {
+      const item = document.createElement("div");
+      item.className = "qitem";
+      item.dataset.idx = i;
+
+      const showNative = t.title_native && t.title_native.trim().toLowerCase() !== (t.title || "").trim().toLowerCase();
+      const sub = [showNative ? esc(t.title_native) : null, t.year || null, t.owned ? "owned" : null].filter(Boolean).join(" · ");
+
+      const thumbHtml = t.poster
+        ? `<img src="${esc(t.poster)}" alt="" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+           <div class="qitem-fallback" style="display:none;">${esc((t.title || "?")[0])}</div>`
+        : `<div class="qitem-fallback">${esc((t.title || "?")[0])}</div>`;
+
+      item.innerHTML = `
+        <div class="qitem-thumb">${thumbHtml}</div>
+        <div class="qitem-info">
+          <div class="qitem-title">${esc(t.title)} ${t.owned ? '<span class="badge">owned</span>' : ""}</div>
+          ${sub ? `<div class="qitem-sub">${sub}</div>` : ""}
+        </div>`;
+
+      item.onclick = () => {
+        runSimilar(t);
+        closeSearch();
+      };
+      qlist.appendChild(item);
+    });
+    qlist.hidden = false;
+  }
+
+  function updateSearchSelection(newIdx) {
+    const items = qlist.querySelectorAll(".qitem");
+    if (!items.length) return;
+    items.forEach((it) => it.classList.remove("selected"));
+    if (newIdx >= 0 && newIdx < items.length) {
+      items[newIdx].classList.add("selected");
+      items[newIdx].scrollIntoView({ block: "nearest" });
+      searchSelectedIndex = newIdx;
+    } else {
+      searchSelectedIndex = -1;
+    }
+  }
+
+  function closeSearch() {
+    qlist.hidden = true;
+    qlist.innerHTML = "";
+    searchSelectedIndex = -1;
+  }
+
+  let currentMatches = [];
   q.oninput = () => {
-    const v = q.value.toLowerCase();
-    if (v.length < 2) return ($("#qlist").innerHTML = "");
-    $("#qlist").innerHTML = "";
-    titles.filter((t) => (t.title + " " + t.title_native).toLowerCase().includes(v)).slice(0, 8)
-      .forEach((t) => {
-        const d = document.createElement("div");
-        d.textContent = `${t.title} ${t.owned ? "✓" : ""}`;
-        d.onclick = () => runSimilar(t);
-        $("#qlist").appendChild(d);
-      });
+    const v = q.value.trim().toLowerCase();
+    qClear.hidden = !v;
+    if (v.length < 2) {
+      closeSearch();
+      return;
+    }
+    currentMatches = titles
+      .filter((t) => (t.title + " " + (t.title_native || "")).toLowerCase().includes(v))
+      .slice(0, 10);
+    renderDropdown(currentMatches);
   };
+
+  q.onkeydown = (e) => {
+    if (qlist.hidden) return;
+    const items = qlist.querySelectorAll(".qitem");
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const next = searchSelectedIndex < items.length - 1 ? searchSelectedIndex + 1 : 0;
+      updateSearchSelection(next);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      const prev = searchSelectedIndex > 0 ? searchSelectedIndex - 1 : items.length - 1;
+      updateSearchSelection(prev);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (searchSelectedIndex >= 0 && currentMatches[searchSelectedIndex]) {
+        runSimilar(currentMatches[searchSelectedIndex]);
+        closeSearch();
+      } else if (currentMatches.length > 0) {
+        runSimilar(currentMatches[0]);
+        closeSearch();
+      }
+    } else if (e.key === "Escape") {
+      closeSearch();
+    }
+  };
+
+  qClear.onclick = () => {
+    q.value = "";
+    qClear.hidden = true;
+    closeSearch();
+    q.focus();
+  };
+
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".search-wrap")) {
+      closeSearch();
+    }
+  });
 }
 
 async function runSimilar(t) {
-  $("#qlist").innerHTML = "";
+  currentSimilarShow = t;
+  $("#qlist").hidden = true;
   $("#q").value = t.title;
+  $("#q-clear").hidden = false;
+
+  const empty = $("#similar-empty");
+  if (empty) empty.hidden = true;
+
+  const header = $("#similar-header");
+  if (header) {
+    header.hidden = false;
+    header.innerHTML = `
+      <div class="result-seed-bar">
+        <div class="seed-info">
+          <div class="seed-label">Showing nearest neighbors for</div>
+          <h3 class="seed-title">${esc(t.title)} ${t.owned ? '<span class="badge">owned</span>' : ""}</h3>
+        </div>
+        <div class="seed-actions">
+          <button class="btn-action" id="sim-view-details">Show Details</button>
+        </div>
+      </div>`;
+    $("#sim-view-details").onclick = () => openModal(t);
+  }
+
   const res = await (await fetch(`/api/similar?id=${encodeURIComponent(t.id)}`)).json();
   const box = $("#sresults");
   box.innerHTML = "";

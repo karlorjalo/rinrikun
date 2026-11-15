@@ -36,6 +36,15 @@ def similar(id: str, k: int = Query(12, le=50, ge=1)):
     return engine.similar_to(id, k=k)
 
 
+@app.get("/api/show/{id:path}")
+def show(id: str):
+    if id not in engine.by_id:
+        raise HTTPException(404, "unknown id")
+    r = dict(engine.by_id[id])
+    r.pop("text_hash", None)
+    return r
+
+
 @app.get("/api/recommend")
 def recommend(k: int = Query(20, le=100, ge=1), seed: str | None = None):
     if seed and seed not in engine.by_id:
@@ -46,7 +55,7 @@ def recommend(k: int = Query(20, le=100, ge=1), seed: str | None = None):
 @app.get("/api/shows")
 def shows():
     return [{"id": r["id"], "title": r["title"], "title_native": r["title_native"],
-             "owned": r["owned"]} for r in engine.rows]
+             "year": r["year"], "poster": r["poster"], "owned": r["owned"]} for r in engine.rows]
 
 
 @app.get("/favicon.ico")
