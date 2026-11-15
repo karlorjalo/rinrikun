@@ -23,3 +23,31 @@ def test_blob_roundtrip():
     import numpy as np
     v = np.arange(384, dtype=np.float32)
     assert (blob_to_vec(vec_to_blob(v)) == v).all()
+
+
+def test_hash_changes_with_model(monkeypatch):
+    import anime_vec.embed as embed
+    before = embed.text_hash(ROW)
+    monkeypatch.setattr(embed, "MODEL", "other/model")
+    assert embed.text_hash(ROW) != before
+
+
+def test_empty_input_has_model_dimension():
+    from anime_vec.embed import DIM, embed_texts
+    assert embed_texts([]).shape == (0, DIM)
+
+
+def test_gpu_providers_follow_onnxruntime(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    import anime_vec.embed as embed
+
+    loaded = []
+    fake = SimpleNamespace(get_available_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+                           preload_dlls=lambda: loaded.append(True))
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake)
+    assert embed.gpu_providers() == ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    assert loaded == [True]
+
+    fake.get_available_providers = lambda: ["CPUExecutionProvider"]
+    assert embed.gpu_providers() is None
