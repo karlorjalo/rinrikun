@@ -33,6 +33,11 @@ def profile():
     }
 
 
+@app.get("/api/vector-map")
+def vector_map():
+    return engine.get_vector_map()
+
+
 @app.get("/api/weights")
 def get_weights():
     return store.get_weights()

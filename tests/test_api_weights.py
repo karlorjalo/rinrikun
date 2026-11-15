@@ -78,6 +78,12 @@ def test_api_weights_endpoints(tmp_path):
 
         rec_invalid = client.get("/api/recommend?mode=invalid")
         assert rec_invalid.status_code == 422
+
+        # 8. Check vector-map endpoint
+        vm_res = client.get("/api/vector-map")
+        assert vm_res.status_code == 200
+        assert "points" in vm_res.json()
+        assert len(vm_res.json()["points"]) == 3
     finally:
         serve.store = orig_store
         serve.engine = orig_engine

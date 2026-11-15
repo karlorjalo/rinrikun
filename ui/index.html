@@ -116,6 +116,23 @@
   </section>
   <section id="tab-recs" hidden>
     <div id="recs-seed-bar"></div>
+    <div class="vector-map-wrap" id="recs-vector-map-wrap">
+      <div class="vector-map-header">
+        <div class="vector-map-title">
+          <span>Recommendation Map</span>
+          <span class="vector-map-sub">2D Vector Space</span>
+        </div>
+        <div class="vector-map-legend">
+          <span class="legend-item"><i class="legend-dot dot-catalog"></i> Catalog</span>
+          <span class="legend-item"><i class="legend-dot dot-library"></i> Watched</span>
+          <span class="legend-item"><i class="legend-dot dot-highlight"></i> Recommended</span>
+        </div>
+      </div>
+      <div class="vector-canvas-box">
+        <canvas id="recs-vector-canvas"></canvas>
+        <div class="vector-map-tooltip" id="recs-vector-tooltip" hidden></div>
+      </div>
+    </div>
     <div class="recs-filter-row">
       <div class="filter-group">
         <span class="filter-label">Formula:</span>

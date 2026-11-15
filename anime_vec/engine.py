@@ -42,6 +42,26 @@ class Engine:
         self.owned_idx = [i for i, r in enumerate(self.rows) if r["owned"] and r["id"] not in self.duplicate_of]
         self.weights = {r["id"]: r.get("weight", 1.0) for r in self.rows if r.get("tier") is not None}
 
+        # Compute 2D projection for vector space visualization
+        if len(self.rows) >= 2 and self.M.ndim == 2 and self.M.shape[1] >= 2:
+            self.mean_M = self.M.mean(axis=0)
+            X = self.M - self.mean_M
+            cov = X.T @ X
+            _, v = np.linalg.eigh(cov)
+            self.pca_basis = v[:, -2:]
+            raw_coords = X @ self.pca_basis
+            self.c_min = raw_coords.min(axis=0)
+            self.c_max = raw_coords.max(axis=0)
+            self.c_span = np.maximum(self.c_max - self.c_min, 1e-6)
+            self.coords_2d = ((raw_coords - self.c_min) / self.c_span).astype(np.float32)
+        else:
+            dim = self.M.shape[1] if self.M.ndim == 2 else 0
+            self.mean_M = np.zeros(dim, dtype=np.float32)
+            self.pca_basis = np.zeros((dim, 2), dtype=np.float32)
+            self.c_min = np.zeros(2, dtype=np.float32)
+            self.c_span = np.ones(2, dtype=np.float32)
+            self.coords_2d = np.zeros((len(self.rows), 2), dtype=np.float32)
+
     def taste_center(self) -> np.ndarray:
         if not self.owned_idx:
             raise RuntimeError("no owned rows in index — run build.py first")
@@ -320,3 +340,31 @@ class Engine:
         if matched_favorite:
             out["matched_favorite"] = matched_favorite
         return out
+
+    def project_2d(self, vec: np.ndarray) -> tuple[float, float]:
+        if len(self.rows) < 2 or self.M.ndim != 2 or self.M.shape[1] < 2:
+            return (0.5, 0.5)
+        raw = (vec - self.mean_M) @ self.pca_basis
+        proj = (raw - self.c_min) / self.c_span
+        return (float(np.clip(proj[0], 0.0, 1.0)), float(np.clip(proj[1], 0.0, 1.0)))
+
+    def get_vector_map(self) -> dict:
+        c = self.taste_center() if self.owned_idx else None
+        c_proj = self.project_2d(c) if c is not None else None
+        points = []
+        for i, r in enumerate(self.rows):
+            points.append({
+                "id": r["id"],
+                "x": round(float(self.coords_2d[i, 0]), 3),
+                "y": round(float(self.coords_2d[i, 1]), 3),
+                "title": r.get("title", ""),
+                "title_native": r.get("title_native", ""),
+                "year": r.get("year"),
+                "genres": r.get("genres", [])[:2],
+                "owned": r.get("owned", 0),
+                "tier": r.get("tier"),
+            })
+        return {
+            "center": {"x": round(c_proj[0], 3), "y": round(c_proj[1], 3)} if c_proj else None,
+            "points": points,
+        }

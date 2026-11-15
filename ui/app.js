@@ -438,6 +438,24 @@ function renderProfile() {
       </div>
     ` : ""}
 
+    <div class="vector-map-wrap" id="profile-vector-map-wrap">
+      <div class="vector-map-header">
+        <div class="vector-map-title">
+          <span>Taste Map</span>
+          <span class="vector-map-sub">2D Vector Space</span>
+        </div>
+        <div class="vector-map-legend">
+          <span class="legend-item"><i class="legend-dot dot-catalog"></i> Catalog</span>
+          <span class="legend-item"><i class="legend-dot dot-library"></i> Watched</span>
+          <span class="legend-item"><i class="legend-dot dot-highlight"></i> Defining shows</span>
+        </div>
+      </div>
+      <div class="vector-canvas-box">
+        <canvas id="profile-vector-canvas"></canvas>
+        <div class="vector-map-tooltip" id="profile-vector-tooltip" hidden></div>
+      </div>
+    </div>
+
     <div class="defining-header-wrap">
       <h2>Defining shows</h2>
     </div>
@@ -474,6 +492,286 @@ function renderProfile() {
   } else {
     displayedShows.forEach((r) => cardsContainer.appendChild(card(r, `${r.similarity}% to center`)));
   }
+
+  initVectorMap("profile-vector-canvas", "profile-vector-tooltip", p.defining_shows.map((s) => s.id), "Defining show");
+}
+
+let vectorMapData = null;
+async function getVectorMap() {
+  if (!vectorMapData) {
+    try {
+      vectorMapData = await (await fetch("/api/vector-map")).json();
+    } catch (e) {
+      console.error("Failed to load vector map data", e);
+    }
+  }
+  return vectorMapData;
+}
+
+const activeVectorMaps = new Map();
+
+async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLabel = "Highlighted") {
+  const canvas = document.getElementById(canvasId);
+  const tooltip = document.getElementById(tooltipId);
+  if (!canvas || !tooltip) return;
+
+  const data = await getVectorMap();
+  if (!data || !data.points) return;
+
+  const highlightSet = new Set(highlightIds);
+  const points = data.points;
+  const center = data.center;
+
+  if (activeVectorMaps.has(canvasId)) {
+    const prev = activeVectorMaps.get(canvasId);
+    prev.destroy();
+  }
+
+  const box = canvas.parentElement;
+  let hoveredPoint = null;
+
+  function getThemeAccent() {
+    const raw = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+    return raw || "#b35c72";
+  }
+
+  function draw() {
+    if (!canvas.isConnected) return;
+    const rect = box.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
+    if (w === 0 || h === 0) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
+    }
+
+    const ctx = canvas.getContext("2d");
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+
+    const pad = 24;
+    const plotW = w - 2 * pad;
+    const plotH = h - 2 * pad;
+
+    const isDark = document.documentElement.dataset.theme === "dark" ||
+      (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+
+    const catalogColor = isDark ? "rgba(168, 162, 158, 0.28)" : "rgba(120, 113, 108, 0.24)";
+    const libraryColor = isDark ? "rgba(235, 230, 220, 0.65)" : "rgba(40, 36, 33, 0.55)";
+    const accentColor = getThemeAccent();
+
+    // 1. Draw Catalog points
+    ctx.fillStyle = catalogColor;
+    ctx.beginPath();
+    for (let i = 0; i < points.length; i++) {
+      const pt = points[i];
+      if (pt.owned || highlightSet.has(pt.id)) continue;
+      const px = pad + pt.x * plotW;
+      const py = pad + (1.0 - pt.y) * plotH;
+      ctx.moveTo(px + 1.6, py);
+      ctx.arc(px, py, 1.6, 0, Math.PI * 2);
+    }
+    ctx.fill();
+
+    // 2. Draw Library points
+    ctx.fillStyle = libraryColor;
+    ctx.beginPath();
+    for (let i = 0; i < points.length; i++) {
+      const pt = points[i];
+      if (!pt.owned || highlightSet.has(pt.id)) continue;
+      const px = pad + pt.x * plotW;
+      const py = pad + (1.0 - pt.y) * plotH;
+      ctx.moveTo(px + 2.8, py);
+      ctx.arc(px, py, 2.8, 0, Math.PI * 2);
+    }
+    ctx.fill();
+
+    // 3. Draw Taste Center marker
+    if (center) {
+      const cx = pad + center.x * plotW;
+      const cy = pad + (1.0 - center.y) * plotH;
+      ctx.fillStyle = isDark ? "#ffffff" : "#1c1917";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.3)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 4. Draw Highlighted points (Pink hue with halo)
+    for (let i = 0; i < points.length; i++) {
+      const pt = points[i];
+      if (!highlightSet.has(pt.id)) continue;
+      const px = pad + pt.x * plotW;
+      const py = pad + (1.0 - pt.y) * plotH;
+
+      ctx.fillStyle = accentColor;
+      ctx.globalAlpha = 0.25;
+      ctx.beginPath();
+      ctx.arc(px, py, 8.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalAlpha = 1.0;
+      ctx.fillStyle = accentColor;
+      ctx.beginPath();
+      ctx.arc(px, py, 4.2, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = isDark ? "#262624" : "#ffffff";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    // 5. Draw Hover Ring
+    if (hoveredPoint) {
+      const px = pad + hoveredPoint.x * plotW;
+      const py = pad + (1.0 - hoveredPoint.y) * plotH;
+      ctx.strokeStyle = accentColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(px, py, 11, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function findNearest(mx, my) {
+    const rect = box.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
+    const pad = 24;
+    const plotW = w - 2 * pad;
+    const plotH = h - 2 * pad;
+
+    let best = null;
+    let bestDistSq = 14 * 14;
+
+    for (let i = 0; i < points.length; i++) {
+      const pt = points[i];
+      if (!highlightSet.has(pt.id)) continue;
+      const px = pad + pt.x * plotW;
+      const py = pad + (1.0 - pt.y) * plotH;
+      const dSq = (px - mx) ** 2 + (py - my) ** 2;
+      if (dSq < bestDistSq) {
+        bestDistSq = dSq;
+        best = pt;
+      }
+    }
+    if (best) return best;
+
+    for (let i = 0; i < points.length; i++) {
+      const pt = points[i];
+      if (!pt.owned) continue;
+      const px = pad + pt.x * plotW;
+      const py = pad + (1.0 - pt.y) * plotH;
+      const dSq = (px - mx) ** 2 + (py - my) ** 2;
+      if (dSq < bestDistSq) {
+        bestDistSq = dSq;
+        best = pt;
+      }
+    }
+    if (best) return best;
+
+    for (let i = 0; i < points.length; i++) {
+      const pt = points[i];
+      const px = pad + pt.x * plotW;
+      const py = pad + (1.0 - pt.y) * plotH;
+      const dSq = (px - mx) ** 2 + (py - my) ** 2;
+      if (dSq < bestDistSq) {
+        bestDistSq = dSq;
+        best = pt;
+      }
+    }
+    return best;
+  }
+
+  function onMouseMove(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const pt = findNearest(mx, my);
+    if (pt !== hoveredPoint) {
+      hoveredPoint = pt;
+      draw();
+    }
+
+    if (pt) {
+      canvas.style.cursor = "pointer";
+      const titles = displayTitles(pt);
+      let badgeHtml = "";
+      if (highlightSet.has(pt.id)) {
+        badgeHtml = `<span class="tt-badge tt-badge-highlight">${esc(highlightLabel)}</span>`;
+      } else if (pt.tier) {
+        badgeHtml = `<span class="tt-badge tt-badge-highlight" style="color:var(--tier-${pt.tier.toLowerCase()});border-color:currentColor;">Tier ${pt.tier}</span>`;
+      } else if (pt.owned) {
+        badgeHtml = `<span class="tt-badge tt-badge-library">Watched</span>`;
+      } else {
+        badgeHtml = `<span class="tt-badge tt-badge-catalog">Catalog</span>`;
+      }
+
+      const metaParts = [];
+      if (pt.year) metaParts.push(pt.year);
+      if (pt.genres && pt.genres.length) metaParts.push(pt.genres.join(", "));
+
+      tooltip.innerHTML = `
+        <div class="tt-title">${esc(titles.main)}</div>
+        ${titles.sub ? `<div class="tt-sub">${esc(titles.sub)}</div>` : ""}
+        <div class="tt-meta">${metaParts.join(" · ")} · ${badgeHtml}</div>
+      `;
+      tooltip.hidden = false;
+
+      const boxRect = box.getBoundingClientRect();
+      let tx = mx + 14;
+      let ty = my + 14;
+      if (tx + 220 > boxRect.width) tx = mx - 230;
+      if (ty + 70 > boxRect.height) ty = my - 70;
+      tooltip.style.left = `${Math.max(8, tx)}px`;
+      tooltip.style.top = `${Math.max(8, ty)}px`;
+    } else {
+      canvas.style.cursor = "crosshair";
+      tooltip.hidden = true;
+    }
+  }
+
+  function onMouseLeave() {
+    hoveredPoint = null;
+    tooltip.hidden = true;
+    draw();
+  }
+
+  function onClick() {
+    if (hoveredPoint) {
+      openModal(hoveredPoint);
+    }
+  }
+
+  canvas.addEventListener("mousemove", onMouseMove);
+  canvas.addEventListener("mouseleave", onMouseLeave);
+  canvas.addEventListener("click", onClick);
+
+  const ro = new ResizeObserver(() => draw());
+  ro.observe(box);
+
+  draw();
+
+  activeVectorMaps.set(canvasId, {
+    draw,
+    destroy: () => {
+      canvas.removeEventListener("mousemove", onMouseMove);
+      canvas.removeEventListener("mouseleave", onMouseLeave);
+      canvas.removeEventListener("click", onClick);
+      ro.disconnect();
+    }
+  });
 }
 
 let titles = [];
@@ -825,6 +1123,7 @@ async function recs() {
     : `/api/recommend?k=40&mode=${encodeURIComponent(recsMode)}`;
   rawRecs = await (await fetch(url)).json();
   renderRecsGrid();
+  initVectorMap("recs-vector-canvas", "recs-vector-tooltip", rawRecs.map((s) => s.id), "Recommended");
 }
 
 async function watched() {
@@ -1239,5 +1538,6 @@ $("#theme").onclick = () => {
   document.documentElement.dataset.theme = next;
   try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
   paintTheme();
+  activeVectorMaps.forEach((ctrl) => ctrl.draw?.());
 };
 paintTheme();

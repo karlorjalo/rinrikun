@@ -56,6 +56,19 @@ def test_recommend_modes(tmp_path):
     assert all("matched_favorite" in r for r in peak_res)
     assert peak_res[0]["matched_favorite"] == "T0"
 
+
+def test_vector_map(tmp_path):
+    e, rows = make_engine(tmp_path)
+    vm = e.get_vector_map()
+    assert "points" in vm
+    assert len(vm["points"]) == len(rows)
+    assert "center" in vm
+    for pt in vm["points"]:
+        assert 0.0 <= pt["x"] <= 1.0
+        assert 0.0 <= pt["y"] <= 1.0
+        assert "title" in pt
+        assert "owned" in pt
+
 def test_recommend_excludes_seed(tmp_path):
     e, rows = make_engine(tmp_path)
     res = e.recommend(k=10, seed_id="al:4")
