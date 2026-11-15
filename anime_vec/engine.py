@@ -68,23 +68,111 @@ class Engine:
                 break
         return out
 
-    def recommend(self, k: int = 20, seed_id: str | None = None) -> list[dict]:
+    def recommend(self, k: int = 20, seed_id: str | None = None, mode: str = "hybrid") -> list[dict]:
         if k <= 0:
             return []
-        q = self.M[self.ids.index(seed_id)] if seed_id else self.taste_center()
-        sims = self.M @ q
-        order = np.argsort(-sims)
-        out = []
-        for j in order:
-            r = self.rows[j]
-            if seed_id is not None and self.ids[j] == seed_id:
-                continue
-            if r["owned"]:
-                continue
-            out.append(self._result(j, float(sims[j]), seed=None))
-            if len(out) >= k:
-                break
-        return out
+
+        if seed_id is not None:
+            if seed_id not in self.by_id:
+                raise KeyError(f"unknown seed id {seed_id}")
+            q = self.M[self.ids.index(seed_id)]
+            sims = self.M @ q
+            order = np.argsort(-sims)
+            out = []
+            for j in order:
+                r = self.rows[j]
+                if self.ids[j] == seed_id or r["owned"]:
+                    continue
+                out.append(self._result(j, float(sims[j]), seed=None))
+                if len(out) >= k:
+                    break
+            return out
+
+        cand_indices = [j for j, r in enumerate(self.rows) if not r["owned"]]
+        if not cand_indices:
+            return []
+
+        cand_M = self.M[cand_indices]
+        c = self.taste_center()
+        c_sims = cand_M @ c
+
+        s_indices = [i for i in self.owned_idx if self.rows[i].get("tier") == "S"]
+        if not s_indices:
+            s_indices = [i for i in self.owned_idx if self.rows[i].get("tier") == "A"]
+        if not s_indices:
+            s_indices = self.owned_idx
+
+        d_indices = [i for i in self.owned_idx if self.rows[i].get("tier") == "D"]
+
+        S_M = self.M[s_indices]
+        s_all_sims = cand_M @ S_M.T
+        s_best_idx = s_all_sims.argmax(axis=1)
+        s_peak_sims = s_all_sims.max(axis=1)
+
+        d_penalty = np.zeros(len(cand_indices), dtype=np.float32)
+        if d_indices:
+            D_M = self.M[d_indices]
+            d_penalty = np.maximum(0.0, (cand_M @ D_M.T).max(axis=1))
+
+        mode = (mode or "hybrid").lower()
+        if mode == "center":
+            order = np.argsort(-c_sims)[:k]
+            out = []
+            for rank in order:
+                orig_idx = cand_indices[rank]
+                out.append(self._result(orig_idx, float(c_sims[rank]), seed=None))
+            return out
+
+        elif mode == "peak":
+            scores = s_peak_sims - 0.25 * d_penalty
+            order = np.argsort(-scores)[:k]
+            out = []
+            for rank in order:
+                orig_idx = cand_indices[rank]
+                fav = self.rows[s_indices[s_best_idx[rank]]]
+                fav_title = fav.get("title_native") or fav.get("title")
+                out.append(self._result(orig_idx, float(s_peak_sims[rank]), seed=None, matched_favorite=fav_title))
+            return out
+
+        elif mode == "diverse":
+            base_scores = 0.5 * c_sims + 0.5 * s_peak_sims - 0.2 * d_penalty
+            selected = []
+            unselected = set(range(len(cand_indices)))
+            lambda_param = 0.65
+            limit = min(k, len(cand_indices))
+
+            for _ in range(limit):
+                if not selected:
+                    best = int(np.argmax(base_scores))
+                else:
+                    unsel_list = list(unselected)
+                    sel_M = cand_M[selected]
+                    sims_to_sel = (cand_M[unsel_list] @ sel_M.T).max(axis=1)
+                    mmr = lambda_param * base_scores[unsel_list] - (1.0 - lambda_param) * sims_to_sel
+                    best = unsel_list[int(np.argmax(mmr))]
+                selected.append(best)
+                unselected.remove(best)
+
+            out = []
+            for sel_idx in selected:
+                orig_idx = cand_indices[sel_idx]
+                sim_val = float(0.5 * c_sims[sel_idx] + 0.5 * s_peak_sims[sel_idx])
+                fav = self.rows[s_indices[s_best_idx[sel_idx]]]
+                fav_title = fav.get("title_native") or fav.get("title")
+                out.append(self._result(orig_idx, sim_val, seed=None, matched_favorite=fav_title))
+            return out
+
+        else: # "hybrid"
+            scores = 0.5 * c_sims + 0.5 * s_peak_sims - 0.2 * d_penalty
+            order = np.argsort(-scores)[:k]
+            out = []
+            for rank in order:
+                orig_idx = cand_indices[rank]
+                sim_val = float(0.5 * c_sims[rank] + 0.5 * s_peak_sims[rank])
+                fav = self.rows[s_indices[s_best_idx[rank]]]
+                fav_title = fav.get("title_native") or fav.get("title")
+                out.append(self._result(orig_idx, sim_val, seed=None, matched_favorite=fav_title))
+            return out
 
     def defining_shows(self, k: int = 15) -> list[dict]:
         c = self.taste_center()
@@ -220,7 +308,7 @@ class Engine:
                 counts["unrated"] += 1
         return counts
 
-    def _result(self, j: int, sim: float, seed) -> dict:
+    def _result(self, j: int, sim: float, seed=None, matched_favorite: str | None = None) -> dict:
         r = self.rows[j]
         out = dict(r)
         out.pop("text_hash", None)
@@ -229,4 +317,6 @@ class Engine:
             out["shared_tags"] = sorted(set(seed["tags"]) & set(r["tags"]))
         else:
             out["shared_tags"] = []
+        if matched_favorite:
+            out["matched_favorite"] = matched_favorite
         return out

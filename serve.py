@@ -96,10 +96,14 @@ def show(id: str):
 
 
 @app.get("/api/recommend")
-def recommend(k: int = Query(20, le=100, ge=1), seed: str | None = None):
+def recommend(
+    k: int = Query(20, le=100, ge=1),
+    seed: str | None = None,
+    mode: str = Query("hybrid", pattern="^(hybrid|peak|diverse|center)$"),
+):
     if seed and seed not in engine.by_id:
         raise HTTPException(404, "unknown seed")
-    return engine.recommend(k=k, seed_id=seed)
+    return engine.recommend(k=k, seed_id=seed, mode=mode)
 
 
 @app.get("/api/shows")

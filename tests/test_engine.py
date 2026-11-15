@@ -38,6 +38,24 @@ def test_recommend_excludes_owned(tmp_path):
     assert all(not r["owned"] for r in res)
     assert all(r["similarity"] <= 100.0 for r in res)
 
+
+def test_recommend_modes(tmp_path):
+    e, rows = make_engine(tmp_path)
+    # Rate al:0 as S, al:1 as D
+    e.set_show_tier("al:0", "S")
+    e.set_show_tier("al:1", "D")
+
+    for mode in ["hybrid", "peak", "diverse", "center"]:
+        res = e.recommend(k=2, mode=mode)
+        assert len(res) == 2
+        assert all(not r["owned"] for r in res)
+        assert all(r["similarity"] <= 100.0 for r in res)
+
+    # In peak mode, matched_favorite should be the S-tier show title
+    peak_res = e.recommend(k=2, mode="peak")
+    assert all("matched_favorite" in r for r in peak_res)
+    assert peak_res[0]["matched_favorite"] == "T0"
+
 def test_recommend_excludes_seed(tmp_path):
     e, rows = make_engine(tmp_path)
     res = e.recommend(k=10, seed_id="al:4")

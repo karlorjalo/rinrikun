@@ -69,6 +69,15 @@ def test_api_weights_endpoints(tmp_path):
         # 6. Both unrated now
         unrated_res2 = client.get("/api/review-queue?unrated_only=true")
         assert len(unrated_res2.json()) == 2
+
+        # 7. Check recommend modes
+        rec_hybrid = client.get("/api/recommend?mode=hybrid")
+        assert rec_hybrid.status_code == 200
+        assert len(rec_hybrid.json()) == 1
+        assert rec_hybrid.json()[0]["id"] == "al:3"
+
+        rec_invalid = client.get("/api/recommend?mode=invalid")
+        assert rec_invalid.status_code == 422
     finally:
         serve.store = orig_store
         serve.engine = orig_engine

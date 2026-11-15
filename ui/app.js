@@ -38,6 +38,10 @@ function card(r, why) {
   let tagHtml = "";
   if (why) {
     tagHtml = `<span class="chip chip-why">${esc(why)}</span>`;
+  } else if (r.matched_favorite) {
+    const matchChip = `<span class="chip chip-matched" title="Matches your favorite: ${esc(r.matched_favorite)}">✦ ${esc(r.matched_favorite)}</span>`;
+    const otherChips = (r.tags || []).slice(0, 2).map((t) => `<span class="chip">${esc(t)}</span>`).join("");
+    tagHtml = matchChip + otherChips;
   } else if (r.shared_tags && r.shared_tags.length) {
     tagHtml = r.shared_tags.slice(0, 3).map((t) => `<span class="chip chip-shared" title="Shared tag">${esc(t)}</span>`).join("");
   } else if (r.tags && r.tags.length) {
@@ -717,6 +721,7 @@ let seed = null;
 let rawRecs = [];
 let recsFormatFilter = "all";
 let recsMinScore = 0;
+let recsMode = "hybrid";
 
 function useSeed(r) {
   seed = r;
@@ -725,6 +730,10 @@ function useSeed(r) {
 
 function renderRecsSeedBar() {
   const bar = $("#recs-seed-bar");
+  const mPills = $("#recs-mode-pills");
+  const mGroup = mPills ? mPills.closest(".filter-group") : null;
+  if (mGroup) mGroup.style.display = seed ? "none" : "";
+
   if (!bar) return;
   if (seed) {
     const { main } = displayTitles(seed);
@@ -746,6 +755,18 @@ function renderRecsSeedBar() {
 }
 
 function initRecsFilters() {
+  const mPills = $("#recs-mode-pills");
+  if (mPills) {
+    mPills.querySelectorAll(".pill").forEach((btn) => {
+      btn.onclick = () => {
+        mPills.querySelectorAll(".pill").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        recsMode = btn.dataset.mode;
+        recs();
+      };
+    });
+  }
+
   const fPills = $("#recs-format-pills");
   if (fPills) {
     fPills.querySelectorAll(".pill").forEach((btn) => {
@@ -799,7 +820,9 @@ function renderRecsGrid() {
 
 async function recs() {
   renderRecsSeedBar();
-  const url = seed ? `/api/recommend?k=40&seed=${encodeURIComponent(seed.id)}` : "/api/recommend?k=40";
+  const url = seed
+    ? `/api/recommend?k=40&seed=${encodeURIComponent(seed.id)}`
+    : `/api/recommend?k=40&mode=${encodeURIComponent(recsMode)}`;
   rawRecs = await (await fetch(url)).json();
   renderRecsGrid();
 }

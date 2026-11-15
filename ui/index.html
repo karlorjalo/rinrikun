@@ -118,6 +118,15 @@
     <div id="recs-seed-bar"></div>
     <div class="recs-filter-row">
       <div class="filter-group">
+        <span class="filter-label">Formula:</span>
+        <div class="filter-pills" id="recs-mode-pills">
+          <button class="pill active" data-mode="hybrid" title="Center + Peak S-Tier + Dislike Penalty">Hybrid</button>
+          <button class="pill" data-mode="peak" title="Maximum similarity to S-Tier favorites">Peak S-Tier</button>
+          <button class="pill" data-mode="diverse" title="Maximal Marginal Relevance across taste pillars">Diverse</button>
+          <button class="pill" data-mode="center" title="Classic library taste centroid">Center</button>
+        </div>
+      </div>
+      <div class="filter-group">
         <span class="filter-label">Format:</span>
         <div class="filter-pills" id="recs-format-pills">
           <button class="pill active" data-format="all">All</button>
