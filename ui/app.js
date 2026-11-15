@@ -870,10 +870,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     const plotH = h - 2 * pad;
     const viewMode = canvas.dataset.view || "posters";
 
-    let best = null;
-    let bestDistSq = 18 * 18;
-
-    // Check highlighted points first
+    // 1. Check highlighted points
     for (let i = 0; i < points.length; i++) {
       const pt = points[i];
       if (!highlightSet.has(pt.id)) continue;
@@ -884,44 +881,50 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
         const scaleBoost = Math.max(1.0, Math.min(1.8, Math.sqrt(scale)));
         const pw = Math.round(24 * scaleBoost);
         const ph = Math.round(35 * scaleBoost);
-        if (Math.abs(px - mx) <= pw / 2 + 4 && Math.abs(py - my) <= ph / 2 + 4) {
+        if (Math.abs(px - mx) <= pw / 2 + 1 && Math.abs(py - my) <= ph / 2 + 1) {
+          return pt;
+        }
+      } else {
+        const dSq = (px - mx) ** 2 + (py - my) ** 2;
+        if (dSq <= 8 * 8) {
           return pt;
         }
       }
-      const dSq = (px - mx) ** 2 + (py - my) ** 2;
-      if (dSq < bestDistSq) {
-        bestDistSq = dSq;
-        best = pt;
-      }
     }
-    if (best) return best;
 
-    // Check owned library points
+    // 2. Check owned library points (compact radius)
+    let bestOwned = null;
+    let bestOwnedDist = 6.5 * 6.5;
     for (let i = 0; i < points.length; i++) {
       const pt = points[i];
       if (!pt.owned) continue;
       const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
       if (px < -30 || px > w + 30 || py < -30 || py > h + 30) continue;
       const dSq = (px - mx) ** 2 + (py - my) ** 2;
-      if (dSq < bestDistSq) {
-        bestDistSq = dSq;
-        best = pt;
+      if (dSq <= bestOwnedDist) {
+        bestOwnedDist = dSq;
+        bestOwned = pt;
       }
     }
-    if (best) return best;
+    if (bestOwned) return bestOwned;
 
-    // Check all points
-    for (let i = 0; i < points.length; i++) {
-      const pt = points[i];
-      const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
-      if (px < -30 || px > w + 30 || py < -30 || py > h + 30) continue;
-      const dSq = (px - mx) ** 2 + (py - my) ** 2;
-      if (dSq < bestDistSq) {
-        bestDistSq = dSq;
-        best = pt;
+    // 3. Check catalog points (in dots mode, or when zoomed in scale >= 1.8)
+    if (viewMode === "dots" || scale >= 1.8) {
+      let bestCat = null;
+      let bestCatDist = 5.5 * 5.5;
+      for (let i = 0; i < points.length; i++) {
+        const pt = points[i];
+        const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
+        if (px < -30 || px > w + 30 || py < -30 || py > h + 30) continue;
+        const dSq = (px - mx) ** 2 + (py - my) ** 2;
+        if (dSq <= bestCatDist) {
+          bestCatDist = dSq;
+          bestCat = pt;
+        }
       }
+      return bestCat;
     }
-    return best;
+    return null;
   }
 
   function onMouseDown(e) {
@@ -931,6 +934,8 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     dragStartX = e.clientX;
     dragStartY = e.clientY;
     canvas.classList.add("is-dragging");
+    tooltip.hidden = true;
+    tooltip.style.display = "none";
   }
 
   function onMouseMove(e) {
@@ -950,6 +955,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       dragStartX = e.clientX;
       dragStartY = e.clientY;
       tooltip.hidden = true;
+      tooltip.style.display = "none";
       scheduleDraw();
       return;
     }
@@ -991,6 +997,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
         </div>
       `;
       tooltip.hidden = false;
+      tooltip.style.display = "flex";
 
       const boxRect = box.getBoundingClientRect();
       let tx = mx + 16;
@@ -1002,6 +1009,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     } else {
       canvas.style.cursor = "grab";
       tooltip.hidden = true;
+      tooltip.style.display = "none";
     }
   }
 
@@ -1019,6 +1027,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     canvas.classList.remove("is-dragging");
     hoveredPoint = null;
     tooltip.hidden = true;
+    tooltip.style.display = "none";
     scheduleDraw();
   }
 
@@ -1089,6 +1098,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   canvas.addEventListener("mousemove", onMouseMove);
   canvas.addEventListener("mouseup", onMouseUp);
   canvas.addEventListener("mouseleave", onMouseLeave);
+  box.addEventListener("mouseleave", onMouseLeave);
   canvas.addEventListener("touchstart", onTouchStart, { passive: false });
   canvas.addEventListener("touchmove", onTouchMove, { passive: false });
   canvas.addEventListener("touchend", onTouchEnd);
@@ -1108,6 +1118,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       canvas.removeEventListener("mousemove", onMouseMove);
       canvas.removeEventListener("mouseup", onMouseUp);
       canvas.removeEventListener("mouseleave", onMouseLeave);
+      box.removeEventListener("mouseleave", onMouseLeave);
       canvas.removeEventListener("touchstart", onTouchStart);
       canvas.removeEventListener("touchmove", onTouchMove);
       canvas.removeEventListener("touchend", onTouchEnd);
