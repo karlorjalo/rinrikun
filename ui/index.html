@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#faf9f5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#262624" media="(prefers-color-scheme: dark)">
 <title>りんりくん</title>
 <link rel="icon" type="image/svg+xml" href="/ui/favicon.svg">
 <link rel="alternate icon" href="/favicon.ico">
@@ -20,16 +22,18 @@
 </head>
 <body>
 <header>
-  <button id="theme" aria-label="Toggle theme" title="Toggle theme"></button>
-  <div class="mast">
-    <h1>りんりくん</h1>
-    <p class="sub">rinrikun — anime taste map</p>
-    <nav>
-      <button data-tab="profile" class="on">Profile</button>
-      <button data-tab="similar">Similar</button>
-      <button data-tab="recs">Recommendations</button>
-    </nav>
+  <div class="header-top">
+    <div class="mast">
+      <h1>りんりくん</h1>
+      <p class="sub">rinrikun — anime taste map</p>
+    </div>
+    <button id="theme" aria-label="Toggle theme" title="Toggle theme"></button>
   </div>
+  <nav>
+    <button data-tab="profile" class="on">Profile</button>
+    <button data-tab="similar">Similar</button>
+    <button data-tab="recs">Recommendations</button>
+  </nav>
 </header>
 <main>
   <section id="tab-profile"></section>
