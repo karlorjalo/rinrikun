@@ -1,0 +1,67 @@
+import pytest
+pytest.importorskip("fastapi")
+from fastapi.testclient import TestClient
+from anime_vec.store import Store
+from anime_vec.engine import Engine
+
+def make_row(i, **kw):
+    r = {
+        "id": f"al:{i}", "source": "anilist", "title": f"Title {i}", "title_native": f"タイトル {i}",
+        "year": 2021, "format": "tv", "genres": ["Action"], "tags": ["Super Power"],
+        "tag_ranks": [80], "studios": ["Bones"], "overview": "Hero academy", "score": 8.0,
+        "owned": 1, "tmdbid": None, "anilist_id": i, "poster": None,
+    }
+    r.update(kw)
+    return r
+
+def test_api_weights_endpoints(tmp_path):
+    import serve
+    db_path = tmp_path / "api_test.db"
+    store = Store(db_path)
+    store.upsert_rows([make_row(1, owned=1), make_row(2, owned=1), make_row(3, owned=0)])
+    store.save_embedding("al:1", b"\x00" * 1536)
+    store.save_embedding("al:2", b"\x00" * 1536)
+    store.save_embedding("al:3", b"\x00" * 1536)
+    engine = Engine(store)
+
+    orig_store = serve.store
+    orig_engine = serve.engine
+    serve.store = store
+    serve.engine = engine
+    try:
+        client = TestClient(serve.app)
+
+        # 1. Initial review queue has 2 owned shows
+        res = client.get("/api/review-queue")
+        assert res.status_code == 200
+        assert len(res.json()) == 2
+
+        # 2. Rate al:1 as S tier
+        post_res = client.post("/api/weights", json={"id": "al:1", "tier": "S"})
+        assert post_res.status_code == 200
+        assert post_res.json() == {"id": "al:1", "tier": "S", "weight": 2.0}
+
+        # 3. Check unrated_only queue
+        unrated_res = client.get("/api/review-queue?unrated_only=true")
+        assert unrated_res.status_code == 200
+        assert len(unrated_res.json()) == 1
+        assert unrated_res.json()[0]["id"] == "al:2"
+
+        # 4. Check profile tier summary
+        prof_res = client.get("/api/profile")
+        assert prof_res.status_code == 200
+        summary = prof_res.json()["tier_summary"]
+        assert summary["S"] == 1
+        assert summary["unrated"] == 1
+
+        # 5. Delete weight via DELETE
+        del_res = client.delete("/api/weights?id=al:1")
+        assert del_res.status_code == 200
+        assert del_res.json() == {"id": "al:1", "tier": None, "weight": 1.0}
+
+        # 6. Both unrated now
+        unrated_res2 = client.get("/api/review-queue?unrated_only=true")
+        assert len(unrated_res2.json()) == 2
+    finally:
+        serve.store = orig_store
+        serve.engine = orig_engine

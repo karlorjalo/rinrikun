@@ -47,6 +47,13 @@ def post_weights(payload: dict):
     return engine.set_show_tier(show_id, tier)
 
 
+@app.delete("/api/weights")
+def delete_weights(id: str = Query(...)):
+    if not id or id not in engine.by_id:
+        raise HTTPException(404, "unknown show id")
+    return engine.set_show_tier(id, None)
+
+
 @app.get("/api/review-queue")
 def review_queue(unrated_only: bool = False):
     return engine.review_queue(unrated_only=unrated_only)
