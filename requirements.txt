@@ -1,0 +1,5 @@
+fastembed>=0.3,<2
+numpy
+fastapi
+uvicorn
+pytest

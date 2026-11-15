@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>anime-vec</title>
+<link rel="stylesheet" href="/ui/styles.css">
+</head>
+<body>
+<header>
+  <h1>anime-vec</h1>
+  <nav>
+    <button data-tab="profile" class="on">Profile</button>
+    <button data-tab="similar">Similar</button>
+    <button data-tab="recs">Recommendations</button>
+  </nav>
+</header>
+<main>
+  <section id="tab-profile"></section>
+  <section id="tab-similar" hidden>
+    <input id="q" placeholder="Type a title…" autocomplete="off">
+    <div id="qlist"></div>
+    <div id="sresults" class="cards"></div>
+  </section>
+  <section id="tab-recs" hidden>
+    <button id="recenter">From taste center</button>
+    <span id="seedlabel"></span>
+    <div id="rresults" class="cards"></div>
+  </section>
+</main>
+<script src="/ui/app.js"></script>
+</body>
+</html>

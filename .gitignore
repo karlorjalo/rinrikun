@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+anilist_cache/
+anime_vec.db
+anime.db
+serve.log
+secrets.json
