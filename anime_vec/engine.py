@@ -4,6 +4,15 @@ from anime_vec.embed import blob_to_vec
 from anime_vec.store import TIER_WEIGHTS
 
 
+# Centered cosine similarity at which the D-tier penalty starts. Random pairs are near 0.0.
+D_SIM_START = 0.5
+
+
+def display_similarity(sim: float) -> float:
+    """Map a centered cosine (-1 to 1) to a percentage (0 to 100) for the UI."""
+    return round((1.0 + sim) * 50.0, 1)
+
+
 class Engine:
     def __init__(self, store):
         self.store = store
@@ -42,14 +51,22 @@ class Engine:
         self.owned_idx = [i for i, r in enumerate(self.rows) if r["owned"] and r["id"] not in self.duplicate_of]
         self.weights = {r["id"]: r.get("weight", 1.0) for r in self.rows if r.get("tier") is not None}
 
-        # Effective embedding matrix: bridge Japanese library rows to their English AniList counterpart vectors
-        self.eff_M = np.array(self.M, copy=True)
+        # Effective embedding matrix: bridge library rows to the vectors of their AniList counterparts
+        self.pos = {rid: i for i, rid in enumerate(self.ids)}
+        bridged = np.array(self.M, copy=True)
         for i, r in enumerate(self.rows):
             if r["source"] == "library" and r["id"] in self.counterparts:
                 for cp_id in self.counterparts[r["id"]]:
                     if cp_id in self.by_id:
-                        self.eff_M[i] = self.M[self.ids.index(cp_id)]
+                        bridged[i] = self.M[self.pos[cp_id]]
                         break
+
+        # Text embeddings share one large common direction, which hides the differences between shows.
+        # Subtract the corpus mean and normalize again, so that cosine similarity measures only the differences.
+        unique = [i for i, r in enumerate(self.rows) if r["id"] not in self.duplicate_of]
+        self.corpus_mean = bridged[unique].mean(axis=0) if unique else np.zeros(bridged.shape[1:], dtype=np.float32)
+        centered = bridged - self.corpus_mean
+        self.eff_M = centered / np.clip(np.linalg.norm(centered, axis=1, keepdims=True), 1e-9, None)
 
         # Compute 2D projection for vector space visualization using effective matrix
         if len(self.rows) >= 2 and self.eff_M.ndim == 2 and self.eff_M.shape[1] >= 2:
@@ -87,7 +104,7 @@ class Engine:
             return []
         if row_id not in self.by_id:
             raise ValueError(f"unknown id {row_id}")
-        i = self.ids.index(row_id)
+        i = self.pos[row_id]
         sims = self.eff_M @ self.eff_M[i]
         order = np.argsort(-sims)
         out = []
@@ -107,7 +124,7 @@ class Engine:
         if seed_id is not None:
             if seed_id not in self.by_id:
                 raise KeyError(f"unknown seed id {seed_id}")
-            q = self.eff_M[self.ids.index(seed_id)]
+            q = self.eff_M[self.pos[seed_id]]
             sims = self.eff_M @ q
             order = np.argsort(-sims)
             out = []
@@ -146,8 +163,8 @@ class Engine:
         if d_indices:
             D_M = self.eff_M[d_indices]
             raw_d_sims = (cand_M @ D_M.T).max(axis=1)
-            # Soft threshold: only apply negative push if candidate similarity to D-tier > 0.75
-            d_penalty = np.maximum(0.0, raw_d_sims - 0.75) / 0.25
+            # Soft threshold: the penalty starts when the similarity to a D-tier show is more than D_SIM_START
+            d_penalty = np.maximum(0.0, raw_d_sims - D_SIM_START) / (1.0 - D_SIM_START)
 
         mode = (mode or "hybrid").lower()
         if mode == "center":
@@ -310,14 +327,14 @@ class Engine:
 
         def sort_key(r):
             is_unrated = 0 if r.get("tier") is None else 1
-            idx = self.ids.index(r["id"])
+            idx = self.pos[r["id"]]
             sim = float(self.eff_M[idx] @ c) if c is not None else 0.0
             return (is_unrated, -sim)
 
         sorted_rows = sorted(owned_rows, key=sort_key)
         out = []
         for r in sorted_rows:
-            idx = self.ids.index(r["id"])
+            idx = self.pos[r["id"]]
             sim = float(self.eff_M[idx] @ c) if c is not None else 0.0
             out.append(self._result(idx, sim, seed=None))
         return out
@@ -347,7 +364,7 @@ class Engine:
         r = self.rows[j]
         out = dict(r)
         out.pop("text_hash", None)
-        out["similarity"] = round(sim * 100, 1)
+        out["similarity"] = display_similarity(sim)
         if seed is not None:
             out["shared_tags"] = sorted(set(seed["tags"]) & set(r["tags"]))
         else:

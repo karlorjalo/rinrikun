@@ -167,7 +167,7 @@ def test_weighted_taste_center_and_tiers(tmp_path):
     e.set_show_tier("al:1", "D") # weight 0.0
     new_center = e.taste_center()
     # al:0 should have higher similarity to new_center than to initial_center
-    v0 = e.M[0]
+    v0 = e.eff_M[0]
     assert (v0 @ new_center) > (v0 @ initial_center)
     # summary
     ts = e.tier_summary()
@@ -234,4 +234,53 @@ def test_deduplicate_library_and_pool_counterparts(tmp_path):
     assert vm["points"][0]["id"] == "jf:1"
 
     # 6. eff_M bridges jf:1 to al:100's vector
-    assert np.allclose(e.eff_M[e.ids.index("jf:1")], e.M[e.ids.index("al:100")])
+    assert np.allclose(e.eff_M[e.ids.index("jf:1")], e.eff_M[e.ids.index("al:100")])
+
+
+def test_bridge_uses_counterpart_vector(tmp_path):
+    from anime_vec.store import Store
+    s = Store(tmp_path / "bridge.db")
+    base = {"year": 2021, "genres": [], "tags": [], "tag_ranks": [], "studios": [], "overview": "O",
+            "score": 7.5, "tmdbid": None, "poster": None}
+    s.upsert_rows([
+        dict(base, id="jf:1", source="library", title="Bokutachi no Remake", title_native="ぼくたちのリメイク",
+             format="series", owned=1, anilist_id=None),
+        dict(base, id="al:100", source="anilist", title="Bokutachi no Remake", title_native="ぼくたちのリメイク",
+             format="tv", owned=1, anilist_id=100),
+        dict(base, id="al:200", source="anilist", title="Other", title_native="", format="tv", owned=0,
+             anilist_id=200),
+    ])
+    s.save_embedding("jf:1", np.array([1, 0, 0, 0], dtype=np.float32).tobytes())
+    s.save_embedding("al:100", np.array([0, 1, 0, 0], dtype=np.float32).tobytes())
+    s.save_embedding("al:200", np.array([0, 0, 1, 0], dtype=np.float32).tobytes())
+    e = Engine(s)
+    assert np.allclose(e.eff_M[e.pos["jf:1"]], e.eff_M[e.pos["al:100"]])
+    assert not np.allclose(e.eff_M[e.pos["jf:1"]], e.eff_M[e.pos["al:200"]])
+
+
+def test_vectors_are_mean_centered(tmp_path):
+    from anime_vec.store import Store
+    s = Store(tmp_path / "c.db")
+    rng = np.random.default_rng(1)
+    # All vectors share one large common direction, as text embeddings do
+    common = np.array([5.0, 0, 0, 0])
+    for i in range(8):
+        v = (common + rng.normal(size=4)).astype(np.float32)
+        s.upsert_rows([{"id": f"al:{i}", "source": "anilist", "title": f"T{i}", "title_native": "",
+                        "year": 2020, "format": "tv", "genres": [], "tags": [], "tag_ranks": [],
+                        "studios": [], "overview": "O", "score": 7.0, "owned": 0, "tmdbid": None,
+                        "anilist_id": i, "poster": None}])
+        s.save_embedding(f"al:{i}", v.tobytes())
+    e = Engine(s)
+    raw = e.M @ e.M.T
+    centered = e.eff_M @ e.eff_M.T
+    off = ~np.eye(8, dtype=bool)
+    assert raw[off].mean() > 0.8
+    assert abs(centered[off].mean()) < 0.3
+    assert np.allclose(np.linalg.norm(e.eff_M, axis=1), 1.0, atol=1e-5)
+
+
+def test_similarity_is_a_percentage(tmp_path):
+    e, rows = make_engine(tmp_path)
+    for r in e.similar_to("al:0", k=5):
+        assert 0.0 <= r["similarity"] <= 100.0
