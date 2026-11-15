@@ -96,7 +96,7 @@ async function openModal(r) {
 
   const statItems = [];
   if (scoreVal) statItems.push(`<span class="score">★ ${scoreVal}</span>`);
-  if (simVal != null) statItems.push(`<span class="affinity">${simVal}% taste match</span>`);
+  if (simVal != null) statItems.push(`<span class="affinity">${simVal}% match</span>`);
 
   const tags = (r.tags || []).map((t, idx) => {
     const rank = r.tag_ranks && r.tag_ranks[idx] ? `<span class="trank">${r.tag_ranks[idx]}%</span>` : "";
@@ -128,7 +128,7 @@ async function openModal(r) {
       <div class="modal-body">
         <h4>Synopsis</h4>
         <div class="modal-overview">${formatOverview(r.overview)}</div>
-        ${tags ? `<h4>Tags & Themes</h4><div class="modal-tags">${tags}</div>` : ""}
+        ${tags ? `<h4>Tags</h4><div class="modal-tags">${tags}</div>` : ""}
       </div>
     </div>`;
 
@@ -181,18 +181,16 @@ function renderProfile() {
     <div class="hero-dna">
       <div class="hero-dna-top">
         <div class="hero-dna-title-wrap">
-          <div class="hero-dna-tagline">Taste DNA & Collection Map</div>
-          <h2 class="hero-dna-title">Personal Anime Profile</h2>
-          <p class="hero-dna-desc">Centroid computed from your <b>${p.owned_count}</b> library titles, embedded into the <b>${p.total_count.toLocaleString()}</b> anime vector universe.</p>
+          <h2 class="hero-dna-title">Taste profile</h2>
         </div>
         <div class="hero-stats-grid">
           <div class="hero-stat-card">
             <div class="hero-stat-val">${p.owned_count}</div>
-            <div class="hero-stat-lbl">Owned Shows</div>
+            <div class="hero-stat-lbl">Owned</div>
           </div>
           <div class="hero-stat-card">
             <div class="hero-stat-val">${p.total_count.toLocaleString()}</div>
-            <div class="hero-stat-lbl">Mapped Pool</div>
+            <div class="hero-stat-lbl">Indexed</div>
           </div>
           <div class="hero-stat-card">
             <div class="hero-stat-val">${esc(topEra)}</div>
@@ -205,7 +203,7 @@ function renderProfile() {
         </div>
       </div>
 
-      <div class="dna-section-title">Dominant Thematic Tags <span style="font-size:12px;color:var(--muted);font-weight:normal;">Click a tag to filter defining shows</span></div>
+      <div class="dna-section-title">Dominant tags</div>
       <div class="tagbar" id="profile-tagbar">
         ${p.tag_summary.map(([t, c]) => `
           <button class="chip-interactive ${activeProfileTag === t ? 'active' : ''}" data-tag="${esc(t)}">
@@ -215,7 +213,7 @@ function renderProfile() {
       </div>
 
       ${p.genre_summary && p.genre_summary.length ? `
-        <div class="dna-section-title" style="margin-top:16px;">Top Genres</div>
+        <div class="dna-section-title" style="margin-top:16px;">Genres</div>
         <div class="tagbar" id="profile-genrebar">
           ${p.genre_summary.map(([g, c]) => `
             <button class="chip-interactive ${activeProfileTag === g ? 'active' : ''}" data-tag="${esc(g)}">
@@ -234,8 +232,7 @@ function renderProfile() {
     ` : ""}
 
     <div class="defining-header-wrap">
-      <h2>Defining Shows</h2>
-      <div class="defining-desc">Titles mathematically nearest to your taste center. These anchor your personal collection's identity.</div>
+      <h2>Defining shows</h2>
     </div>
     <div class="cards" id="profile-cards"></div>
   `;
@@ -411,11 +408,10 @@ async function runSimilar(t) {
     header.innerHTML = `
       <div class="result-seed-bar">
         <div class="seed-info">
-          <div class="seed-label">Showing nearest neighbors for</div>
           <h3 class="seed-title">${esc(t.title)} ${t.owned ? '<span class="badge">owned</span>' : ""}</h3>
         </div>
         <div class="seed-actions">
-          <button class="btn-action" id="sim-view-details">Show Details</button>
+          <button class="btn-action" id="sim-view-details">Details</button>
         </div>
       </div>`;
     $("#sim-view-details").onclick = () => openModal(t);
@@ -444,23 +440,17 @@ function renderRecsSeedBar() {
     bar.innerHTML = `
       <div class="recs-seed-card">
         <div class="recs-seed-left">
-          <span class="seed-badge">Custom Seed</span>
-          <span class="seed-text">Recommendations anchored to: <b>${esc(seed.title)}</b></span>
+          <span class="seed-badge">Seed</span>
+          <span class="seed-text"><b>${esc(seed.title)}</b></span>
         </div>
-        <button id="recenter-btn" class="btn-action">Reset to Taste Center ↺</button>
+        <button id="recenter-btn" class="btn-action">Reset to center ↺</button>
       </div>`;
     $("#recenter-btn").onclick = () => {
       seed = null;
       recs();
     };
   } else {
-    bar.innerHTML = `
-      <div class="recs-seed-card">
-        <div class="recs-seed-left">
-          <span class="seed-badge seed-badge-center">Taste Center</span>
-          <span class="seed-text">Recommendations calculated from your overall library centroid (unowned AniList pool)</span>
-        </div>
-      </div>`;
+    bar.innerHTML = "";
   }
 }
 
