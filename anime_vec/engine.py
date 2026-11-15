@@ -360,6 +360,7 @@ class Engine:
                 "title": r.get("title", ""),
                 "title_native": r.get("title_native", ""),
                 "year": r.get("year"),
+                "poster": r.get("poster"),
                 "genres": r.get("genres", [])[:2],
                 "owned": r.get("owned", 0),
                 "tier": r.get("tier"),

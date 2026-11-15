@@ -365,19 +365,38 @@ dialog#detail-modal::backdrop { background: rgba(20, 18, 16, 0.6); backdrop-filt
   box-shadow: 0 0 6px var(--accent);
 }
 .vector-canvas-box {
-  position: relative; width: 100%; height: 280px; border-radius: 8px;
+  position: relative; width: 100%; height: 350px; border-radius: 8px;
   background: color-mix(in srgb, var(--bg) 65%, var(--card));
   border: 1px solid var(--border); overflow: hidden;
 }
 .vector-canvas-box canvas {
   display: block; width: 100%; height: 100%; cursor: crosshair;
 }
+.vector-view-pills {
+  display: inline-flex; gap: 2px; margin-right: 6px;
+  background: color-mix(in srgb, var(--hover) 80%, transparent);
+  padding: 2px; border-radius: 6px; border: 1px solid var(--border);
+}
+.vector-view-pills .pill { padding: 2px 7px; font-size: 11px; }
 .vector-map-tooltip {
   position: absolute; pointer-events: none; background: var(--card);
-  border: 1px solid var(--border); border-radius: 8px; padding: 7px 11px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16); font-size: 12px; z-index: 60;
-  max-width: 250px; line-height: 1.35; white-space: normal;
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2); font-size: 12px; z-index: 60;
+  max-width: 290px; line-height: 1.35; white-space: normal;
+  display: flex; gap: 10px; align-items: flex-start;
 }
+.tt-poster-box {
+  width: 38px; height: 52px; border-radius: 4px; overflow: hidden; flex: none;
+  background: var(--hover); border: 1px solid var(--border); position: relative;
+}
+.tt-poster-box img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.tt-poster-box .tt-poster-fallback {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--muted);
+}
+.tt-content { min-width: 0; flex: 1; }
 .vector-map-tooltip .tt-title {
   font-family: var(--serif); font-size: 13.5px; font-weight: 600; color: var(--text); margin-bottom: 2px;
 }
@@ -385,7 +404,7 @@ dialog#detail-modal::backdrop { background: rgba(20, 18, 16, 0.6); backdrop-filt
   font-size: 11px; color: var(--muted); margin-bottom: 4px;
 }
 .vector-map-tooltip .tt-meta {
-  font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
 }
 .vector-map-tooltip .tt-badge {
   display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px;

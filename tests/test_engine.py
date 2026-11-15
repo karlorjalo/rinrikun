@@ -67,6 +67,7 @@ def test_vector_map(tmp_path):
         assert 0.0 <= pt["x"] <= 1.0
         assert 0.0 <= pt["y"] <= 1.0
         assert "title" in pt
+        assert "poster" in pt
         assert "owned" in pt
 
 def test_recommend_excludes_seed(tmp_path):

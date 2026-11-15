@@ -445,6 +445,10 @@ function renderProfile() {
           <span class="vector-map-sub">2D Vector Space</span>
         </div>
         <div class="vector-map-legend">
+          <div class="vector-view-pills" data-canvas="profile-vector-canvas">
+            <button class="pill active" data-view="posters">Posters</button>
+            <button class="pill" data-view="dots">Dots</button>
+          </div>
           <span class="legend-item"><i class="legend-dot dot-catalog"></i> Catalog</span>
           <span class="legend-item"><i class="legend-dot dot-library"></i> Watched</span>
           <span class="legend-item"><i class="legend-dot dot-highlight"></i> Defining shows</span>
@@ -508,6 +512,29 @@ async function getVectorMap() {
   return vectorMapData;
 }
 
+const posterImgCache = new Map();
+
+function getPosterImage(url, onLoaded) {
+  if (!url) return null;
+  if (posterImgCache.has(url)) {
+    const entry = posterImgCache.get(url);
+    if (entry && entry.complete && entry.naturalWidth > 0) return entry;
+    return null;
+  }
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.src = url;
+  img.onload = () => {
+    posterImgCache.set(url, img);
+    onLoaded?.();
+  };
+  img.onerror = () => {
+    posterImgCache.set(url, false);
+  };
+  posterImgCache.set(url, img);
+  return null;
+}
+
 const activeVectorMaps = new Map();
 
 async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLabel = "Highlighted") {
@@ -529,6 +556,17 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
 
   const box = canvas.parentElement;
   let hoveredPoint = null;
+
+  // View toggle pills (Posters vs Dots)
+  const viewPills = box.parentElement.querySelectorAll(`.vector-view-pills[data-canvas="${canvasId}"] button`);
+  viewPills.forEach((btn) => {
+    btn.onclick = () => {
+      viewPills.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      canvas.dataset.view = btn.dataset.view;
+      draw();
+    };
+  });
 
   function getThemeAccent() {
     const raw = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
@@ -563,6 +601,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     const catalogColor = isDark ? "rgba(168, 162, 158, 0.28)" : "rgba(120, 113, 108, 0.24)";
     const libraryColor = isDark ? "rgba(235, 230, 220, 0.65)" : "rgba(40, 36, 33, 0.55)";
     const accentColor = getThemeAccent();
+    const viewMode = canvas.dataset.view || "posters";
 
     // 1. Draw Catalog points
     ctx.fillStyle = catalogColor;
@@ -605,32 +644,89 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       ctx.stroke();
     }
 
-    // 4. Draw Highlighted points (Pink hue with halo)
-    for (let i = 0; i < points.length; i++) {
-      const pt = points[i];
-      if (!highlightSet.has(pt.id)) continue;
-      const px = pad + pt.x * plotW;
-      const py = pad + (1.0 - pt.y) * plotH;
+    // 4. Draw Highlighted points (Posters or Pink Dots)
+    if (viewMode === "posters") {
+      // Sort so hovered point is drawn on top
+      const highlightedPoints = points.filter((pt) => highlightSet.has(pt.id));
+      highlightedPoints.sort((a, b) => {
+        if (hoveredPoint && a.id === hoveredPoint.id) return 1;
+        if (hoveredPoint && b.id === hoveredPoint.id) return -1;
+        return 0;
+      });
 
-      ctx.fillStyle = accentColor;
-      ctx.globalAlpha = 0.25;
-      ctx.beginPath();
-      ctx.arc(px, py, 8.5, 0, Math.PI * 2);
-      ctx.fill();
+      for (let i = 0; i < highlightedPoints.length; i++) {
+        const pt = highlightedPoints[i];
+        const px = pad + pt.x * plotW;
+        const py = pad + (1.0 - pt.y) * plotH;
+        const isHovered = hoveredPoint && hoveredPoint.id === pt.id;
 
-      ctx.globalAlpha = 1.0;
-      ctx.fillStyle = accentColor;
-      ctx.beginPath();
-      ctx.arc(px, py, 4.2, 0, Math.PI * 2);
-      ctx.fill();
+        const pw = isHovered ? 36 : 24;
+        const ph = isHovered ? 52 : 35;
+        const x0 = px - pw / 2;
+        const y0 = py - ph / 2;
 
-      ctx.strokeStyle = isDark ? "#262624" : "#ffffff";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+        // Outer glowing pink halo / border
+        ctx.save();
+        ctx.shadowColor = accentColor;
+        ctx.shadowBlur = isHovered ? 14 : 7;
+        ctx.strokeStyle = accentColor;
+        ctx.lineWidth = isHovered ? 2.5 : 2;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x0, y0, pw, ph, 4);
+        else ctx.rect(x0, y0, pw, ph);
+        ctx.stroke();
+        ctx.restore();
+
+        // Clip and render poster image
+        ctx.save();
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x0, y0, pw, ph, 4);
+        else ctx.rect(x0, y0, pw, ph);
+        ctx.clip();
+
+        const img = pt.poster ? getPosterImage(pt.poster, () => draw()) : null;
+        if (img) {
+          ctx.drawImage(img, x0, y0, pw, ph);
+        } else {
+          ctx.fillStyle = isDark ? "#3a3833" : "#f1efe8";
+          ctx.fillRect(x0, y0, pw, ph);
+          ctx.fillStyle = accentColor;
+          ctx.font = `bold ${isHovered ? 14 : 11}px sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          const ch = (pt.title_native || pt.title || "?").trim()[0];
+          ctx.fillText(ch, px, py);
+        }
+        ctx.restore();
+      }
+    } else {
+      // Dots view mode
+      for (let i = 0; i < points.length; i++) {
+        const pt = points[i];
+        if (!highlightSet.has(pt.id)) continue;
+        const px = pad + pt.x * plotW;
+        const py = pad + (1.0 - pt.y) * plotH;
+
+        ctx.fillStyle = accentColor;
+        ctx.globalAlpha = 0.25;
+        ctx.beginPath();
+        ctx.arc(px, py, 8.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.globalAlpha = 1.0;
+        ctx.fillStyle = accentColor;
+        ctx.beginPath();
+        ctx.arc(px, py, 4.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = isDark ? "#262624" : "#ffffff";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
     }
 
-    // 5. Draw Hover Ring
-    if (hoveredPoint) {
+    // 5. Draw Hover Crosshair / Ring (for non-posters or dots)
+    if (hoveredPoint && (viewMode !== "posters" || !highlightSet.has(hoveredPoint.id))) {
       const px = pad + hoveredPoint.x * plotW;
       const py = pad + (1.0 - hoveredPoint.y) * plotH;
       ctx.strokeStyle = accentColor;
@@ -650,15 +746,23 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     const pad = 24;
     const plotW = w - 2 * pad;
     const plotH = h - 2 * pad;
+    const viewMode = canvas.dataset.view || "posters";
 
     let best = null;
     let bestDistSq = 14 * 14;
 
+    // Check highlighted points first
     for (let i = 0; i < points.length; i++) {
       const pt = points[i];
       if (!highlightSet.has(pt.id)) continue;
       const px = pad + pt.x * plotW;
       const py = pad + (1.0 - pt.y) * plotH;
+
+      if (viewMode === "posters") {
+        if (Math.abs(px - mx) <= 15 && Math.abs(py - my) <= 22) {
+          return pt;
+        }
+      }
       const dSq = (px - mx) ** 2 + (py - my) ** 2;
       if (dSq < bestDistSq) {
         bestDistSq = dSq;
@@ -667,6 +771,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     }
     if (best) return best;
 
+    // Check owned library points
     for (let i = 0; i < points.length; i++) {
       const pt = points[i];
       if (!pt.owned) continue;
@@ -680,6 +785,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     }
     if (best) return best;
 
+    // Check all points
     for (let i = 0; i < points.length; i++) {
       const pt = points[i];
       const px = pad + pt.x * plotW;
@@ -722,18 +828,25 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       if (pt.year) metaParts.push(pt.year);
       if (pt.genres && pt.genres.length) metaParts.push(pt.genres.join(", "));
 
+      const posterHtml = pt.poster
+        ? `<div class="tt-poster-box"><img src="${esc(pt.poster)}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"><div class="tt-poster-fallback" style="display:none;">${esc((pt.title_native || pt.title || "?")[0])}</div></div>`
+        : `<div class="tt-poster-box"><div class="tt-poster-fallback">${esc((pt.title_native || pt.title || "?")[0])}</div></div>`;
+
       tooltip.innerHTML = `
-        <div class="tt-title">${esc(titles.main)}</div>
-        ${titles.sub ? `<div class="tt-sub">${esc(titles.sub)}</div>` : ""}
-        <div class="tt-meta">${metaParts.join(" · ")} · ${badgeHtml}</div>
+        ${posterHtml}
+        <div class="tt-content">
+          <div class="tt-title">${esc(titles.main)}</div>
+          ${titles.sub ? `<div class="tt-sub">${esc(titles.sub)}</div>` : ""}
+          <div class="tt-meta">${metaParts.join(" · ")} · ${badgeHtml}</div>
+        </div>
       `;
       tooltip.hidden = false;
 
       const boxRect = box.getBoundingClientRect();
-      let tx = mx + 14;
-      let ty = my + 14;
-      if (tx + 220 > boxRect.width) tx = mx - 230;
-      if (ty + 70 > boxRect.height) ty = my - 70;
+      let tx = mx + 16;
+      let ty = my + 16;
+      if (tx + 280 > boxRect.width) tx = mx - 290;
+      if (ty + 75 > boxRect.height) ty = my - 75;
       tooltip.style.left = `${Math.max(8, tx)}px`;
       tooltip.style.top = `${Math.max(8, ty)}px`;
     } else {
