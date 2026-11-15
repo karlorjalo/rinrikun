@@ -613,6 +613,37 @@ async function initSearch() {
   });
 }
 
+let rawSimilar = [];
+let similarFilter = "all";
+let similarCount = 24;
+
+function renderSimilarGrid() {
+  const box = $("#sresults");
+  if (!box) return;
+  box.innerHTML = "";
+
+  const filtered = rawSimilar.filter((r) => {
+    if (similarFilter === "unowned") return !r.owned && !r.manual_watched;
+    return true;
+  });
+
+  if (!filtered.length) {
+    box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 0;">No similar titles match the selected filter.</p>`;
+    return;
+  }
+
+  filtered.forEach((r) => box.appendChild(card(r)));
+}
+
+async function fetchSimilarShows(t) {
+  const res = await (await fetch(`/api/similar?id=${encodeURIComponent(t.id)}&k=${similarCount}`)).json();
+  if (Array.isArray(res)) {
+    rawSimilar = res;
+  } else {
+    rawSimilar = [];
+  }
+}
+
 async function runSimilar(t) {
   currentSimilarShow = t;
   const { main } = displayTitles(t);
@@ -623,6 +654,8 @@ async function runSimilar(t) {
   const empty = $("#similar-empty");
   if (empty) empty.hidden = true;
 
+  await fetchSimilarShows(t);
+
   const header = $("#similar-header");
   if (header) {
     header.hidden = false;
@@ -632,17 +665,52 @@ async function runSimilar(t) {
         <div class="seed-info">
           <h3 class="seed-title">${esc(main)} ${simBadge}</h3>
         </div>
-        <div class="seed-actions">
+        <div class="seed-actions" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <div class="filter-pills" id="similar-filter-pills">
+            <button class="pill ${similarFilter === 'all' ? 'active' : ''}" data-filter="all">All (${rawSimilar.length})</button>
+            <button class="pill ${similarFilter === 'unowned' ? 'active' : ''}" data-filter="unowned">Unowned only</button>
+          </div>
+          <div class="filter-pills" id="similar-limit-pills">
+            <button class="pill ${similarCount === 24 ? 'active' : ''}" data-count="24">24</button>
+            <button class="pill ${similarCount === 48 ? 'active' : ''}" data-count="48">48</button>
+          </div>
           <button class="btn-action" id="sim-view-details">Details</button>
         </div>
       </div>`;
+
+    const fPills = $("#similar-filter-pills");
+    if (fPills) {
+      fPills.querySelectorAll(".pill").forEach((btn) => {
+        btn.onclick = () => {
+          similarFilter = btn.dataset.filter;
+          fPills.querySelectorAll(".pill").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          renderSimilarGrid();
+        };
+      });
+    }
+
+    const lPills = $("#similar-limit-pills");
+    if (lPills) {
+      lPills.querySelectorAll(".pill").forEach((btn) => {
+        btn.onclick = async () => {
+          similarCount = parseInt(btn.dataset.count, 10);
+          lPills.querySelectorAll(".pill").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          await fetchSimilarShows(t);
+          if (fPills) {
+            const allBtn = fPills.querySelector('[data-filter="all"]');
+            if (allBtn) allBtn.textContent = `All (${rawSimilar.length})`;
+          }
+          renderSimilarGrid();
+        };
+      });
+    }
+
     $("#sim-view-details").onclick = () => openModal(t);
   }
 
-  const res = await (await fetch(`/api/similar?id=${encodeURIComponent(t.id)}`)).json();
-  const box = $("#sresults");
-  box.innerHTML = "";
-  res.forEach((r) => box.appendChild(card(r)));
+  renderSimilarGrid();
 }
 
 let seed = null;

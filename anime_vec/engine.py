@@ -51,7 +51,7 @@ class Engine:
         v = (self.M[self.owned_idx] * weights[:, None]).sum(axis=0)
         return v / max(np.linalg.norm(v), 1e-9)
 
-    def similar_to(self, row_id: str, k: int = 12) -> list[dict]:
+    def similar_to(self, row_id: str, k: int = 24) -> list[dict]:
         if k <= 0:
             return []
         i = self.ids.index(row_id)

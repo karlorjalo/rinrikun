@@ -80,7 +80,7 @@ def post_watched(payload: dict):
 
 
 @app.get("/api/similar")
-def similar(id: str, k: int = Query(12, le=50, ge=1)):
+def similar(id: str, k: int = Query(24, le=100, ge=1)):
     if id not in engine.by_id:
         raise HTTPException(404, "unknown id")
     return engine.similar_to(id, k=k)
