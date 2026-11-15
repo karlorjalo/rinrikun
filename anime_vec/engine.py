@@ -13,6 +13,31 @@ def display_similarity(sim: float) -> float:
     return round((1.0 + sim) * 50.0, 1)
 
 
+# Number of nearest liked shows that give the score of a candidate
+LIKED_K = 5
+# Weight of the D-tier penalty in the hybrid score, in standard deviations
+D_PENALTY = 1.0
+
+
+def _zscore(x: np.ndarray) -> np.ndarray:
+    sd = float(x.std())
+    return (x - x.mean()) / sd if sd > 1e-9 else np.zeros_like(x)
+
+
+def _knn_score(cand: np.ndarray, liked: np.ndarray, weights: np.ndarray, k: int = LIKED_K):
+    """Score each candidate by the mean weighted similarity to its k nearest liked shows.
+
+    Return the scores, the mean similarity without weights, and the index of the best liked show.
+    """
+    sims = cand @ liked.T
+    weighted = sims * weights[None, :]
+    k = min(k, liked.shape[0])
+    top = np.argpartition(-weighted, k - 1, axis=1)[:, :k]
+    score = np.take_along_axis(weighted, top, axis=1).mean(axis=1)
+    shown = np.take_along_axis(sims, top, axis=1).mean(axis=1)
+    return score, shown, weighted.argmax(axis=1)
+
+
 class Engine:
     def __init__(self, store):
         self.store = store
@@ -67,6 +92,7 @@ class Engine:
         self.corpus_mean = bridged[unique].mean(axis=0) if unique else np.zeros(bridged.shape[1:], dtype=np.float32)
         centered = bridged - self.corpus_mean
         self.eff_M = centered / np.clip(np.linalg.norm(centered, axis=1, keepdims=True), 1e-9, None)
+        self.tag_M = self._build_tag_matrix()
 
         # Compute 2D projection for vector space visualization using effective matrix
         if len(self.rows) >= 2 and self.eff_M.ndim == 2 and self.eff_M.shape[1] >= 2:
@@ -143,88 +169,110 @@ class Engine:
             return []
 
         cand_M = self.eff_M[cand_indices]
-        c = self.taste_center()
-        c_sims = cand_M @ c
+        mode = (mode or "hybrid").lower()
 
-        s_indices = [i for i in self.owned_idx if self.rows[i].get("tier") == "S"]
-        if not s_indices:
-            s_indices = [i for i in self.owned_idx if self.rows[i].get("tier") == "A"]
-        if not s_indices:
-            s_indices = self.owned_idx
-
-        d_indices = [i for i in self.owned_idx if self.rows[i].get("tier") == "D"]
-
-        S_M = self.eff_M[s_indices]
-        s_all_sims = cand_M @ S_M.T
-        s_best_idx = s_all_sims.argmax(axis=1)
-        s_peak_sims = s_all_sims.max(axis=1)
+        if mode == "center":
+            c_sims = cand_M @ self.taste_center()
+            order = np.argsort(-c_sims)[:k]
+            return [self._result(cand_indices[j], float(c_sims[j]), seed=None) for j in order]
 
         d_penalty = np.zeros(len(cand_indices), dtype=np.float32)
+        d_indices = [i for i in self.owned_idx if self.rows[i].get("tier") == "D"]
         if d_indices:
-            D_M = self.eff_M[d_indices]
-            raw_d_sims = (cand_M @ D_M.T).max(axis=1)
+            raw_d_sims = (cand_M @ self.eff_M[d_indices].T).max(axis=1)
             # Soft threshold: the penalty starts when the similarity to a D-tier show is more than D_SIM_START
             d_penalty = np.maximum(0.0, raw_d_sims - D_SIM_START) / (1.0 - D_SIM_START)
 
-        mode = (mode or "hybrid").lower()
-        if mode == "center":
-            order = np.argsort(-c_sims)[:k]
-            out = []
-            for rank in order:
-                orig_idx = cand_indices[rank]
-                out.append(self._result(orig_idx, float(c_sims[rank]), seed=None))
-            return out
+        if mode == "peak":
+            s_indices = [i for i in self.owned_idx if self.rows[i].get("tier") == "S"]
+            if not s_indices:
+                s_indices = [i for i in self.owned_idx if self.rows[i].get("tier") == "A"]
+            if not s_indices:
+                s_indices = self.owned_idx
+            s_all_sims = cand_M @ self.eff_M[s_indices].T
+            s_best_idx = s_all_sims.argmax(axis=1)
+            s_peak_sims = s_all_sims.max(axis=1)
+            order = np.argsort(-(s_peak_sims - 0.15 * d_penalty))[:k]
+            return [self._result(cand_indices[j], float(s_peak_sims[j]), seed=None,
+                                 matched_favorite=self._favorite_title(s_indices[s_best_idx[j]]))
+                    for j in order]
 
-        elif mode == "peak":
-            scores = s_peak_sims - 0.15 * d_penalty
-            order = np.argsort(-scores)[:k]
-            out = []
-            for rank in order:
-                orig_idx = cand_indices[rank]
-                fav = self.rows[s_indices[s_best_idx[rank]]]
-                fav_title = fav.get("title_native") or fav.get("title")
-                out.append(self._result(orig_idx, float(s_peak_sims[rank]), seed=None, matched_favorite=fav_title))
-            return out
+        # "hybrid" and "diverse": one center cannot describe a taste that has many small groups.
+        # Score each candidate by its nearest liked shows, in the text space and in the tag space.
+        liked, liked_w = self._liked()
+        text_score, text_sims, best = _knn_score(cand_M, self.eff_M[liked], liked_w)
+        tag_score, _, _ = _knn_score(self.tag_M[cand_indices], self.tag_M[liked], liked_w)
+        scores = 0.5 * _zscore(text_score) + 0.5 * _zscore(tag_score) - D_PENALTY * d_penalty
 
-        elif mode == "diverse":
-            base_scores = 0.5 * c_sims + 0.5 * s_peak_sims - 0.15 * d_penalty
-            selected = []
-            unselected = set(range(len(cand_indices)))
+        if mode == "diverse":
+            # Maximal marginal relevance: balance the score against the similarity to the shows already selected
+            span = float(scores.max() - scores.min())
+            base = (scores - scores.min()) / span if span > 1e-9 else np.zeros_like(scores)
             lambda_param = 0.65
-            limit = min(k, len(cand_indices))
-
-            for _ in range(limit):
+            selected: list[int] = []
+            unselected = set(range(len(cand_indices)))
+            for _ in range(min(k, len(cand_indices))):
                 if not selected:
-                    best = int(np.argmax(base_scores))
+                    pick = int(np.argmax(base))
                 else:
                     unsel_list = list(unselected)
-                    sel_M = cand_M[selected]
-                    sims_to_sel = (cand_M[unsel_list] @ sel_M.T).max(axis=1)
-                    mmr = lambda_param * base_scores[unsel_list] - (1.0 - lambda_param) * sims_to_sel
-                    best = unsel_list[int(np.argmax(mmr))]
-                selected.append(best)
-                unselected.remove(best)
-
-            out = []
-            for sel_idx in selected:
-                orig_idx = cand_indices[sel_idx]
-                sim_val = float(0.5 * c_sims[sel_idx] + 0.5 * s_peak_sims[sel_idx])
-                fav = self.rows[s_indices[s_best_idx[sel_idx]]]
-                fav_title = fav.get("title_native") or fav.get("title")
-                out.append(self._result(orig_idx, sim_val, seed=None, matched_favorite=fav_title))
-            return out
-
-        else: # "hybrid"
-            scores = 0.5 * c_sims + 0.5 * s_peak_sims - 0.15 * d_penalty
+                    sims_to_sel = (cand_M[unsel_list] @ cand_M[selected].T).max(axis=1)
+                    mmr = lambda_param * base[unsel_list] - (1.0 - lambda_param) * sims_to_sel
+                    pick = unsel_list[int(np.argmax(mmr))]
+                selected.append(pick)
+                unselected.remove(pick)
+            order = selected
+        else:
             order = np.argsort(-scores)[:k]
-            out = []
-            for rank in order:
-                orig_idx = cand_indices[rank]
-                sim_val = float(0.5 * c_sims[rank] + 0.5 * s_peak_sims[rank])
-                fav = self.rows[s_indices[s_best_idx[rank]]]
-                fav_title = fav.get("title_native") or fav.get("title")
-                out.append(self._result(orig_idx, sim_val, seed=None, matched_favorite=fav_title))
-            return out
+
+        return [self._result(cand_indices[j], float(text_sims[j]), seed=None,
+                             matched_favorite=self._favorite_title(liked[best[j]]))
+                for j in order]
+
+    def _favorite_title(self, i: int) -> str:
+        r = self.rows[i]
+        return r.get("title_native") or r.get("title")
+
+    def _liked(self) -> tuple[list[int], np.ndarray]:
+        """Return the indexes and the weights of the owned shows that describe what the user likes."""
+        liked = [i for i in self.owned_idx if self.weights.get(self.ids[i], 0.0) >= 1.0]
+        if liked:
+            return liked, np.array([self.weights[self.ids[i]] for i in liked], dtype=np.float32)
+        # No S, A or B ratings: use all owned shows except the disliked shows
+        liked = [i for i in self.owned_idx if self.rows[i].get("tier") not in ("C", "D")] or list(self.owned_idx)
+        return liked, np.ones(len(liked), dtype=np.float32)
+
+    def _tag_source(self, i: int) -> dict:
+        """Return the row that supplies the tags of row i. A library row uses its AniList counterpart."""
+        r = self.rows[i]
+        if r["source"] == "library":
+            for cp_id in self.counterparts.get(r["id"], []):
+                if cp_id in self.by_id:
+                    return self.by_id[cp_id]
+        return r
+
+    def _build_tag_matrix(self) -> np.ndarray:
+        """Build one TF-IDF vector for each row from its genres and its tags, weighted by tag rank."""
+        vocab: dict[str, int] = {}
+        feats: list[dict[int, float]] = []
+        for i in range(len(self.rows)):
+            r = self._tag_source(i)
+            ranks = r.get("tag_ranks") or []
+            f: dict[int, float] = {}
+            for k, t in enumerate(r.get("tags") or []):
+                rank = ranks[k] if k < len(ranks) and ranks[k] else 50
+                f[vocab.setdefault("t:" + t, len(vocab))] = rank / 100.0
+            for g in r.get("genres") or []:
+                f[vocab.setdefault("g:" + g, len(vocab))] = 1.0
+            feats.append(f)
+        T = np.zeros((len(self.rows), max(len(vocab), 1)), dtype=np.float32)
+        for i, f in enumerate(feats):
+            for col, val in f.items():
+                T[i, col] = val
+        # A tag that many shows have gives less information than a rare tag
+        df = (T > 0).sum(axis=0)
+        T *= (np.log((len(self.rows) + 1) / (df + 1)) + 1.0).astype(np.float32)
+        return T / np.clip(np.linalg.norm(T, axis=1, keepdims=True), 1e-9, None)
 
     def defining_shows(self, k: int = 15) -> list[dict]:
         c = self.taste_center()

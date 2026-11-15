@@ -284,3 +284,60 @@ def test_similarity_is_a_percentage(tmp_path):
     e, rows = make_engine(tmp_path)
     for r in e.similar_to("al:0", k=5):
         assert 0.0 <= r["similarity"] <= 100.0
+
+
+def _engine_from(tmp_path, specs):
+    """Build an engine from (id, vector, owned, tags, tag_ranks) tuples."""
+    from anime_vec.store import Store
+    s = Store(tmp_path / "x.db")
+    for rid, vec, owned, tags, ranks in specs:
+        s.upsert_rows([{"id": rid, "source": "anilist", "title": rid, "title_native": "",
+                        "year": 2020, "format": "tv", "genres": [], "tags": tags, "tag_ranks": ranks,
+                        "studios": [], "overview": "O", "score": 7.0, "owned": owned, "tmdbid": None,
+                        "anilist_id": int(rid.split(":")[1]), "poster": None}])
+        s.save_embedding(rid, np.array(vec, dtype=np.float32).tobytes())
+    return Engine(s)
+
+
+def test_hybrid_prefers_a_liked_group_to_the_gap_between_groups(tmp_path):
+    # Two groups of liked shows on different axes. The center is in the gap between them.
+    specs = []
+    for n in range(5):
+        specs.append((f"al:{n}", [1, 0.01 * n, 0, 0, 0, 0], 1, [], []))
+        specs.append((f"al:{5 + n}", [0, 0, 1, 0.01 * n, 0, 0], 1, [], []))
+    specs += [
+        ("al:20", [1, 0.025, 0, 0, 0, 0], 0, [], []),     # inside the first group
+        ("al:21", [0.5, 0, 0.5, 0, 0, 0], 0, [], []),     # in the gap
+        ("al:22", [0, 0, 0, 0, 1, 0], 0, [], []),
+        ("al:23", [0, 0, 0, 0, 0, 1], 0, [], []),
+        ("al:24", [0, 0, 0, 1, 0, 1], 0, [], []),
+    ]
+    e = _engine_from(tmp_path, specs)
+    assert e.recommend(k=1, mode="center")[0]["id"] == "al:21"
+    top = e.recommend(k=1, mode="hybrid")[0]
+    assert top["id"] == "al:20"
+    assert top["matched_favorite"] in {f"al:{n}" for n in range(5)}
+
+
+def test_hybrid_uses_tags_and_tag_ranks(tmp_path):
+    # al:10 and al:11 have the same embedding. Only al:10 shares the important tag of the liked show.
+    specs = [
+        ("al:1", [1, 0, 0, 0], 1, ["Band", "School"], [90, 20]),
+        ("al:10", [0, 1, 0, 0], 0, ["Band", "Mecha"], [90, 20]),
+        ("al:11", [0, 1, 0, 0], 0, ["Mecha", "School"], [90, 20]),
+        ("al:12", [0, 0, 1, 0], 0, ["Space"], [80]),
+        ("al:13", [0, 0, 0, 1], 0, ["Idol"], [80]),
+    ]
+    e = _engine_from(tmp_path, specs)
+    ids = [r["id"] for r in e.recommend(k=4, mode="hybrid")]
+    assert ids[0] == "al:10"
+    assert ids.index("al:10") < ids.index("al:11")
+
+
+def test_liked_shows_ignore_low_tiers(tmp_path):
+    e, rows = make_engine(tmp_path)
+    e.set_show_tier("al:0", "S")
+    e.set_show_tier("al:1", "C")
+    liked, w = e._liked()
+    assert [e.ids[i] for i in liked] == ["al:0"]
+    assert list(w) == [2.0]
