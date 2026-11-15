@@ -43,9 +43,110 @@ function card(r, why) {
       <div class="simbar" title="${simVal ?? 0}% match"><i style="width:${Math.max(0, Math.min(100, simVal ?? 0))}%"></i></div>
       <div class="m tagrow">${tagHtml}</div>
     </div>`;
-  d.onclick = () => useSeed(r);
+
+  const quick = document.createElement("button");
+  quick.className = "card-quick-seed";
+  quick.title = "Recommend like this";
+  quick.innerHTML = "✦";
+  quick.onclick = (e) => {
+    e.stopPropagation();
+    useSeed(r);
+  };
+  d.appendChild(quick);
+
+  d.onclick = () => openModal(r);
   return d;
 }
+
+let currentModalShow = null;
+
+function formatOverview(text) {
+  if (!text) return '<p style="color:var(--muted);font-style:italic;">No synopsis available.</p>';
+  return esc(text)
+    .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
+    .replace(/&lt;i&gt;/gi, "<i>")
+    .replace(/&lt;\/i&gt;/gi, "</i>")
+    .replace(/\n\n+/g, "<br><br>")
+    .replace(/\n/g, "<br>");
+}
+
+function openModal(r) {
+  currentModalShow = r;
+  const modal = $("#detail-modal");
+  const showNative = r.title_native && r.title_native.trim().toLowerCase() !== (r.title || "").trim().toLowerCase();
+  const simVal = r.similarity != null ? Math.round(r.similarity) : null;
+  const scoreVal = r.score != null ? Number(r.score).toFixed(1) : null;
+
+  const posterHtml = r.poster
+    ? `<img src="${esc(r.poster)}" loading="lazy" alt="${esc(r.title)}" onerror="this.style.display='none'; this.nextElementSibling.classList.add('show');">
+       <div class="poster-fallback" aria-hidden="true">${esc((r.title || "?")[0])}</div>`
+    : `<div class="poster-fallback show" aria-hidden="true">${esc((r.title || "?")[0])}</div>`;
+
+  const metaItems = [];
+  metaItems.push(r.owned ? '<span class="badge">owned</span>' : '<span class="badge badge-unowned">in pool</span>');
+  if (r.format) metaItems.push(`<span>${esc(r.format.toUpperCase())}</span>`);
+  if (r.year) metaItems.push(`<span>${r.year}</span>`);
+  if (r.genres && r.genres.length) metaItems.push(`<span>${esc(r.genres.slice(0, 3).join(", "))}</span>`);
+
+  const statItems = [];
+  if (scoreVal) statItems.push(`<span class="score">★ ${scoreVal}</span>`);
+  if (simVal != null) statItems.push(`<span class="affinity">${simVal}% taste match</span>`);
+
+  const tags = (r.tags || []).map((t, idx) => {
+    const rank = r.tag_ranks && r.tag_ranks[idx] ? `<span class="trank">${r.tag_ranks[idx]}%</span>` : "";
+    return `<span class="modal-tag">${esc(t)}${rank}</span>`;
+  }).join("");
+
+  const anilistLink = r.anilist_id
+    ? `<a href="https://anilist.co/anime/${r.anilist_id}" target="_blank" rel="noopener noreferrer" class="btn-action">AniList ↗</a>`
+    : "";
+
+  modal.innerHTML = `
+    <div class="modal-inner">
+      <button class="modal-close" onclick="closeModal()" aria-label="Close dialog">✕</button>
+      <div class="modal-head">
+        <div class="modal-poster poster-box">${posterHtml}</div>
+        <div class="modal-info">
+          <div class="modal-meta-row">${metaItems.join(" · ")}</div>
+          <h3 class="modal-title">${esc(r.title)}</h3>
+          ${showNative ? `<div class="modal-native">${esc(r.title_native)}</div>` : ""}
+          ${r.studios && r.studios.length ? `<div class="modal-studio">Studio: <b>${esc(r.studios.join(", "))}</b></div>` : ""}
+          <div class="modal-score-row">${statItems.join(" · ")}</div>
+          <div class="modal-actions">
+            <button class="btn-action primary" id="modal-find-sim">Find Similar</button>
+            <button class="btn-action" id="modal-seed-rec">Recommend Like This</button>
+            ${anilistLink}
+          </div>
+        </div>
+      </div>
+      <div class="modal-body">
+        <h4>Synopsis</h4>
+        <div class="modal-overview">${formatOverview(r.overview)}</div>
+        ${tags ? `<h4>Tags & Themes</h4><div class="modal-tags">${tags}</div>` : ""}
+      </div>
+    </div>`;
+
+  $("#modal-find-sim").onclick = () => {
+    closeModal();
+    runSimilar(r);
+    $('[data-tab="similar"]').click();
+  };
+  $("#modal-seed-rec").onclick = () => {
+    closeModal();
+    useSeed(r);
+  };
+
+  modal.showModal();
+}
+
+function closeModal() {
+  const m = $("#detail-modal");
+  if (m.open) m.close();
+}
+
+$("#detail-modal").onclick = (e) => {
+  if (e.target === $("#detail-modal")) closeModal();
+};
 
 async function profile() {
   const p = await (await fetch("/api/profile")).json();
