@@ -310,6 +310,24 @@ dialog#detail-modal::backdrop { background: rgba(20, 18, 16, 0.6); backdrop-filt
 .tier-summary-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
 .tier-summary-count { font-weight: 600; color: var(--text); }
 
+/* Ratings Tab */
+.ratings-head { margin-bottom: 24px; }
+.ratings-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
+.ratings-title-row h2 { margin: 0; }
+.ratings-filter-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px;
+}
+.pill-count {
+  font-size: 10.5px; opacity: 0.75; font-weight: 600; margin-left: 2px;
+}
+.tier-summary-item.clickable {
+  cursor: pointer; padding: 3px 6px; border-radius: 6px; transition: background .12s ease;
+}
+.tier-summary-item.clickable:hover {
+  background: var(--card);
+}
+
 /* Watched Tab */
 .watched-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
 .watched-head h2 { margin: 0; }
@@ -329,7 +347,7 @@ dialog#detail-modal::backdrop { background: rgba(20, 18, 16, 0.6); backdrop-filt
   .modal-head { flex-direction: column; align-items: center; text-align: center; }
   .modal-info { padding-right: 0; }
   .modal-meta-row, .modal-actions { justify-content: center; }
-  .recs-filter-row { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .recs-filter-row, .ratings-filter-bar { flex-direction: column; align-items: flex-start; gap: 10px; }
   .deck-card { flex-direction: column; padding: 16px; gap: 14px; }
   .deck-poster-wrap { width: 100px; height: 146px; margin: 0 auto; }
   .tier-buttons { grid-template-columns: repeat(5, 1fr); gap: 4px; }

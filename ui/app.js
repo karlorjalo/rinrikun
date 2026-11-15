@@ -296,6 +296,9 @@ async function setTier(r, tier) {
     if (!$("#tab-profile").hidden) {
       profile();
     }
+    if (!$("#tab-ratings").hidden) {
+      loadRatings();
+    }
   } catch (e) {
     console.error("Failed to set tier", e);
   }
@@ -319,6 +322,9 @@ async function clearTier(r) {
     }
     if (!$("#tab-profile").hidden) {
       profile();
+    }
+    if (!$("#tab-ratings").hidden) {
+      loadRatings();
     }
   } catch (e) {
     console.error("Failed to clear tier", e);
@@ -410,11 +416,11 @@ function renderProfile() {
             <span style="font-weight:400;color:var(--muted);font-size:12px;">S 2.0× · A 1.5× · B 1.0× · C 0.3× · D 0.0×</span>
           </div>
           <div class="tier-summary-row">
-            <div class="tier-summary-item"><span class="tier-pill tier-s">S</span> <span class="tier-summary-count">${p.tier_summary.S || 0}</span></div>
-            <div class="tier-summary-item"><span class="tier-pill tier-a">A</span> <span class="tier-summary-count">${p.tier_summary.A || 0}</span></div>
-            <div class="tier-summary-item"><span class="tier-pill tier-b">B</span> <span class="tier-summary-count">${p.tier_summary.B || 0}</span></div>
-            <div class="tier-summary-item"><span class="tier-pill tier-c">C</span> <span class="tier-summary-count">${p.tier_summary.C || 0}</span></div>
-            <div class="tier-summary-item"><span class="tier-pill tier-d">D</span> <span class="tier-summary-count">${p.tier_summary.D || 0}</span></div>
+            <div class="tier-summary-item clickable" data-filter-tier="S" title="View S tier ratings"><span class="tier-pill tier-s">S</span> <span class="tier-summary-count">${p.tier_summary.S || 0}</span></div>
+            <div class="tier-summary-item clickable" data-filter-tier="A" title="View A tier ratings"><span class="tier-pill tier-a">A</span> <span class="tier-summary-count">${p.tier_summary.A || 0}</span></div>
+            <div class="tier-summary-item clickable" data-filter-tier="B" title="View B tier ratings"><span class="tier-pill tier-b">B</span> <span class="tier-summary-count">${p.tier_summary.B || 0}</span></div>
+            <div class="tier-summary-item clickable" data-filter-tier="C" title="View C tier ratings"><span class="tier-pill tier-c">C</span> <span class="tier-summary-count">${p.tier_summary.C || 0}</span></div>
+            <div class="tier-summary-item clickable" data-filter-tier="D" title="View D tier ratings"><span class="tier-pill tier-d">D</span> <span class="tier-summary-count">${p.tier_summary.D || 0}</span></div>
             <div class="tier-summary-item" style="color:var(--muted);"><span style="font-size:11.5px;">Unrated:</span> <span class="tier-summary-count">${p.tier_summary.unrated || 0}</span></div>
           </div>
         </div>
@@ -433,6 +439,14 @@ function renderProfile() {
     </div>
     <div class="cards" id="profile-cards"></div>
   `;
+
+  el.querySelectorAll(".tier-summary-item[data-filter-tier]").forEach((btn) => {
+    btn.onclick = () => {
+      const tier = btn.dataset.filterTier;
+      ratingsTierFilter = tier;
+      document.querySelector('[data-tab="ratings"]').click();
+    };
+  });
 
   el.querySelectorAll(".chip-interactive").forEach((btn) => {
     btn.onclick = () => {
@@ -990,6 +1004,114 @@ function initReviewDeck() {
   });
 }
 
+let ratedShows = [];
+let ratingsTierFilter = "all";
+let ratingsSort = "tier";
+
+async function loadRatings() {
+  try {
+    const res = await (await fetch("/api/ratings")).json();
+    if (!Array.isArray(res)) return;
+    ratedShows = res;
+
+    const counts = { S: 0, A: 0, B: 0, C: 0, D: 0 };
+    ratedShows.forEach((s) => {
+      if (s.tier && counts[s.tier] !== undefined) counts[s.tier]++;
+    });
+
+    const badge = $("#ratings-count-badge");
+    if (badge) badge.textContent = `${ratedShows.length} ${ratedShows.length === 1 ? "show" : "shows"}`;
+
+    if ($("#count-tier-s")) $("#count-tier-s").textContent = counts.S;
+    if ($("#count-tier-a")) $("#count-tier-a").textContent = counts.A;
+    if ($("#count-tier-b")) $("#count-tier-b").textContent = counts.B;
+    if ($("#count-tier-c")) $("#count-tier-c").textContent = counts.C;
+    if ($("#count-tier-d")) $("#count-tier-d").textContent = counts.D;
+
+    document.querySelectorAll("#ratings-tier-pills .pill").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.tier === ratingsTierFilter);
+    });
+
+    renderRatingsGrid();
+  } catch (e) {
+    console.error("Failed to load ratings", e);
+  }
+}
+
+function renderRatingsGrid() {
+  const box = $("#ratings-grid");
+  if (!box) return;
+  box.innerHTML = "";
+
+  let filtered = ratedShows.filter((r) => {
+    if (ratingsTierFilter === "all") return true;
+    return r.tier === ratingsTierFilter;
+  });
+
+  const tierOrder = { S: 0, A: 1, B: 2, C: 3, D: 4 };
+  filtered.sort((a, b) => {
+    if (ratingsSort === "tier") {
+      const diff = (tierOrder[a.tier] ?? 99) - (tierOrder[b.tier] ?? 99);
+      if (diff !== 0) return diff;
+      return (b.similarity ?? 0) - (a.similarity ?? 0);
+    } else if (ratingsSort === "match") {
+      return (b.similarity ?? 0) - (a.similarity ?? 0);
+    } else if (ratingsSort === "score") {
+      return (b.score ?? 0) - (a.score ?? 0);
+    } else if (ratingsSort === "title") {
+      const aTitle = displayTitles(a).main;
+      const bTitle = displayTitles(b).main;
+      return aTitle.localeCompare(bTitle);
+    }
+    return 0;
+  });
+
+  if (!filtered.length) {
+    if (!ratedShows.length) {
+      box.innerHTML = `
+        <div style="grid-column:1/-1;text-align:center;padding:48px 20px;color:var(--muted);">
+          <div style="font-size:32px;margin-bottom:8px;">★</div>
+          <h3 style="font-family:var(--serif);font-size:18px;margin:0 0 6px;color:var(--text);">No ratings yet</h3>
+          <p style="font-size:13.5px;margin:0 0 16px;">Head over to the Review deck or click any show to assign a tier.</p>
+          <button class="btn-action primary" id="ratings-go-review">Go to Review →</button>
+        </div>`;
+      const btn = $("#ratings-go-review");
+      if (btn) btn.onclick = () => $('[data-tab="review"]').click();
+    } else {
+      box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 0;">No shows rated in Tier ${esc(ratingsTierFilter)}.</p>`;
+    }
+    return;
+  }
+
+  filtered.forEach((r) => box.appendChild(card(r)));
+}
+
+function initRatingsControls() {
+  const tPills = $("#ratings-tier-pills");
+  if (tPills) {
+    tPills.querySelectorAll(".pill").forEach((btn) => {
+      btn.onclick = () => {
+        ratingsTierFilter = btn.dataset.tier;
+        tPills.querySelectorAll(".pill").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        renderRatingsGrid();
+      };
+    });
+  }
+
+  const sPills = $("#ratings-sort-pills");
+  if (sPills) {
+    sPills.querySelectorAll(".pill").forEach((btn) => {
+      btn.onclick = () => {
+        ratingsSort = btn.dataset.sort;
+        sPills.querySelectorAll(".pill").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        renderRatingsGrid();
+      };
+    });
+  }
+}
+
 document.querySelectorAll("nav button").forEach((b) => {
   b.onclick = () => {
     document.querySelectorAll("nav button").forEach((x) => x.classList.remove("on"));
@@ -997,6 +1119,7 @@ document.querySelectorAll("nav button").forEach((b) => {
     for (const s of document.querySelectorAll("main section")) s.hidden = true;
     $(`#tab-${b.dataset.tab}`).hidden = false;
     if (b.dataset.tab === "review") loadReviewQueue();
+    if (b.dataset.tab === "ratings") loadRatings();
     if (b.dataset.tab === "recs") recs();
     if (b.dataset.tab === "watched") watched();
     if (b.dataset.tab === "profile") profile();
@@ -1007,6 +1130,7 @@ profile();
 initSearch();
 initRecsFilters();
 initReviewDeck();
+initRatingsControls();
 
 const THEME_KEY = "rinrikun-theme";
 const SUN = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';

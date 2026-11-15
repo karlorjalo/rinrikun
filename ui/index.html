@@ -32,6 +32,7 @@
   <nav>
     <button data-tab="profile" class="on">Profile</button>
     <button data-tab="review">Review</button>
+    <button data-tab="ratings">Ratings</button>
     <button data-tab="similar">Similar</button>
     <button data-tab="recs">Recommendations</button>
     <button data-tab="watched">Watched</button>
@@ -66,6 +67,37 @@
         <button class="btn-action" id="deck-skip" title="Space or →">Skip →</button>
       </div>
     </div>
+  </section>
+  <section id="tab-ratings" hidden>
+    <div class="ratings-head">
+      <div class="ratings-title-row">
+        <h2>Ratings</h2>
+        <div class="watched-count-badge" id="ratings-count-badge">0 rated</div>
+      </div>
+      <div class="ratings-filter-bar">
+        <div class="filter-group">
+          <span class="filter-label">Tier:</span>
+          <div class="filter-pills" id="ratings-tier-pills">
+            <button class="pill active" data-tier="all">All</button>
+            <button class="pill" data-tier="S">S <span class="pill-count" id="count-tier-s">0</span></button>
+            <button class="pill" data-tier="A">A <span class="pill-count" id="count-tier-a">0</span></button>
+            <button class="pill" data-tier="B">B <span class="pill-count" id="count-tier-b">0</span></button>
+            <button class="pill" data-tier="C">C <span class="pill-count" id="count-tier-c">0</span></button>
+            <button class="pill" data-tier="D">D <span class="pill-count" id="count-tier-d">0</span></button>
+          </div>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Sort:</span>
+          <div class="filter-pills" id="ratings-sort-pills">
+            <button class="pill active" data-sort="tier">Tier</button>
+            <button class="pill" data-sort="match">Match</button>
+            <button class="pill" data-sort="score">Score</button>
+            <button class="pill" data-sort="title">Title</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="cards" id="ratings-grid"></div>
   </section>
   <section id="tab-similar" hidden>
     <div class="search-wrap">
