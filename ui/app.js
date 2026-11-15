@@ -748,6 +748,12 @@ async function loadReviewQueue() {
   try {
     const unratedOnly = reviewFilter === "unrated";
     const res = await (await fetch(`/api/review-queue?unrated_only=${unratedOnly}`)).json();
+    if (!Array.isArray(res)) {
+      console.error("Failed to load review queue:", res);
+      const wrap = $("#deck-wrap");
+      if (wrap) wrap.innerHTML = `<p style="text-align:center;color:var(--muted);padding:40px 0;">Failed to load review queue. Please ensure the server is updated and running.</p>`;
+      return;
+    }
     reviewQueue = res;
     reviewIndex = 0;
     reviewUndoStack = [];
