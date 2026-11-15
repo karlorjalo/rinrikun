@@ -1,13 +1,29 @@
 const $ = (s) => document.querySelector(s);
 const esc = (s) => (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+function displayTitles(r) {
+  const native = (r.title_native || "").trim();
+  const romaji = (r.title || "").trim();
+  if (native) {
+    const isDiff = romaji && romaji.toLowerCase() !== native.toLowerCase();
+    return {
+      main: native,
+      sub: isDiff ? romaji : null
+    };
+  }
+  return {
+    main: romaji || "Unknown",
+    sub: null
+  };
+}
+
 function card(r, why) {
   const d = document.createElement("div");
   d.className = "card";
 
-  const showNative = r.title_native && r.title_native.trim().toLowerCase() !== (r.title || "").trim().toLowerCase();
+  const { main, sub } = displayTitles(r);
   const metaParts = [];
-  if (showNative) metaParts.push(esc(r.title_native));
+  if (sub) metaParts.push(esc(sub));
   if (r.year) metaParts.push(r.year);
   if (r.genres && r.genres.length) metaParts.push(esc(r.genres.slice(0, 2).join(", ")));
 
@@ -28,9 +44,9 @@ function card(r, why) {
   }
 
   const posterHtml = r.poster
-    ? `<img src="${esc(r.poster)}" loading="lazy" alt="${esc(r.title)}" onerror="this.style.display='none'; this.nextElementSibling.classList.add('show');">
-       <div class="poster-fallback" aria-hidden="true">${esc((r.title || "?")[0])}</div>`
-    : `<div class="poster-fallback show" aria-hidden="true">${esc((r.title || "?")[0])}</div>`;
+    ? `<img src="${esc(r.poster)}" loading="lazy" alt="${esc(main)}" onerror="this.style.display='none'; this.nextElementSibling.classList.add('show');">
+       <div class="poster-fallback" aria-hidden="true">${esc(main[0] || "?")}</div>`
+    : `<div class="poster-fallback show" aria-hidden="true">${esc(main[0] || "?")}</div>`;
 
   let badgeHtml = "";
   if (r.manual_watched) {
@@ -44,7 +60,7 @@ function card(r, why) {
       ${posterHtml}
     </div>
     <div class="card-content">
-      <div class="t">${esc(r.title)} ${badgeHtml}</div>
+      <div class="t">${esc(main)} ${badgeHtml}</div>
       <div class="m submeta">${metaParts.join(" · ")}</div>
       <div class="m stats">${statParts.join(" · ")}</div>
       <div class="simbar" title="${simVal ?? 0}% match"><i style="width:${Math.max(0, Math.min(100, simVal ?? 0))}%"></i></div>
@@ -86,14 +102,14 @@ async function openModal(r) {
   }
   currentModalShow = r;
   const modal = $("#detail-modal");
-  const showNative = r.title_native && r.title_native.trim().toLowerCase() !== (r.title || "").trim().toLowerCase();
+  const { main, sub } = displayTitles(r);
   const simVal = r.similarity != null ? Math.round(r.similarity) : null;
   const scoreVal = r.score != null ? Number(r.score).toFixed(1) : null;
 
   const posterHtml = r.poster
-    ? `<img src="${esc(r.poster)}" loading="lazy" alt="${esc(r.title)}" onerror="this.style.display='none'; this.nextElementSibling.classList.add('show');">
-       <div class="poster-fallback" aria-hidden="true">${esc((r.title || "?")[0])}</div>`
-    : `<div class="poster-fallback show" aria-hidden="true">${esc((r.title || "?")[0])}</div>`;
+    ? `<img src="${esc(r.poster)}" loading="lazy" alt="${esc(main)}" onerror="this.style.display='none'; this.nextElementSibling.classList.add('show');">
+       <div class="poster-fallback" aria-hidden="true">${esc(main[0] || "?")}</div>`
+    : `<div class="poster-fallback show" aria-hidden="true">${esc(main[0] || "?")}</div>`;
 
   const metaItems = [];
   if (r.source === "library" || (r.owned && !r.manual_watched)) {
@@ -134,8 +150,8 @@ async function openModal(r) {
         <div class="modal-poster poster-box">${posterHtml}</div>
         <div class="modal-info">
           <div class="modal-meta-row">${metaItems.join(" · ")}</div>
-          <h3 class="modal-title">${esc(r.title)}</h3>
-          ${showNative ? `<div class="modal-native">${esc(r.title_native)}</div>` : ""}
+          <h3 class="modal-title">${esc(main)}</h3>
+          ${sub ? `<div class="modal-native">${esc(sub)}</div>` : ""}
           ${r.studios && r.studios.length ? `<div class="modal-studio">Studio: <b>${esc(r.studios.join(", "))}</b></div>` : ""}
           <div class="modal-score-row">${statItems.join(" · ")}</div>
           <div class="modal-actions">
@@ -326,11 +342,11 @@ async function initSearch() {
   const qClear = $("#q-clear");
 
   // Populate suggestions in empty state
-  const ownedSample = titles.filter((t) => t.owned && t.title);
+  const ownedSample = titles.filter((t) => t.owned && (t.title_native || t.title));
   const shuffled = ownedSample.sort(() => 0.5 - Math.random()).slice(0, 5);
   const suggBox = $("#similar-suggestions");
   if (suggBox) {
-    suggBox.innerHTML = shuffled.map((t) => `<button class="suggestion-chip">${esc(t.title)}</button>`).join("");
+    suggBox.innerHTML = shuffled.map((t) => `<button class="suggestion-chip">${esc(displayTitles(t).main)}</button>`).join("");
     suggBox.querySelectorAll("button").forEach((btn, idx) => {
       btn.onclick = () => {
         runSimilar(shuffled[idx]);
@@ -351,8 +367,10 @@ async function initSearch() {
       item.className = "qitem";
       item.dataset.idx = i;
 
-      const showNative = t.title_native && t.title_native.trim().toLowerCase() !== (t.title || "").trim().toLowerCase();
-      const sub = [showNative ? esc(t.title_native) : null, t.year || null].filter(Boolean).join(" · ");
+      const { main, sub } = displayTitles(t);
+      const subParts = [];
+      if (sub) subParts.push(esc(sub));
+      if (t.year) subParts.push(t.year);
 
       let badge = "";
       if (t.manual_watched) {
@@ -363,14 +381,14 @@ async function initSearch() {
 
       const thumbHtml = t.poster
         ? `<img src="${esc(t.poster)}" alt="" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-           <div class="qitem-fallback" style="display:none;">${esc((t.title || "?")[0])}</div>`
-        : `<div class="qitem-fallback">${esc((t.title || "?")[0])}</div>`;
+           <div class="qitem-fallback" style="display:none;">${esc(main[0] || "?")}</div>`
+        : `<div class="qitem-fallback">${esc(main[0] || "?")}</div>`;
 
       item.innerHTML = `
         <div class="qitem-thumb">${thumbHtml}</div>
         <div class="qitem-info">
-          <div class="qitem-title">${esc(t.title)} ${badge}</div>
-          ${sub ? `<div class="qitem-sub">${sub}</div>` : ""}
+          <div class="qitem-title">${esc(main)} ${badge}</div>
+          ${subParts.length ? `<div class="qitem-sub">${subParts.join(" · ")}</div>` : ""}
         </div>`;
 
       item.onclick = () => {
@@ -456,8 +474,9 @@ async function initSearch() {
 
 async function runSimilar(t) {
   currentSimilarShow = t;
+  const { main } = displayTitles(t);
   $("#qlist").hidden = true;
-  $("#q").value = t.title;
+  $("#q").value = main;
   $("#q-clear").hidden = false;
 
   const empty = $("#similar-empty");
@@ -470,7 +489,7 @@ async function runSimilar(t) {
     header.innerHTML = `
       <div class="result-seed-bar">
         <div class="seed-info">
-          <h3 class="seed-title">${esc(t.title)} ${simBadge}</h3>
+          <h3 class="seed-title">${esc(main)} ${simBadge}</h3>
         </div>
         <div class="seed-actions">
           <button class="btn-action" id="sim-view-details">Details</button>
@@ -499,11 +518,12 @@ function renderRecsSeedBar() {
   const bar = $("#recs-seed-bar");
   if (!bar) return;
   if (seed) {
+    const { main } = displayTitles(seed);
     bar.innerHTML = `
       <div class="recs-seed-card">
         <div class="recs-seed-left">
           <span class="seed-badge">Seed</span>
-          <span class="seed-text"><b>${esc(seed.title)}</b></span>
+          <span class="seed-text"><b>${esc(main)}</b></span>
         </div>
         <button id="recenter-btn" class="btn-action">Reset to center ↺</button>
       </div>`;
