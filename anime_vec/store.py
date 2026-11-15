@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS watched_manual (
 
 class Store:
     def __init__(self, path):
-        self.con = sqlite3.connect(str(path))
+        self.con = sqlite3.connect(str(path), check_same_thread=False)
         self.con.executescript(SCHEMA)
 
     def get_manual_watched_ids(self) -> set[str]:
