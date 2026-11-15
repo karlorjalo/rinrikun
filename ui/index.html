@@ -31,6 +31,7 @@
   </div>
   <nav>
     <button data-tab="profile" class="on">Profile</button>
+    <button data-tab="review">Review</button>
     <button data-tab="similar">Similar</button>
     <button data-tab="recs">Recommendations</button>
     <button data-tab="watched">Watched</button>
@@ -38,6 +39,34 @@
 </header>
 <main>
   <section id="tab-profile"></section>
+  <section id="tab-review" hidden>
+    <div class="deck-top">
+      <div class="deck-title-row">
+        <h2>Library review</h2>
+        <div class="deck-progress" id="deck-progress">0 rated</div>
+      </div>
+      <div class="deck-filter-row">
+        <button class="pill active" id="deck-filter-unrated" data-filter="unrated">Unrated only</button>
+        <button class="pill" id="deck-filter-all" data-filter="all">All watched</button>
+      </div>
+    </div>
+
+    <div id="deck-wrap"></div>
+
+    <div class="deck-controls">
+      <div class="tier-buttons">
+        <button class="btn-tier tier-s" data-tier="S"><span class="tier-key">S / 1</span><span class="tier-label">Masterpiece</span><span class="tier-mult">2.0×</span></button>
+        <button class="btn-tier tier-a" data-tier="A"><span class="tier-key">A / 2</span><span class="tier-label">Favorite</span><span class="tier-mult">1.5×</span></button>
+        <button class="btn-tier tier-b" data-tier="B"><span class="tier-key">B / 3</span><span class="tier-label">Liked</span><span class="tier-mult">1.0×</span></button>
+        <button class="btn-tier tier-c" data-tier="C"><span class="tier-key">C / 4</span><span class="tier-label">Meh</span><span class="tier-mult">0.3×</span></button>
+        <button class="btn-tier tier-d" data-tier="D"><span class="tier-key">D / 5</span><span class="tier-label">Disliked</span><span class="tier-mult">0.0×</span></button>
+      </div>
+      <div class="deck-nav-buttons">
+        <button class="btn-action" id="deck-undo" title="Backspace or ←">↺ Undo</button>
+        <button class="btn-action" id="deck-skip" title="Space or →">Skip →</button>
+      </div>
+    </div>
+  </section>
   <section id="tab-similar" hidden>
     <div class="search-wrap">
       <div class="search-bar">

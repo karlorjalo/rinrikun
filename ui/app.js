@@ -20,6 +20,7 @@ function displayTitles(r) {
 function card(r, why) {
   const d = document.createElement("div");
   d.className = "card";
+  d.dataset.id = r.id;
 
   const { main, sub } = displayTitles(r);
   const metaParts = [];
@@ -55,12 +56,17 @@ function card(r, why) {
     badgeHtml = '<span class="badge">owned</span>';
   }
 
+  let tierHtml = "";
+  if (r.tier) {
+    tierHtml = `<span class="tier-pill tier-${r.tier.toLowerCase()}" title="Tier ${r.tier}">${r.tier}</span>`;
+  }
+
   d.innerHTML = `
     <div class="poster-box">
       ${posterHtml}
     </div>
     <div class="card-content">
-      <div class="t">${esc(main)} ${badgeHtml}</div>
+      <div class="t">${esc(main)} ${tierHtml} ${badgeHtml}</div>
       <div class="m submeta">${metaParts.join(" · ")}</div>
       <div class="m stats">${statParts.join(" · ")}</div>
       <div class="simbar" title="${simVal ?? 0}% match"><i style="width:${Math.max(0, Math.min(100, simVal ?? 0))}%"></i></div>
@@ -143,6 +149,31 @@ async function openModal(r) {
          ${r.manual_watched ? '✓ Watched · Remove' : '+ Add to Watched'}
        </button>`;
 
+  const tierOptions = [
+    { t: "S", w: "2.0×" },
+    { t: "A", w: "1.5×" },
+    { t: "B", w: "1.0×" },
+    { t: "C", w: "0.3×" },
+    { t: "D", w: "0.0×" },
+  ];
+  const tierPills = tierOptions.map(({ t, w }) => {
+    const active = r.tier === t ? "active" : "";
+    return `<button class="btn-modal-tier tier-${t.toLowerCase()} ${active}" data-tier="${t}">${t} ${w}</button>`;
+  }).join("");
+
+  const clearTierBtn = r.tier
+    ? `<button class="btn-modal-tier tier-clear" id="modal-clear-tier">Clear</button>`
+    : "";
+
+  const tierSection = `
+    <div class="modal-tier-section">
+      <span class="modal-tier-label">Preference tier:</span>
+      <div class="modal-tier-pills">
+        ${tierPills}
+        ${clearTierBtn}
+      </div>
+    </div>`;
+
   modal.innerHTML = `
     <div class="modal-inner">
       <button class="modal-close" onclick="closeModal()" aria-label="Close dialog">✕</button>
@@ -160,6 +191,7 @@ async function openModal(r) {
             ${watchedBtn}
             ${anilistLink}
           </div>
+          ${tierSection}
         </div>
       </div>
       <div class="modal-body">
@@ -168,6 +200,20 @@ async function openModal(r) {
         ${tags ? `<h4>Tags</h4><div class="modal-tags">${tags}</div>` : ""}
       </div>
     </div>`;
+
+  modal.querySelectorAll(".btn-modal-tier[data-tier]").forEach((btn) => {
+    btn.onclick = async () => {
+      const tier = btn.dataset.tier;
+      await setTier(r, tier);
+      openModal(r);
+    };
+  });
+  if ($("#modal-clear-tier")) {
+    $("#modal-clear-tier").onclick = async () => {
+      await clearTier(r);
+      openModal(r);
+    };
+  }
 
   if ($("#modal-toggle-watched")) {
     $("#modal-toggle-watched").onclick = async () => {
@@ -212,6 +258,70 @@ async function toggleWatched(r, next) {
     }
   } catch (e) {
     console.error("Failed to toggle watched status", e);
+  }
+}
+
+async function setTier(r, tier) {
+  try {
+    await fetch("/api/weights", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: r.id, tier: tier })
+    });
+    r.tier = tier;
+    const t = titles.find((x) => x.id === r.id);
+    if (t) t.tier = tier;
+    document.querySelectorAll(`.card[data-id="${r.id}"]`).forEach((c) => {
+      const tEl = c.querySelector(".t");
+      if (tEl) {
+        let pill = tEl.querySelector(".tier-pill");
+        if (!pill) {
+          pill = document.createElement("span");
+          tEl.insertBefore(pill, tEl.querySelector(".badge") || null);
+        }
+        pill.className = `tier-pill tier-${tier.toLowerCase()}`;
+        pill.title = `Tier ${tier}`;
+        pill.textContent = tier;
+      }
+    });
+    if (typeof reviewQueue !== "undefined" && reviewQueue[reviewIndex] && reviewQueue[reviewIndex].id === r.id) {
+      reviewQueue[reviewIndex].tier = tier;
+      if (typeof updateActiveTierButton === "function") updateActiveTierButton(tier);
+      const wrapPill = document.querySelector("#deck-wrap .tier-pill");
+      if (wrapPill) {
+        wrapPill.className = `tier-pill tier-${tier.toLowerCase()}`;
+        wrapPill.textContent = tier;
+      }
+    }
+    if (!$("#tab-profile").hidden) {
+      profile();
+    }
+  } catch (e) {
+    console.error("Failed to set tier", e);
+  }
+}
+
+async function clearTier(r) {
+  try {
+    await fetch(`/api/weights?id=${encodeURIComponent(r.id)}`, { method: "DELETE" });
+    r.tier = null;
+    const t = titles.find((x) => x.id === r.id);
+    if (t) t.tier = null;
+    document.querySelectorAll(`.card[data-id="${r.id}"]`).forEach((c) => {
+      const pill = c.querySelector(".tier-pill");
+      if (pill) pill.remove();
+    });
+    if (typeof reviewQueue !== "undefined" && reviewQueue[reviewIndex] && reviewQueue[reviewIndex].id === r.id) {
+      reviewQueue[reviewIndex].tier = null;
+      if (typeof updateActiveTierButton === "function") updateActiveTierButton(null);
+      const wrapPill = document.querySelector("#deck-wrap .tier-pill");
+      if (wrapPill) wrapPill.remove();
+    }
+    if (!$("#tab-profile").hidden) {
+      profile();
+    }
+  } catch (e) {
+    console.error("Failed to clear tier", e);
   }
 }
 
@@ -290,6 +400,23 @@ function renderProfile() {
               ${esc(g)} <b>${c}</b>
             </button>
           `).join("")}
+        </div>
+      ` : ""}
+
+      ${p.tier_summary ? `
+        <div class="tier-summary-box">
+          <div class="tier-summary-title">
+            <span>Preference distribution</span>
+            <span style="font-weight:400;color:var(--muted);font-size:12px;">S 2.0× · A 1.5× · B 1.0× · C 0.3× · D 0.0×</span>
+          </div>
+          <div class="tier-summary-row">
+            <div class="tier-summary-item"><span class="tier-pill tier-s">S</span> <span class="tier-summary-count">${p.tier_summary.S || 0}</span></div>
+            <div class="tier-summary-item"><span class="tier-pill tier-a">A</span> <span class="tier-summary-count">${p.tier_summary.A || 0}</span></div>
+            <div class="tier-summary-item"><span class="tier-pill tier-b">B</span> <span class="tier-summary-count">${p.tier_summary.B || 0}</span></div>
+            <div class="tier-summary-item"><span class="tier-pill tier-c">C</span> <span class="tier-summary-count">${p.tier_summary.C || 0}</span></div>
+            <div class="tier-summary-item"><span class="tier-pill tier-d">D</span> <span class="tier-summary-count">${p.tier_summary.D || 0}</span></div>
+            <div class="tier-summary-item" style="color:var(--muted);"><span style="font-size:11.5px;">Unrated:</span> <span class="tier-summary-count">${p.tier_summary.unrated || 0}</span></div>
+          </div>
         </div>
       ` : ""}
     </div>
@@ -610,12 +737,259 @@ async function watched() {
   });
 }
 
+let reviewQueue = [];
+let reviewIndex = 0;
+let reviewFilter = "unrated";
+let reviewUndoStack = [];
+let totalWatchedCount = 0;
+let totalRatedCount = 0;
+
+async function loadReviewQueue() {
+  try {
+    const unratedOnly = reviewFilter === "unrated";
+    const res = await (await fetch(`/api/review-queue?unrated_only=${unratedOnly}`)).json();
+    reviewQueue = res;
+    reviewIndex = 0;
+    reviewUndoStack = [];
+
+    const prof = await (await fetch("/api/profile")).json();
+    if (prof && prof.tier_summary) {
+      const s = prof.tier_summary;
+      totalRatedCount = (s.S || 0) + (s.A || 0) + (s.B || 0) + (s.C || 0) + (s.D || 0);
+      totalWatchedCount = totalRatedCount + (s.unrated || 0);
+    }
+    updateDeckProgress();
+    renderDeckCard();
+  } catch (e) {
+    console.error("Failed to load review queue", e);
+  }
+}
+
+function updateDeckProgress() {
+  const p = $("#deck-progress");
+  if (!p) return;
+  if (totalWatchedCount > 0) {
+    p.textContent = `${totalRatedCount} of ${totalWatchedCount} rated`;
+  } else {
+    p.textContent = `${reviewQueue.length} shows`;
+  }
+}
+
+function updateActiveTierButton(tier) {
+  document.querySelectorAll(".btn-tier").forEach((b) => {
+    if (tier && b.dataset.tier === tier) {
+      b.classList.add("active");
+    } else {
+      b.classList.remove("active");
+    }
+  });
+}
+
+function renderDeckCard() {
+  const wrap = $("#deck-wrap");
+  if (!wrap) return;
+
+  if (!reviewQueue.length || reviewIndex >= reviewQueue.length) {
+    wrap.innerHTML = `
+      <div class="deck-card" style="align-items:center;justify-content:center;text-align:center;padding:48px 24px;">
+        <div style="max-width:380px;">
+          <div style="font-size:36px;margin-bottom:12px;">🎉</div>
+          <h3 style="font-family:var(--serif);font-size:20px;margin:0 0 8px;">All caught up</h3>
+          <p style="color:var(--muted);font-size:14px;margin:0 0 20px;">
+            ${reviewFilter === "unrated" ? "You have reviewed all unrated watched shows." : "You have reached the end of the review queue."}
+          </p>
+          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+            ${reviewFilter === "unrated" ? '<button class="btn-action" id="deck-review-all-btn">Review all watched</button>' : ''}
+            <button class="btn-action primary" id="deck-view-profile-btn">View taste profile</button>
+          </div>
+        </div>
+      </div>`;
+
+    if ($("#deck-review-all-btn")) {
+      $("#deck-review-all-btn").onclick = () => setReviewFilter("all");
+    }
+    if ($("#deck-view-profile-btn")) {
+      $("#deck-view-profile-btn").onclick = () => $('[data-tab="profile"]').click();
+    }
+    updateActiveTierButton(null);
+    return;
+  }
+
+  const show = reviewQueue[reviewIndex];
+  const { main, sub } = displayTitles(show);
+  const scoreVal = show.score != null ? Number(show.score).toFixed(1) : null;
+  const tierBadge = show.tier ? `<span class="tier-pill tier-${show.tier.toLowerCase()}">${show.tier}</span>` : "";
+
+  const posterHtml = show.poster
+    ? `<img src="${esc(show.poster)}" alt="${esc(main)}" onerror="this.style.display='none'; this.nextElementSibling.classList.add('show');">
+       <div class="poster-fallback" aria-hidden="true">${esc(main[0] || "?")}</div>`
+    : `<div class="poster-fallback show" aria-hidden="true">${esc(main[0] || "?")}</div>`;
+
+  const metaItems = [];
+  if (show.format) metaItems.push(esc(show.format.toUpperCase()));
+  if (show.year) metaItems.push(show.year);
+  if (show.studios && show.studios.length) metaItems.push(`Studio: <b>${esc(show.studios.slice(0, 2).join(", "))}</b>`);
+  if (scoreVal) metaItems.push(`★ ${scoreVal}`);
+
+  const tagsHtml = (show.tags || []).slice(0, 5).map(t => `<span class="chip">${esc(t)}</span>`).join("");
+
+  wrap.innerHTML = `
+    <div class="deck-card">
+      <div class="deck-poster-wrap poster-box">
+        ${posterHtml}
+      </div>
+      <div class="deck-info">
+        <div class="deck-meta-top">
+          <span>${show.source === "library" ? "Local library" : "Watched"}</span>
+          <div style="display:flex;align-items:center;gap:6px;">
+            ${tierBadge}
+            <span style="font-size:11.5px;color:var(--muted);">${reviewIndex + 1} / ${reviewQueue.length}</span>
+          </div>
+        </div>
+        <h3 class="deck-title">${esc(main)}</h3>
+        ${sub ? `<div class="deck-sub">${esc(sub)}</div>` : ""}
+        <div class="deck-meta-details">${metaItems.join(" · ")}</div>
+        <div class="deck-synopsis">${formatOverview(show.overview)}</div>
+        ${tagsHtml ? `<div class="deck-tags">${tagsHtml}</div>` : ""}
+        <div class="deck-bottom-actions">
+          <button class="btn-action" id="deck-card-details">Details</button>
+        </div>
+      </div>
+    </div>`;
+
+  $("#deck-card-details").onclick = () => openModal(show);
+  updateActiveTierButton(show.tier);
+}
+
+async function rateReviewShow(tier) {
+  if (!reviewQueue.length || reviewIndex >= reviewQueue.length) return;
+  const show = reviewQueue[reviewIndex];
+  const prevTier = show.tier || null;
+
+  reviewUndoStack.push({ show, prevTier });
+  const wasUnrated = !prevTier;
+  show.tier = tier;
+
+  if (wasUnrated) totalRatedCount++;
+
+  const t = titles.find(x => x.id === show.id);
+  if (t) t.tier = tier;
+
+  try {
+    await fetch("/api/weights", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: show.id, tier })
+    });
+  } catch (e) {
+    console.error("Failed to rate review show", e);
+  }
+
+  reviewIndex++;
+  updateDeckProgress();
+  renderDeckCard();
+}
+
+async function undoReview() {
+  if (!reviewUndoStack.length) return;
+  const last = reviewUndoStack.pop();
+  const show = last.show;
+  const wasRated = !!show.tier;
+  const revertedToUnrated = !last.prevTier;
+
+  show.tier = last.prevTier;
+  if (wasRated && revertedToUnrated && totalRatedCount > 0) totalRatedCount--;
+
+  const t = titles.find(x => x.id === show.id);
+  if (t) t.tier = last.prevTier;
+
+  try {
+    if (last.prevTier) {
+      await fetch("/api/weights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: show.id, tier: last.prevTier })
+      });
+    } else {
+      await fetch(`/api/weights?id=${encodeURIComponent(show.id)}`, { method: "DELETE" });
+    }
+  } catch (e) {
+    console.error("Failed to undo review show", e);
+  }
+
+  if (reviewIndex > 0) reviewIndex--;
+  updateDeckProgress();
+  renderDeckCard();
+}
+
+function skipReview() {
+  if (reviewIndex < reviewQueue.length) {
+    reviewIndex++;
+    updateDeckProgress();
+    renderDeckCard();
+  }
+}
+
+function setReviewFilter(filter) {
+  reviewFilter = filter;
+  $("#deck-filter-unrated").classList.toggle("active", filter === "unrated");
+  $("#deck-filter-all").classList.toggle("active", filter === "all");
+  loadReviewQueue();
+}
+
+function initReviewDeck() {
+  $("#deck-filter-unrated").onclick = () => setReviewFilter("unrated");
+  $("#deck-filter-all").onclick = () => setReviewFilter("all");
+
+  document.querySelectorAll(".btn-tier").forEach((btn) => {
+    btn.onclick = () => {
+      const tier = btn.dataset.tier;
+      rateReviewShow(tier);
+    };
+  });
+
+  $("#deck-undo").onclick = () => undoReview();
+  $("#deck-skip").onclick = () => skipReview();
+
+  document.addEventListener("keydown", (e) => {
+    if ($("#tab-review").hidden) return;
+    if ($("#detail-modal").open) return;
+    const tag = (document.activeElement && document.activeElement.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+    const key = e.key.toUpperCase();
+    if (key === "1" || key === "S") {
+      e.preventDefault();
+      rateReviewShow("S");
+    } else if (key === "2" || key === "A") {
+      e.preventDefault();
+      rateReviewShow("A");
+    } else if (key === "3" || key === "B") {
+      e.preventDefault();
+      rateReviewShow("B");
+    } else if (key === "4" || key === "C") {
+      e.preventDefault();
+      rateReviewShow("C");
+    } else if (key === "5" || key === "D") {
+      e.preventDefault();
+      rateReviewShow("D");
+    } else if (e.key === "Backspace" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      undoReview();
+    } else if (e.key === " " || e.key === "ArrowRight") {
+      e.preventDefault();
+      skipReview();
+    }
+  });
+}
+
 document.querySelectorAll("nav button").forEach((b) => {
   b.onclick = () => {
     document.querySelectorAll("nav button").forEach((x) => x.classList.remove("on"));
     b.classList.add("on");
     for (const s of document.querySelectorAll("main section")) s.hidden = true;
     $(`#tab-${b.dataset.tab}`).hidden = false;
+    if (b.dataset.tab === "review") loadReviewQueue();
     if (b.dataset.tab === "recs") recs();
     if (b.dataset.tab === "watched") watched();
     if (b.dataset.tab === "profile") profile();
@@ -625,6 +999,7 @@ document.querySelectorAll("nav button").forEach((b) => {
 profile();
 initSearch();
 initRecsFilters();
+initReviewDeck();
 
 const THEME_KEY = "rinrikun-theme";
 const SUN = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
