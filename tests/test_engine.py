@@ -78,3 +78,11 @@ def test_unknown_id_raises(tmp_path):
     e, rows = make_engine(tmp_path)
     with pytest.raises(ValueError):
         e.similar_to("al:999", k=1)
+
+
+def test_genre_and_era_summaries(tmp_path):
+    e, rows = make_engine(tmp_path)
+    genres = e.owned_genre_summary(k=5)
+    assert genres == [("Drama", 3)]
+    eras = e.owned_era_summary()
+    assert eras == [("2020s", 3)]

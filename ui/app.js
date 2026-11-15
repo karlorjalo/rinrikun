@@ -154,16 +154,114 @@ $("#detail-modal").onclick = (e) => {
   if (e.target === $("#detail-modal")) closeModal();
 };
 
+let activeProfileTag = null;
+let profileData = null;
+
 async function profile() {
-  const p = await (await fetch("/api/profile")).json();
+  profileData = await (await fetch("/api/profile")).json();
+  renderProfile();
+}
+
+function renderProfile() {
+  const p = profileData;
   const el = $("#tab-profile");
-  el.innerHTML = `<h2>Taste profile — ${p.owned_count} owned of ${p.total_count} indexed</h2>
-    <h2>Dominant tags</h2><div class="tagbar">${p.tag_summary.map(([t, c]) => `<span class="chip">${esc(t)} <b>${c}</b></span>`).join("")}</div>
-    <h2>Defining shows (nearest to taste center)</h2>`;
-  const cards = document.createElement("div");
-  cards.className = "cards";
-  p.defining_shows.forEach((r) => cards.appendChild(card(r, `${r.similarity}% to center`)));
-  el.appendChild(cards);
+  if (!p) return;
+
+  const topGenre = (p.genre_summary && p.genre_summary[0]) ? p.genre_summary[0][0] : "Anime";
+  const topEra = (p.era_summary && p.era_summary[0]) ? p.era_summary[0][0] : "Modern";
+
+  let displayedShows = p.defining_shows;
+  if (activeProfileTag) {
+    displayedShows = p.defining_shows.filter((r) =>
+      (r.tags || []).concat(r.genres || []).map((x) => x.toLowerCase()).includes(activeProfileTag.toLowerCase())
+    );
+  }
+
+  el.innerHTML = `
+    <div class="hero-dna">
+      <div class="hero-dna-top">
+        <div class="hero-dna-title-wrap">
+          <div class="hero-dna-tagline">Taste DNA & Collection Map</div>
+          <h2 class="hero-dna-title">Personal Anime Profile</h2>
+          <p class="hero-dna-desc">Centroid computed from your <b>${p.owned_count}</b> library titles, embedded into the <b>${p.total_count.toLocaleString()}</b> anime vector universe.</p>
+        </div>
+        <div class="hero-stats-grid">
+          <div class="hero-stat-card">
+            <div class="hero-stat-val">${p.owned_count}</div>
+            <div class="hero-stat-lbl">Owned Shows</div>
+          </div>
+          <div class="hero-stat-card">
+            <div class="hero-stat-val">${p.total_count.toLocaleString()}</div>
+            <div class="hero-stat-lbl">Mapped Pool</div>
+          </div>
+          <div class="hero-stat-card">
+            <div class="hero-stat-val">${esc(topEra)}</div>
+            <div class="hero-stat-lbl">Dominant Era</div>
+          </div>
+          <div class="hero-stat-card">
+            <div class="hero-stat-val">${esc(topGenre)}</div>
+            <div class="hero-stat-lbl">Top Genre</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dna-section-title">Dominant Thematic Tags <span style="font-size:12px;color:var(--muted);font-weight:normal;">Click a tag to filter defining shows</span></div>
+      <div class="tagbar" id="profile-tagbar">
+        ${p.tag_summary.map(([t, c]) => `
+          <button class="chip-interactive ${activeProfileTag === t ? 'active' : ''}" data-tag="${esc(t)}">
+            ${esc(t)} <b>${c}</b>
+          </button>
+        `).join("")}
+      </div>
+
+      ${p.genre_summary && p.genre_summary.length ? `
+        <div class="dna-section-title" style="margin-top:16px;">Top Genres</div>
+        <div class="tagbar" id="profile-genrebar">
+          ${p.genre_summary.map(([g, c]) => `
+            <button class="chip-interactive ${activeProfileTag === g ? 'active' : ''}" data-tag="${esc(g)}">
+              ${esc(g)} <b>${c}</b>
+            </button>
+          `).join("")}
+        </div>
+      ` : ""}
+    </div>
+
+    ${activeProfileTag ? `
+      <div class="active-filter-bar">
+        <span>Filtered by: <b>${esc(activeProfileTag)}</b> (${displayedShows.length} of ${p.defining_shows.length} defining shows match)</span>
+        <button id="clear-profile-filter">Clear filter ✕</button>
+      </div>
+    ` : ""}
+
+    <div class="defining-header-wrap">
+      <h2>Defining Shows</h2>
+      <div class="defining-desc">Titles mathematically nearest to your taste center. These anchor your personal collection's identity.</div>
+    </div>
+    <div class="cards" id="profile-cards"></div>
+  `;
+
+  el.querySelectorAll(".chip-interactive").forEach((btn) => {
+    btn.onclick = () => {
+      const tag = btn.dataset.tag;
+      activeProfileTag = (activeProfileTag === tag) ? null : tag;
+      renderProfile();
+    };
+  });
+
+  const clearBtn = $("#clear-profile-filter");
+  if (clearBtn) {
+    clearBtn.onclick = () => {
+      activeProfileTag = null;
+      renderProfile();
+    };
+  }
+
+  const cardsContainer = $("#profile-cards");
+  if (!displayedShows.length) {
+    cardsContainer.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:30px 0;">No defining shows contain the tag "${esc(activeProfileTag)}". Try another tag!</p>`;
+  } else {
+    displayedShows.forEach((r) => cardsContainer.appendChild(card(r, `${r.similarity}% to center`)));
+  }
 }
 
 let titles = [];

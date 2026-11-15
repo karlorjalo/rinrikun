@@ -65,6 +65,22 @@ class Engine:
                 counts[t] = counts.get(t, 0) + 1
         return sorted(counts.items(), key=lambda x: -x[1])[:k]
 
+    def owned_genre_summary(self, k: int = 10) -> list[tuple[str, int]]:
+        counts: dict[str, int] = {}
+        for i in self.owned_idx:
+            for g in self.rows[i]["genres"]:
+                counts[g] = counts.get(g, 0) + 1
+        return sorted(counts.items(), key=lambda x: -x[1])[:k]
+
+    def owned_era_summary(self) -> list[tuple[str, int]]:
+        counts: dict[str, int] = {}
+        for i in self.owned_idx:
+            y = self.rows[i]["year"]
+            if y:
+                era = f"{(int(y) // 10) * 10}s"
+                counts[era] = counts.get(era, 0) + 1
+        return sorted(counts.items(), key=lambda x: x[0], reverse=True)
+
     def _result(self, j: int, sim: float, seed) -> dict:
         r = self.rows[j]
         out = dict(r)
