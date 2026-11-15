@@ -10,7 +10,8 @@ function card(r, why) {
       <div class="t">${esc(r.title)} ${r.owned ? '<span class="badge">owned</span>' : ""}</div>
       <div class="m">${esc(r.title_native)} ${r.year || ""} · ${esc((r.genres || []).slice(0, 3).join(", "))}</div>
       <div class="m">sim ${r.similarity}% · score ${r.score ?? "?"}</div>
-      <div class="m">${why || (r.shared_tags || []).map((t) => `<span class="badge">${esc(t)}</span>`).join("")}</div>
+      <div class="simbar"><i style="width:${Math.max(0, Math.min(100, r.similarity))}%"></i></div>
+      <div class="m" style="margin-top:6px;">${why || (r.shared_tags || []).map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div>
     </div>`;
   d.onclick = () => useSeed(r);
   return d;
@@ -20,7 +21,7 @@ async function profile() {
   const p = await (await fetch("/api/profile")).json();
   const el = $("#tab-profile");
   el.innerHTML = `<h2>Taste profile — ${p.owned_count} owned of ${p.total_count} indexed</h2>
-    <h2>Dominant tags</h2><div class="tagbar">${p.tag_summary.map(([t, c]) => `<span>${esc(t)} <b>${c}</b></span>`).join("")}</div>
+    <h2>Dominant tags</h2><div class="tagbar">${p.tag_summary.map(([t, c]) => `<span class="chip">${esc(t)} <b>${c}</b></span>`).join("")}</div>
     <h2>Defining shows (nearest to taste center)</h2>`;
   const cards = document.createElement("div");
   cards.className = "cards";
@@ -83,3 +84,22 @@ $("#recenter").onclick = () => { seed = null; $("#seedlabel").textContent = ""; 
 
 profile();
 initSearch();
+
+const THEME_KEY = "rinrikun-theme";
+const SUN = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+const MOON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+
+function effectiveTheme() {
+  return document.documentElement.dataset.theme ||
+    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+}
+function paintTheme() {
+  $("#theme").innerHTML = effectiveTheme() === "dark" ? SUN : MOON;
+}
+$("#theme").onclick = () => {
+  const next = effectiveTheme() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+  paintTheme();
+};
+paintTheme();
