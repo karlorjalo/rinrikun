@@ -2,6 +2,8 @@
 
 Semantic taste map for your anime library: embeds your Jellyfin library plus a pool of popular AniList anime into a local vector index, then serves a web UI for taste profiling, similar-to search, and recommendations.
 
+The name is the nickname 倫理君 (rinri-kun) that Utaha Kasumigaoka gives to Tomoya Aki in 冴えない彼女の育てかた (Saekano). The interface has some design choices from that series: a subtitle and messages in the voice of Utaha, cherry blossom petals, and message windows as in a visual novel. These lines are new text, not quotations.
+
 ## What it does
 
 - **Profile** — the number of shows in each tier and the map of the index, with your S-tier shows as posters.
@@ -9,7 +11,7 @@ Semantic taste map for your anime library: embeds your Jellyfin library plus a p
 - **Ratings** — the shows that you rated, by tier, and the shows that you marked as watched by hand.
 - **Recommendations** — unowned AniList anime from franchises that you do not own, with one result for each franchise. **Formula** selects one of two formulas. **My usual kinds** gives a higher score to the kinds of shows that your library has many of. The kind of a show is its year, its format and its number of episodes. A show with an AniList crowd score below 6.5 also moves down, because your library has few of these shows. A higher crowd score gives no advantage: the crowd score does not predict your tiers. **All kinds** gives each kind of show the same chance. A line above the list tells which formula made the list. Two switches change the list: **More variety** gives results that are less similar to each other, and **Include sequels** adds the franchises that you own. The score has these parts: the similarity to your nearest liked shows (text embedding plus tag TF-IDF), the AniList user recommendations that connect your liked shows to the candidate (a show of yours without a tier also counts there, with a smaller weight), and a penalty for the similarity to your C-tier and D-tier shows. A small model also learns from the tags of your rated shows which tier you will give. A candidate with a low predicted tier moves down. The ✕ button on a recommendation removes the show from the list. Shows like it then get a lower score. The Ratings tab lists the removed shows, and the detail window of a show can put it back. A franchise that you do not own appears as its first TV season. You can also seed the list from any show you click.
 - **Map** — a 2D t-SNE layout of the index. Shows that are neighbors in the embedding space are neighbors on the map. In the far view each show is a dot. When you zoom in, each show moves to its own cell of a grid and becomes a poster, so that no poster covers another poster and you can see which shows are near a show. At the largest zoom a poster has its title. A show of yours has a frame in the color of its tier and a badge with the tier letter. A recommendation has a ✦ badge. Labels name the areas of the map by their typical tags. The far view has the labels of the large areas. The smaller areas get their labels when you zoom in.
-- **Settings** — choices for the look of the interface. The browser keeps them. The typeface setting has two options: serif titles (Noto Serif JP for titles and headings), and Noto Sans JP for all text.
+- **Settings** — choices for the look of the interface. The browser keeps them. The typeface setting has two options: serif titles (Noto Serif JP for titles and headings), and Noto Sans JP for all text. A second setting turns the cherry blossom petals of the page header on or off.
 
 ## Setup
 

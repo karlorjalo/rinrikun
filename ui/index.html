@@ -33,11 +33,12 @@
 <link rel="stylesheet" href="/ui/styles.css">
 </head>
 <body>
+<div class="petals" id="petals" aria-hidden="true"></div>
 <header>
   <div class="header-top">
     <div class="mast">
       <h1>りんりくん</h1>
-      <p class="sub">rinrikun — anime taste map</p>
+      <p class="sub" lang="ja">「倫理君、次の攻略対象はもう決めたのかしら？」</p>
     </div>
     <button id="theme" aria-label="Toggle theme" title="Toggle theme"></button>
   </div>
@@ -130,6 +131,7 @@
     </div>
     <div id="similar-header" class="result-header" hidden></div>
     <div id="similar-empty" class="empty-state">
+      <div class="vn-window" lang="ja"><span class="vn-name">霞ヶ丘詩羽</span><p class="vn-line">気になる作品があるのでしょう？ タイトルを入れてごらんなさい、倫理君。</p></div>
       <div class="empty-suggestions" id="similar-suggestions"></div>
     </div>
     <div id="sresults" class="cards"></div>
@@ -201,6 +203,9 @@
     <div id="settings-list" class="settings-list"></div>
   </section>
 </main>
+<footer class="site-footer">
+  <span lang="ja">りんりくん（倫理君）</span> is the name that Utaha Kasumigaoka gives to Tomoya Aki in <span lang="ja">『冴えない彼女の育てかた』</span>.
+</footer>
 <dialog id="detail-modal"></dialog>
 <script src="/ui/app.js"></script>
 </body>

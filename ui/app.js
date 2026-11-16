@@ -2022,7 +2022,9 @@ function renderDeckCard() {
     wrap.innerHTML = `
       <div class="deck-card" style="align-items:center;justify-content:center;text-align:center;padding:48px 24px;">
         <div style="max-width:380px;">
-          <div style="font-size:36px;margin-bottom:12px;">🎉</div>
+          ${vnWindow(reviewFilter === "unrated"
+            ? "あら、もう全部に評価をつけたの？ 倫理君にしては仕事が早いじゃない。"
+            : "これで最後よ。お疲れさま、倫理君。")}
           <h3 style="font-family:var(--serif);font-size:20px;margin:0 0 8px;">All caught up</h3>
           <p style="color:var(--muted);font-size:14px;margin:0 0 20px;">
             ${reviewFilter === "unrated" ? "All your shows have a tier." : "You have reached the end of the review queue."}
@@ -2292,13 +2294,17 @@ function renderRatingsGrid() {
 
   if (!filtered.length) {
     if (ratingsSource === "dismissed" && ratingsTierFilter === "all") {
-      box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:48px 20px;">No removed recommendations. In the Recommendations tab, click ✕ on a show that you do not want.</p>`;
+      box.innerHTML = `<div style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 20px;">
+          ${vnWindow("切り捨てた作品はまだ一つもないのね。優しいのか、優柔不断なのか……。")}
+          <p style="margin:0;">No removed recommendations. In the Recommendations tab, click ✕ on a show that you do not want.</p></div>`;
     } else if (ratingsSource === "manual" && ratingsTierFilter === "all") {
-      box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:48px 20px;">No manually added shows yet. When you watch a show outside your local library, find it and click "+ Add to Watched".</p>`;
+      box.innerHTML = `<div style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 20px;">
+          ${vnWindow("ライブラリの外で観た作品があるなら、正直に白状なさい。")}
+          <p style="margin:0;">No manually added shows yet. When you watch a show outside your local library, find it and click "+ Add to Watched".</p></div>`;
     } else if (!ratedShows.length) {
       box.innerHTML = `
         <div style="grid-column:1/-1;text-align:center;padding:48px 20px;color:var(--muted);">
-          <div style="font-size:32px;margin-bottom:8px;">★</div>
+          ${vnWindow("まだ何も評価していないのね。話はそれからよ、倫理君。")}
           <h3 style="font-family:var(--serif);font-size:18px;margin:0 0 6px;color:var(--text);">No ratings yet</h3>
           <p style="font-size:13.5px;margin:0 0 16px;">Head over to the Review deck or click any show to assign a tier.</p>
           <button class="btn-action primary" id="ratings-go-review">Go to Review →</button>
@@ -2365,6 +2371,32 @@ document.querySelectorAll("nav button").forEach((b) => {
   };
 });
 
+// ---- The Saekano look
+// A message window as in a visual novel: a name plate and one line. The lines are new text in the
+// voice of Utaha Kasumigaoka, who calls the user "倫理君" (rinri-kun).
+function vnWindow(line) {
+  return `<div class="vn-window" lang="ja"><span class="vn-name">霞ヶ丘詩羽</span><p class="vn-line">${esc(line)}</p></div>`;
+}
+
+// Cherry blossom petals fall behind the page header. The values are fixed, not random, so that
+// the page looks the same each time. The style sheet hides the petals if the setting is off or
+// if the system asks for less motion.
+function initPetals() {
+  const box = $("#petals");
+  if (!box) return;
+  // position (% of the width), size (px), time of one fall (s), start (s), drift (px), angle (deg), opacity
+  const petals = [
+    [3, 11, 15, 2, 70, 20, 0.7], [11, 8, 19, 9, 40, 110, 0.55], [18, 12, 13, 5, 90, 200, 0.75],
+    [26, 9, 17, 12, 55, 60, 0.6], [34, 7, 21, 1, 35, 300, 0.5], [42, 10, 14, 7, 80, 150, 0.7],
+    [50, 8, 18, 14, 45, 250, 0.55], [58, 12, 16, 3, 95, 30, 0.75], [66, 9, 20, 10, 50, 180, 0.6],
+    [74, 11, 13, 6, 75, 90, 0.7], [82, 7, 22, 16, 30, 330, 0.5], [89, 10, 15, 11, 65, 130, 0.65],
+    [95, 9, 18, 4, 40, 270, 0.6], [46, 6, 24, 18, 25, 10, 0.45],
+  ];
+  box.innerHTML = petals.map(([x, size, time, start, drift, turn, alpha]) =>
+    `<i class="petal" style="--x:${x}%;--size:${size}px;--time:${time}s;--delay:-${start}s;--drift:${drift}px;--turn:${turn}deg;--alpha:${alpha}"></i>`
+  ).join("");
+}
+
 // ---- Settings
 // Each setting is a choice between options. The first option is the default. The value of a
 // setting is an attribute of the root element (data-<key>), so that the style sheet can use it.
@@ -2380,6 +2412,14 @@ const SETTINGS = [
       { value: "sans", label: "Noto Sans JP everywhere", text: "All text uses Noto Sans JP." },
     ],
     apply: applyFontSetting,
+  },
+  {
+    key: "petals",
+    title: "Cherry blossom petals",
+    options: [
+      { value: "on", label: "On", text: "Petals fall behind the page header." },
+      { value: "off", label: "Off", text: "The page header has no petals." },
+    ],
   },
 ];
 const settings = {};
@@ -2445,6 +2485,7 @@ function initSettings() {
   renderSettings();
 }
 
+initPetals();
 initSettings();
 profile();
 initSearch();
