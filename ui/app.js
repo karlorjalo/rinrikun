@@ -32,7 +32,8 @@ function card(r, why) {
   const scoreVal = r.score != null ? Number(r.score).toFixed(1) : null;
 
   const statParts = [];
-  if (simVal != null) statParts.push(`<span class="affinity">${simVal}% match</span>`);
+  if (matchHtml(r)) statParts.push(matchHtml(r));
+  if (similarHtml(r)) statParts.push(similarHtml(r));
   if (scoreVal) statParts.push(`<span class="score">★ ${scoreVal}</span>`);
 
   let tagHtml = "";
@@ -78,7 +79,7 @@ function card(r, why) {
       <div class="t">${esc(main)} ${tierHtml} ${badgeHtml}</div>
       <div class="m submeta">${metaParts.join(" · ")}</div>
       <div class="m stats">${statParts.join(" · ")}</div>
-      <div class="simbar" title="${simVal ?? 0}% match"><i style="width:${Math.max(0, Math.min(100, simVal ?? 0))}%"></i></div>
+      ${simVal != null ? `<div class="simbar" title="${simVal}% similar to the seed show"><i style="width:${Math.max(0, Math.min(100, simVal))}%"></i></div>` : ""}
       <div class="m tagrow">${tagHtml}</div>
     </div>`;
 
@@ -108,6 +109,42 @@ function formatOverview(text) {
     .replace(/\n/g, "<br>");
 }
 
+// The address of a list of shows, with the formula of the Recommendations tab. The server uses
+// the formula for the match of each show.
+function withFormula(url) {
+  return `${url}${url.includes("?") ? "&" : "?"}kinds=${recsKinds}`;
+}
+
+// The match of a show is the part of the franchises that the user does not have, which get a
+// lower score from the formula of the recommendations. For a show of the user it is the match
+// that the show would have if the user did not have it.
+function formatMatch(match) {
+  if (match == null) return null;
+  return match >= 99.95 ? "100" : match >= 99 ? match.toFixed(1) : String(Math.round(match));
+}
+
+function matchHtml(r) {
+  const text = formatMatch(r.match);
+  if (text == null) return "";
+  const title = r.owned
+    ? `Without this show in your list, the formula would put it above ${text}% of the franchises that you do not have`
+    : `The formula puts this show above ${text}% of the franchises that you do not have`;
+  return `<span class="affinity" title="${title}">${text}% match</span>`;
+}
+
+// A list with a seed also has the similarity of each show to the seed
+function similarHtml(r) {
+  return r.similarity != null ? `<span title="The similarity to the seed show">${Math.round(r.similarity)}% similar</span>` : "";
+}
+
+// Get the match of a show again after a change of a tier or of the watched state
+async function refreshMatch(r) {
+  try {
+    const full = await (await fetch(withFormula(`/api/show/${encodeURIComponent(r.id)}`))).json();
+    r.match = full.match;
+  } catch (e) {}
+}
+
 // AniList has each cover in a small file (100 pixels wide) and in a larger file. A large picture
 // uses the larger file. If the larger file does not load, the picture uses the small file.
 function largePoster(url) {
@@ -119,14 +156,13 @@ const POSTER_ERROR = "if (!this.dataset.retry && this.dataset.small) { this.data
 async function openModal(r) {
   if (r.overview === undefined && r.id) {
     try {
-      const full = await (await fetch(`/api/show/${encodeURIComponent(r.id)}`)).json();
+      const full = await (await fetch(withFormula(`/api/show/${encodeURIComponent(r.id)}`))).json();
       r = { ...r, ...full };
     } catch (e) {}
   }
   currentModalShow = r;
   const modal = $("#detail-modal");
   const { main, sub } = displayTitles(r);
-  const simVal = r.similarity != null ? Math.round(r.similarity) : null;
   const scoreVal = r.score != null ? Number(r.score).toFixed(1) : null;
 
   const posterHtml = r.poster
@@ -148,7 +184,8 @@ async function openModal(r) {
 
   const statItems = [];
   if (scoreVal) statItems.push(`<span class="score">★ ${scoreVal}</span>`);
-  if (simVal != null) statItems.push(`<span class="affinity">${simVal}% match</span>`);
+  if (matchHtml(r)) statItems.push(matchHtml(r));
+  if (similarHtml(r)) statItems.push(similarHtml(r));
 
   const tags = (r.tags || []).map((t, idx) => {
     const rank = r.tag_ranks && r.tag_ranks[idx] ? `<span class="trank">${r.tag_ranks[idx]}%</span>` : "";
@@ -224,12 +261,14 @@ async function openModal(r) {
     btn.onclick = async () => {
       const tier = btn.dataset.tier;
       await setTier(r, tier);
+      await refreshMatch(r);
       openModal(r);
     };
   });
   if ($("#modal-clear-tier")) {
     $("#modal-clear-tier").onclick = async () => {
       await clearTier(r);
+      await refreshMatch(r);
       openModal(r);
     };
   }
@@ -238,6 +277,7 @@ async function openModal(r) {
     $("#modal-toggle-watched").onclick = async () => {
       const next = !r.manual_watched;
       await toggleWatched(r, next);
+      await refreshMatch(r);
       openModal(r);
     };
   }
@@ -1631,7 +1671,7 @@ function renderSimilarGrid() {
 }
 
 async function fetchSimilarShows(t) {
-  const res = await (await fetch(`/api/similar?id=${encodeURIComponent(t.id)}&k=${similarCount}`)).json();
+  const res = await (await fetch(withFormula(`/api/similar?id=${encodeURIComponent(t.id)}&k=${similarCount}`))).json();
   if (Array.isArray(res)) {
     rawSimilar = res;
   } else {
@@ -1951,7 +1991,7 @@ async function recs() {
   renderRecsSeedBar();
   const applied = seed ? "seed" : recsKinds;
   const base = seed
-    ? `/api/recommend?k=40&seed=${encodeURIComponent(seed.id)}`
+    ? `/api/recommend?k=40&seed=${encodeURIComponent(seed.id)}&kinds=${recsKinds}`
     : `/api/recommend?k=40&mode=${recsVariety ? "diverse" : "hybrid"}&kinds=${recsKinds}`;
   const request = ++recsRequest;
   const list = await (await fetch(`${base}&new_only=${!recsSequels}`)).json();
@@ -1978,7 +2018,7 @@ let totalRatedCount = 0;
 async function loadReviewQueue() {
   try {
     const unratedOnly = reviewFilter === "unrated";
-    const res = await (await fetch(`/api/review-queue?unrated_only=${unratedOnly}`)).json();
+    const res = await (await fetch(withFormula(`/api/review-queue?unrated_only=${unratedOnly}`))).json();
     if (!Array.isArray(res)) {
       console.error("Failed to load review queue:", res);
       const wrap = $("#deck-wrap");
@@ -2069,6 +2109,7 @@ function renderDeckCard() {
   if (show.year) metaItems.push(show.year);
   if (show.studios && show.studios.length) metaItems.push(`Studio: <b>${esc(show.studios.slice(0, 2).join(", "))}</b>`);
   if (scoreVal) metaItems.push(`★ ${scoreVal}`);
+  if (matchHtml(show)) metaItems.push(matchHtml(show));
 
   const tagsHtml = (show.tags || []).slice(0, 5).map(t => `<span class="chip">${esc(t)}</span>`).join("");
 
@@ -2235,9 +2276,9 @@ let ratingsSort = "tier";
 async function loadRatings() {
   try {
     const [res, manual, dismissed] = await Promise.all([
-      fetch("/api/ratings").then((r) => r.json()),
-      fetch("/api/watched").then((r) => r.json()),
-      fetch("/api/dismissed").then((r) => r.json()),
+      fetch(withFormula("/api/ratings")).then((r) => r.json()),
+      fetch(withFormula("/api/watched")).then((r) => r.json()),
+      fetch(withFormula("/api/dismissed")).then((r) => r.json()),
     ]);
     if (!Array.isArray(res)) return;
     ratedShows = res;
@@ -2287,9 +2328,9 @@ function renderRatingsGrid() {
     if (ratingsSort === "tier") {
       const diff = (tierOrder[a.tier] ?? 99) - (tierOrder[b.tier] ?? 99);
       if (diff !== 0) return diff;
-      return (b.similarity ?? 0) - (a.similarity ?? 0);
+      return (b.match ?? 0) - (a.match ?? 0);
     } else if (ratingsSort === "match") {
-      return (b.similarity ?? 0) - (a.similarity ?? 0);
+      return (b.match ?? 0) - (a.match ?? 0);
     } else if (ratingsSort === "score") {
       return (b.score ?? 0) - (a.score ?? 0);
     } else if (ratingsSort === "title") {
