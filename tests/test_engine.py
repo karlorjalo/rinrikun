@@ -36,7 +36,8 @@ def test_recommend_excludes_owned(tmp_path):
     res = e.recommend(k=3)
     assert len(res) == 3
     assert all(not r["owned"] for r in res)
-    assert all(r["similarity"] <= 100.0 for r in res)
+    # A list without a seed has no similarity to a seed
+    assert all("similarity" not in r for r in res)
 
 
 def test_recommend_modes(tmp_path):
@@ -49,7 +50,7 @@ def test_recommend_modes(tmp_path):
         res = e.recommend(k=2, mode=mode)
         assert len(res) == 2
         assert all(not r["owned"] for r in res)
-        assert all(r["similarity"] <= 100.0 for r in res)
+        assert all("similarity" not in r for r in res)
 
     # The only liked show is the S-tier show, thus it is the matched favorite of each result
     res = e.recommend(k=2, mode="hybrid")
@@ -863,3 +864,102 @@ def test_library_row_gets_a_poster_that_other_computers_can_load(tmp_path):
     assert {p["id"]: p["poster"] for p in e.get_vector_map()["points"]} == posters
     # The row of the database does not change
     assert e.by_id["jf:1"]["poster"] == local.format(1)
+
+
+def _match_engine(tmp_path):
+    """al:1 and al:2 are liked shows with different content. Each has one candidate with the same content."""
+    e = _link_engine(tmp_path, extra=[("al:2", [0, 0, 1, 0], 1, []), ("al:3", [0, 0, 0, 1], 1, [])])
+    e.set_show_tier("al:1", "S")
+    e.set_show_tier("al:2", "A")
+    return e
+
+
+def test_match_has_the_order_of_the_recommendations(tmp_path):
+    e = _match_engine(tmp_path)
+    match = e.match_percent()
+    recs = e.recommend(k=10)
+    values = [float(match[e.pos[r["id"]]]) for r in recs]
+    assert values == sorted(values, reverse=True)
+    assert all(0.0 <= v < 100.0 for v in values)
+    # with_match gives the same values, with one decimal
+    assert [r["match"] for r in e.with_match(recs)] == [round(v, 1) for v in values]
+
+
+def test_match_of_a_show_of_the_user_ignores_the_show_itself(tmp_path):
+    e = _match_engine(tmp_path)
+    match = e.match_percent()
+    # al:12 has the content of the liked show al:2, thus its content score is the best possible.
+    # al:2 itself gets the score that it has without al:2: its content is far from al:1.
+    assert match[e.pos["al:2"]] < match[e.pos["al:12"]]
+    # All rows have a match: candidates, shows of the user, and shows without a tier
+    assert not np.isnan(match).any()
+
+
+def test_match_changes_when_a_tier_changes(tmp_path):
+    e = _match_engine(tmp_path)
+    before = e.match_percent().copy()
+    assert e.match_percent() is e.match_percent()
+    e.set_show_tier("al:2", "D")
+    after = e.match_percent()
+    # al:12 is like al:2, which is now a disliked show
+    assert after[e.pos["al:12"]] < before[e.pos["al:12"]]
+    # The two formulas have their own values
+    assert e.match_percent("usual") is not e.match_percent("all")
+
+
+def test_match_of_an_anilist_row_of_a_library_show(tmp_path):
+    from anime_vec.store import Store
+    s = Store(tmp_path / "match_lib.db")
+    base = {"title_native": "", "genres": [], "tags": [], "tag_ranks": [], "studios": [], "overview": "O",
+            "tmdbid": None, "poster": None, "year": 2021, "score": 7.0}
+    s.upsert_rows([dict(base, id="jf:1", source="library", title="Show", format="series", anilist_id=None, owned=1),
+                   dict(base, id="al:100", source="anilist", title="Show", format="tv", anilist_id=100, owned=1, library_id="jf:1"),
+                   dict(base, id="al:200", source="anilist", title="Other", format="tv", anilist_id=200, owned=0),
+                   dict(base, id="al:300", source="anilist", title="Third", format="tv", anilist_id=300, owned=0)])
+    for n, rid in enumerate(("jf:1", "al:100", "al:200", "al:300")):
+        vec = np.zeros(4, dtype=np.float32)
+        vec[n] = 1.0
+        s.save_embedding(rid, vec.tobytes())
+    e = Engine(s)
+    match = e.match_percent()
+    assert match[e.pos["al:100"]] == match[e.pos["jf:1"]]
+    queue = e.review_queue()
+    assert [r["id"] for r in queue] == ["jf:1"] and queue[0]["match"] is not None and "similarity" not in queue[0]
+
+
+def test_review_queue_has_the_shows_without_a_tier_first_by_match(tmp_path):
+    e = _match_engine(tmp_path)
+    queue = e.review_queue()
+    assert [r["id"] for r in queue] == ["al:3", "al:1", "al:2"] or [r["id"] for r in queue] == ["al:3", "al:2", "al:1"]
+    rated = [r for r in queue if r["tier"]]
+    assert [r["match"] for r in rated] == sorted((r["match"] for r in rated), reverse=True)
+    assert [r["id"] for r in e.review_queue(unrated_only=True)] == ["al:3"]
+    # The rated shows: by tier, then by match
+    assert [r["tier"] for r in e.rated_shows()] == ["S", "A"]
+
+
+def test_tier_prediction_without_the_row_itself(tmp_path, monkeypatch):
+    import anime_vec.engine as engine_module
+    monkeypatch.setattr(engine_module, "TIER_MODEL_MIN_RATED", 3)
+    from anime_vec.store import Store
+    s = Store(tmp_path / "loo.db")
+    tags = [["A"], ["A"], ["A"], ["B"], ["B"], ["A", "B"]]
+    for n, t in enumerate(tags):
+        s.upsert_rows([{"id": f"al:{n}", "source": "anilist", "title": f"T{n}", "title_native": "", "year": 2020,
+                        "format": "tv", "genres": [], "tags": t, "tag_ranks": [80] * len(t), "studios": [],
+                        "overview": "O", "score": 7.0, "owned": 1, "tmdbid": None, "anilist_id": n, "poster": None}])
+        vec = np.zeros(8, dtype=np.float32)
+        vec[n] = 1.0
+        s.save_embedding(f"al:{n}", vec.tobytes())
+    e = Engine(s)
+    for n, tier in enumerate(["S", "S", "D", "C", "C", "B"]):
+        e.set_show_tier(f"al:{n}", tier)
+    rows = [e.pos[f"al:{n}"] for n in range(6)]
+    with_row = e._predicted_tier(rows)
+    without_row = e._predicted_tier(rows, leave_out=True)
+    # al:2 has tier D among shows with tag A that have tier S. The model that knows al:2 predicts a
+    # lower tier for it than the model that does not know it.
+    assert without_row[2] > with_row[2]
+    # The check with a model that really does not have the row
+    e.set_show_tier("al:2", None)
+    assert e._predicted_tier([rows[2]])[0] == pytest.approx(without_row[2], abs=1e-3)

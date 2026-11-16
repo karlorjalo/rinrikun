@@ -62,19 +62,23 @@ def delete_weights(id: str = Query(...)):
     return engine.set_show_tier(id, None)
 
 
+# The formula of the match of a show: see Engine.match_percent
+KINDS = Query("all", pattern="^(all|usual)$")
+
+
 @app.get("/api/review-queue")
-def review_queue(unrated_only: bool = False):
-    return engine.review_queue(unrated_only=unrated_only)
+def review_queue(unrated_only: bool = False, kinds: str = KINDS):
+    return engine.review_queue(unrated_only=unrated_only, kinds=kinds)
 
 
 @app.get("/api/ratings")
-def get_ratings():
-    return engine.rated_shows()
+def get_ratings(kinds: str = KINDS):
+    return engine.rated_shows(kinds=kinds)
 
 
 @app.get("/api/watched")
-def get_watched():
-    return engine.manual_shows()
+def get_watched(kinds: str = KINDS):
+    return engine.with_match(engine.manual_shows(), kinds)
 
 
 @app.post("/api/watched")
@@ -88,8 +92,8 @@ def post_watched(payload: dict):
 
 
 @app.get("/api/dismissed")
-def get_dismissed():
-    return engine.dismissed_shows()
+def get_dismissed(kinds: str = KINDS):
+    return engine.with_match(engine.dismissed_shows(), kinds)
 
 
 @app.post("/api/dismissed")
@@ -103,17 +107,17 @@ def post_dismissed(payload: dict):
 
 
 @app.get("/api/similar")
-def similar(id: str, k: int = Query(24, le=100, ge=1)):
+def similar(id: str, k: int = Query(24, le=100, ge=1), kinds: str = KINDS):
     if id not in engine.by_id:
         raise HTTPException(404, "unknown id")
-    return engine.similar_to(id, k=k)
+    return engine.with_match(engine.similar_to(id, k=k), kinds)
 
 
 @app.get("/api/show/{id:path}")
-def show(id: str):
+def show(id: str, kinds: str = KINDS):
     if id not in engine.by_id:
         raise HTTPException(404, "unknown id")
-    return engine.public_row(engine.pos[id])
+    return engine.with_match([engine.public_row(engine.pos[id])], kinds)[0]
 
 
 @app.get("/api/recommend")
@@ -126,7 +130,7 @@ def recommend(
 ):
     if seed and seed not in engine.by_id:
         raise HTTPException(404, "unknown seed")
-    return engine.recommend(k=k, seed_id=seed, mode=mode, new_only=new_only, kinds=kinds)
+    return engine.with_match(engine.recommend(k=k, seed_id=seed, mode=mode, new_only=new_only, kinds=kinds), kinds)
 
 
 @app.get("/api/shows")

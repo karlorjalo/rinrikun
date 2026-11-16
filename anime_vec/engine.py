@@ -115,6 +115,23 @@ def _knn_score(cand: np.ndarray, liked: np.ndarray, weights: np.ndarray, k: int 
     return score, shown, weighted.argmax(axis=1)
 
 
+def _scale_like(reference: np.ndarray, x: np.ndarray) -> np.ndarray:
+    """Return the z-scores of x on the scale of `reference`: with the mean and the standard deviation of `reference`."""
+    sd = float(reference.std())
+    if sd <= 1e-9:
+        return np.zeros(len(x), dtype=np.float32)
+    return ((x - reference.mean()) / sd).astype(np.float32)
+
+
+def _knn_score_without(cand: np.ndarray, liked: np.ndarray, weights: np.ndarray, skip: np.ndarray, k: int = LIKED_K):
+    """As the score of _knn_score, but each candidate ignores the liked shows for which `skip` is true."""
+    weighted = np.where(skip, -np.inf, (cand @ liked.T) * weights[None, :])
+    k = min(k, liked.shape[0])
+    top = np.take_along_axis(weighted, np.argpartition(-weighted, k - 1, axis=1)[:, :k], axis=1)
+    valid = np.isfinite(top)
+    return (np.where(valid, top, 0.0).sum(axis=1) / np.maximum(valid.sum(axis=1), 1)).astype(np.float32)
+
+
 class Engine:
     def __init__(self, store):
         self.store = store
@@ -193,6 +210,8 @@ class Engine:
         self._build_links()
         self.entry_row = self._build_entry_rows()
         self.kind_codes = self._build_kind_codes()
+        # The match of each row, for each formula. See match_percent.
+        self._match_cache: dict = {}
 
         self.coords_2d, self.grid_2d, self.cell = self._build_layout(unique)
         self.regions = self._build_regions(unique)
@@ -402,49 +421,11 @@ class Engine:
         if not cand_indices:
             return []
 
-        cand_M = self.eff_M[cand_indices]
         mode = (mode or "hybrid").lower()
-
-        d_penalty = np.zeros(len(cand_indices), dtype=np.float32)
-        d_indices = [i for i in self.owned_idx if self.rows[i].get("tier") == "D"]
-        if d_indices:
-            raw_d_sims = (cand_M @ self.eff_M[d_indices].T).max(axis=1)
-            # Soft threshold: the penalty starts when the similarity to a D-tier show is more than D_SIM_START
-            d_penalty = np.maximum(0.0, raw_d_sims - D_SIM_START) / (1.0 - D_SIM_START)
-
-        # One center cannot describe a taste that has many small groups.
-        # Score each candidate by its nearest liked shows, in the text space and in the tag space.
-        liked, liked_w = self._liked()
-        text_score, text_sims, best = _knn_score(cand_M, self.eff_M[liked], liked_w)
-        tag_score, _, _ = _knn_score(self.tag_M[cand_indices], self.tag_M[liked], liked_w)
-        scores = _zscore(0.5 * _zscore(text_score) + 0.5 * _zscore(tag_score)) - D_PENALTY * d_penalty
-
-        # Content tells the kind of a show. The AniList user recommendations tell which shows the
-        # people who like one show also like. This second signal comes from other people.
-        cand_fr = self.row_fr[cand_indices]
-        link_score, link_source = self._link_scores(*self._link_sources(liked, liked_w))
-        scores = scores + LINK_WEIGHT * _zscore(link_score[cand_fr])
-
-        # Shows that are similar to the C-tier and D-tier shows of the user, or to the shows that
-        # the user removed from the recommendations, get a lower score
-        disliked = [i for i in self.owned_idx if self.rows[i].get("tier") in ("C", "D")] + self._dismissed_rows()
-        if disliked:
-            ones = np.ones(len(disliked), dtype=np.float32)
-            bad_text, _, _ = _knn_score(cand_M, self.eff_M[disliked], ones, DISLIKED_K)
-            bad_tag, _, _ = _knn_score(self.tag_M[cand_indices], self.tag_M[disliked], ones, DISLIKED_K)
-            scores = scores - DISLIKE_WEIGHT * _zscore(0.5 * _zscore(bad_text) + 0.5 * _zscore(bad_tag))
-
-        # A candidate that the tier model puts clearly below the other candidates gets a lower score.
-        # A high prediction gives no bonus: in the hidden franchise test a bonus made the list worse,
-        # and the penalty moved the S-tier and A-tier shows up.
-        low = np.maximum(0.0, -_zscore(self._predicted_tier(cand_indices)) - TIER_MARGIN)
-        scores = scores - TIER_PENALTY * low
-
-        # The "usual kinds" formula: a candidate of a kind that the library has many of moves up.
-        # In the hidden franchise test this part moves the S-tier and A-tier shows up in the full
-        # list (the first 100 more than the first 20).
-        if kinds == "usual":
-            scores = scores + KIND_WEIGHT * _zscore(self._kind_score(cand_indices, owned))
+        hybrid = self._hybrid(cand_indices, kinds, owned)
+        scores, best, liked = hybrid["scores"], hybrid["best"], hybrid["liked"]
+        link_source, cand_fr = hybrid["link_source"], hybrid["cand_fr"]
+        cand_M = self.eff_M[cand_indices]
 
         if mode == "diverse":
             # Maximal marginal relevance: balance the score against the similarity to the shows already selected
@@ -471,8 +452,7 @@ class Engine:
 
         out = []
         for j in order:
-            r = self._result(cand_indices[j], float(text_sims[j]), seed=None,
-                             matched_favorite=self._favorite_title(liked[best[j]]))
+            r = self._result(cand_indices[j], matched_favorite=self._favorite_title(liked[best[j]]))
             source = link_source.get(int(cand_fr[j]))
             if source is not None:
                 # The liked show that AniList users connect most strongly to this candidate
@@ -480,13 +460,162 @@ class Engine:
             out.append(r)
         return out
 
-    def _predicted_tier(self, indices: list[int]) -> np.ndarray:
+    def _hybrid(self, cand_indices: list[int], kinds: str, owned: set[str], extra: list[int] | None = None) -> dict:
+        """Compute the hybrid score of each candidate.
+
+        `extra` are rows that are not candidates, for example the shows of the user. Each of them
+        gets a score on the scale of the candidates: each part of its score uses the mean and the
+        standard deviation that the part has for the candidates. An extra row ignores the shows of
+        its own franchise in each part. Thus a show of the user gets about the score that it
+        would have if the user did not have it.
+
+        Return the scores, the scores of the extra rows, and the data for the results.
+        """
+        cand_M = self.eff_M[cand_indices]
+        cand_T = self.tag_M[cand_indices]
+        cand_fr = self.row_fr[cand_indices]
+        extra = list(extra) if extra is not None else []
+        extra_fr = self.row_fr[extra]
+
+        def same_franchise(rows: list[int]) -> np.ndarray:
+            """Return for each extra row which of `rows` are in its franchise."""
+            return extra_fr[:, None] == self.row_fr[rows][None, :]
+
+        d_penalty = np.zeros(len(cand_indices), dtype=np.float32)
+        extra_d = np.zeros(len(extra), dtype=np.float32)
+        d_indices = [i for i in self.owned_idx if self.rows[i].get("tier") == "D"]
+        if d_indices:
+            raw_d_sims = (cand_M @ self.eff_M[d_indices].T).max(axis=1)
+            # Soft threshold: the penalty starts when the similarity to a D-tier show is more than D_SIM_START
+            d_penalty = np.maximum(0.0, raw_d_sims - D_SIM_START) / (1.0 - D_SIM_START)
+            if extra:
+                sims = np.where(same_franchise(d_indices), -np.inf, self.eff_M[extra] @ self.eff_M[d_indices].T)
+                extra_d = (np.maximum(0.0, sims.max(axis=1) - D_SIM_START) / (1.0 - D_SIM_START)).astype(np.float32)
+
+        # One center cannot describe a taste that has many small groups.
+        # Score each candidate by its nearest liked shows, in the text space and in the tag space.
+        liked, liked_w = self._liked()
+        text_score, _, best = _knn_score(cand_M, self.eff_M[liked], liked_w)
+        tag_score, _, _ = _knn_score(cand_T, self.tag_M[liked], liked_w)
+        content = 0.5 * _zscore(text_score) + 0.5 * _zscore(tag_score)
+        scores = _zscore(content) - D_PENALTY * d_penalty
+        extra_scores = np.zeros(len(extra), dtype=np.float32)
+        if extra:
+            skip = same_franchise(liked)
+            extra_text = _knn_score_without(self.eff_M[extra], self.eff_M[liked], liked_w, skip)
+            extra_tag = _knn_score_without(self.tag_M[extra], self.tag_M[liked], liked_w, skip)
+            extra_content = 0.5 * _scale_like(text_score, extra_text) + 0.5 * _scale_like(tag_score, extra_tag)
+            extra_scores = _scale_like(content, extra_content) - D_PENALTY * extra_d
+
+        # Content tells the kind of a show. The AniList user recommendations tell which shows the
+        # people who like one show also like. This second signal comes from other people.
+        # A franchise has no link to itself, thus an extra row needs no special rule here.
+        link_score, link_source = self._link_scores(*self._link_sources(liked, liked_w))
+        cand_links = link_score[cand_fr]
+        scores = scores + LINK_WEIGHT * _zscore(cand_links)
+        if extra:
+            extra_scores = extra_scores + LINK_WEIGHT * _scale_like(cand_links, link_score[extra_fr])
+
+        # Shows that are similar to the C-tier and D-tier shows of the user, or to the shows that
+        # the user removed from the recommendations, get a lower score
+        disliked = [i for i in self.owned_idx if self.rows[i].get("tier") in ("C", "D")] + self._dismissed_rows()
+        if disliked:
+            ones = np.ones(len(disliked), dtype=np.float32)
+            bad_text, _, _ = _knn_score(cand_M, self.eff_M[disliked], ones, DISLIKED_K)
+            bad_tag, _, _ = _knn_score(cand_T, self.tag_M[disliked], ones, DISLIKED_K)
+            bad = 0.5 * _zscore(bad_text) + 0.5 * _zscore(bad_tag)
+            scores = scores - DISLIKE_WEIGHT * _zscore(bad)
+            if extra:
+                skip = same_franchise(disliked)
+                extra_bad_text = _knn_score_without(self.eff_M[extra], self.eff_M[disliked], ones, skip, DISLIKED_K)
+                extra_bad_tag = _knn_score_without(self.tag_M[extra], self.tag_M[disliked], ones, skip, DISLIKED_K)
+                extra_bad = 0.5 * _scale_like(bad_text, extra_bad_text) + 0.5 * _scale_like(bad_tag, extra_bad_tag)
+                extra_scores = extra_scores - DISLIKE_WEIGHT * _scale_like(bad, extra_bad)
+
+        # A candidate that the tier model puts clearly below the other candidates gets a lower score.
+        # A high prediction gives no bonus: in the hidden franchise test a bonus made the list worse,
+        # and the penalty moved the S-tier and A-tier shows up.
+        predicted = self._predicted_tier(cand_indices)
+        low = np.maximum(0.0, -_zscore(predicted) - TIER_MARGIN)
+        scores = scores - TIER_PENALTY * low
+        if extra:
+            extra_predicted = self._predicted_tier(extra, leave_out=True)
+            extra_scores = extra_scores - TIER_PENALTY * np.maximum(0.0, -_scale_like(predicted, extra_predicted) - TIER_MARGIN)
+
+        # The "usual kinds" formula: a candidate of a kind that the library has many of moves up.
+        # In the hidden franchise test this part moves the S-tier and A-tier shows up in the full
+        # list (the first 100 more than the first 20).
+        if kinds == "usual":
+            tables = self._kind_tables(cand_indices, owned)
+            kind = self._kind_values(cand_indices, tables)
+            scores = scores + KIND_WEIGHT * _zscore(kind)
+            if extra:
+                extra_scores = extra_scores + KIND_WEIGHT * _scale_like(kind, self._kind_values(extra, tables))
+
+        return {"scores": scores, "extra_scores": extra_scores, "best": best, "liked": liked,
+                "link_source": link_source, "cand_fr": cand_fr}
+
+    def _state_key(self) -> tuple:
+        """Return a value that changes when the shows, the tiers or the removed shows of the user change."""
+        return tuple(self.owned_idx), tuple(sorted(self.weights.items())), tuple(sorted(self.dismissed))
+
+    def match_percent(self, kinds: str = "all") -> np.ndarray:
+        """Return the match of each row in percent. The value is NaN for a row without a match.
+
+        The match of a show is the part of the new franchises of the catalog that have a lower
+        hybrid score than the show. 99 means: the show scores higher than 99% of the franchises
+        that the user does not have. It uses the same formula as the recommendations, thus the
+        first recommendation has the highest match.
+
+        A show of the user gets the score that it would have if the user did not have it: each
+        part of the score ignores the shows of its own franchise. Thus the match of a show of the
+        user tells how well the formula finds this show from the other shows of the user.
+        """
+        key = self._state_key()
+        cached = self._match_cache.get(kinds)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        out = np.full(len(self.rows), np.nan, dtype=np.float32)
+        owned = self.owned_franchises()
+        unique = [j for j, r in enumerate(self.rows) if r["id"] not in self.duplicate_of]
+        # The candidates of a list that also has the franchises of the user (see _recommend)
+        cand = [j for j in unique
+                if not self.rows[j]["owned"] and _watchable(self.rows[j]) and self.ids[j] not in self.dismissed
+                and (self.franchise[self.ids[j]] in owned or self.entry_row[self.franchise[self.ids[j]]] == j)]
+        if cand and self.owned_idx:
+            cand_set = set(cand)
+            extra = [j for j in unique if j not in cand_set]
+            hybrid = self._hybrid(cand, kinds, owned, extra)
+            # The reference: the franchises that the user does not have
+            new = np.array([self.franchise[self.ids[j]] not in owned for j in cand])
+            reference = np.sort(hybrid["scores"][new] if new.any() else hybrid["scores"])
+            out[cand] = 100.0 * np.searchsorted(reference, hybrid["scores"], side="left") / len(reference)
+            if extra:
+                out[extra] = 100.0 * np.searchsorted(reference, hybrid["extra_scores"], side="left") / len(reference)
+            # An AniList row of a library show has the match of the library show
+            for dup_id, lib_id in self.duplicate_of.items():
+                out[self.pos[dup_id]] = out[self.pos[lib_id]]
+        self._match_cache[kinds] = (key, out)
+        return out
+
+    def with_match(self, results: list[dict], kinds: str = "all") -> list[dict]:
+        """Add the match (see match_percent) to each result. The value is None for a show without a match."""
+        match = self.match_percent(kinds)
+        for r in results:
+            value = match[self.pos[r["id"]]]
+            r["match"] = None if np.isnan(value) else round(float(value), 1)
+        return results
+
+    def _predicted_tier(self, indices: list[int], leave_out: bool = False) -> np.ndarray:
         """Predict the tier that the user will give to each row, as a number (4 = S, 0 = D).
 
         The model is a ridge regression on the tags of the shows that the user rated: it learns
         which tags go with high tiers and which go with low tiers. The crowd score of a show does
         not predict the tier of this user, but the tiers of the user for shows with the same tags do.
         All predictions are 0 if the user has too few ratings.
+
+        If leave_out is true, a row that the model learned from gets the prediction of a model
+        that did not learn from this row.
         """
         rated = [i for i in self.owned_idx if self.rows[i].get("tier") in TIER_VALUES]
         # A removed recommendation is a show near the taste of the user that the user does not want.
@@ -499,6 +628,22 @@ class Engine:
         R = self.tag_M[rated + dismissed].astype(np.float64)
         alpha = np.linalg.solve(R @ R.T + TIER_RIDGE * np.eye(len(values)), values - values.mean())
         predicted = self.tag_M[indices].astype(np.float64) @ (R.T @ alpha) + values.mean()
+        if leave_out:
+            # For a ridge regression, the fit without one row comes from the fit with all rows:
+            # (fit of the row - leverage * value of the row) / (1 - leverage). The model subtracts
+            # the mean of the values first, and this mean is also different without the row.
+            gram = R @ R.T
+            hat = gram @ np.linalg.inv(gram + TIER_RIDGE * np.eye(len(values)))
+            leverage = np.diag(hat)
+            rest = np.clip(1.0 - leverage, 1e-6, None)
+            fit_values = (hat @ values - leverage * values) / rest
+            fit_ones = (hat.sum(axis=1) - leverage) / rest
+            mean_without = (values.sum() - values) / max(len(values) - 1, 1)
+            without = fit_values + mean_without * (1.0 - fit_ones)
+            position = {row: n for n, row in enumerate(rated + dismissed)}
+            for n, row in enumerate(indices):
+                if row in position:
+                    predicted[n] = without[position[row]]
         return predicted.astype(np.float32)
 
     def _build_kind_codes(self) -> np.ndarray:
@@ -533,25 +678,40 @@ class Engine:
 
         `owned` are the franchises of the library. Each franchise counts one time, as its entry point.
         """
-        total = np.zeros(len(indices), dtype=np.float64)
+        return self._kind_values(indices, self._kind_tables(indices, owned))
+
+    def _kind_tables(self, indices: list[int], owned: set[str]) -> list:
+        """Return for each property the value of each of its groups, and the value for a row without the property.
+
+        The entry of a property is None if the rows or the library have no data for it.
+        """
         library = [self.entry_row[f] for f in sorted(owned) if f in self.entry_row]
-        if not library or not len(indices):
-            return total.astype(np.float32)
+        tables: list = []
         for col, size in enumerate(KIND_SIZES):
-            cand = self.kind_codes[indices, col]
-            lib = self.kind_codes[library, col]
+            cand = self.kind_codes[indices, col] if len(indices) else np.zeros(0, dtype=np.int64)
+            lib = self.kind_codes[library, col] if library else np.zeros(0, dtype=np.int64)
             lib = lib[lib >= 0]
             known = cand >= 0
             if not known.any() or not len(lib):
+                tables.append(None)
                 continue
             n_cand = np.bincount(cand[known], minlength=size)
             n_lib = np.bincount(lib, minlength=size)
             # Each group gets 0.5 more, so that an empty group does not give an infinite value
             ratio = (np.log((n_lib + 0.5) / (n_lib.sum() + 0.5 * size))
                      - np.log((n_cand + 0.5) / (n_cand.sum() + 0.5 * size)))
-            value = np.where(known, ratio[np.clip(cand, 0, None)], 0.0)
-            value[~known] = value[known].mean()
-            total += value
+            tables.append((ratio, ratio[cand[known]].mean()))
+        return tables
+
+    def _kind_values(self, indices: list[int], tables: list) -> np.ndarray:
+        """Return the kind score of each row from the tables of _kind_tables."""
+        total = np.zeros(len(indices), dtype=np.float64)
+        for col, table in enumerate(tables):
+            if table is None or not len(indices):
+                continue
+            ratio, unknown = table
+            codes = self.kind_codes[indices, col]
+            total += np.where(codes >= 0, ratio[np.clip(codes, 0, None)], unknown)
         return total.astype(np.float32)
 
     def _build_entry_rows(self) -> dict[str, int]:
@@ -776,24 +936,13 @@ class Engine:
             self.dismissed.discard(show_id)
 
     def dismissed_shows(self) -> list[dict]:
-        c = self.taste_center() if self.owned_idx else None
-        out = []
-        for show_id in sorted(self.dismissed):
-            i = self.pos[show_id]
-            sim = float(self.eff_M[i] @ c) if c is not None else 0.0
-            out.append(self._result(i, sim, seed=None))
-        return out
+        return [self._result(self.pos[show_id]) for show_id in sorted(self.dismissed)]
 
     def manual_shows(self) -> list[dict]:
         manual_ids = self.store.get_manual_watched_ids()
-        c = self.taste_center() if self.owned_idx else None
-        out = []
-        for i, r in enumerate(self.rows):
-            # A show that the library has now is not a manually added show
-            if r["id"] in manual_ids and r["id"] not in self.duplicate_of:
-                sim = float(self.eff_M[i] @ c) if c is not None else 0.0
-                out.append(self._result(i, sim, seed=None))
-        return out
+        # A show that the library has now is not a manually added show
+        return [self._result(i) for i, r in enumerate(self.rows)
+                if r["id"] in manual_ids and r["id"] not in self.duplicate_of]
 
     def set_show_tier(self, show_id: str, tier: str | None) -> dict:
         if show_id not in self.by_id:
@@ -823,36 +972,23 @@ class Engine:
         changed = [sid for sid in target_ids if sid in self.by_id]
         return {"id": show_id, "tier": primary["tier"], "weight": primary["weight"], "ids": changed}
 
-    def review_queue(self, unrated_only: bool = False) -> list[dict]:
-        c = self.taste_center() if self.owned_idx else None
-        owned_rows = [self.rows[i] for i in self.owned_idx]
+    def review_queue(self, unrated_only: bool = False, kinds: str = "all") -> list[dict]:
+        """Return the shows of the user: the shows without a tier first, then by their match.
+
+        A show without a tier is frequently a show that the user did not watch yet. Thus the
+        start of the list is also the answer to "which show of mine do I watch next?".
+        """
+        match = np.nan_to_num(self.match_percent(kinds), nan=-1.0)
+        order = sorted(self.owned_idx, key=lambda i: (self.rows[i].get("tier") is not None, -float(match[i])))
         if unrated_only:
-            owned_rows = [r for r in owned_rows if r.get("tier") is None]
+            order = [i for i in order if self.rows[i].get("tier") is None]
+        return self.with_match([self._result(i) for i in order], kinds)
 
-        def sort_key(r):
-            is_unrated = 0 if r.get("tier") is None else 1
-            idx = self.pos[r["id"]]
-            sim = float(self.eff_M[idx] @ c) if c is not None else 0.0
-            return (is_unrated, -sim)
-
-        sorted_rows = sorted(owned_rows, key=sort_key)
-        out = []
-        for r in sorted_rows:
-            idx = self.pos[r["id"]]
-            sim = float(self.eff_M[idx] @ c) if c is not None else 0.0
-            out.append(self._result(idx, sim, seed=None))
-        return out
-
-    def rated_shows(self) -> list[dict]:
-        c = self.taste_center() if self.owned_idx else None
-        out = []
-        for i in self.owned_idx:
-            r = self.rows[i]
-            if r.get("tier") is not None:
-                sim = float(self.eff_M[i] @ c) if c is not None else 0.0
-                out.append(self._result(i, sim, seed=None))
+    def rated_shows(self, kinds: str = "all") -> list[dict]:
+        """Return the shows that the user rated: by tier, then by their match."""
+        out = self.with_match([self._result(i) for i in self.owned_idx if self.rows[i].get("tier") is not None], kinds)
         tier_order = {"S": 0, "A": 1, "B": 2, "C": 3, "D": 4}
-        return sorted(out, key=lambda x: (tier_order.get(x.get("tier"), 99), -(x.get("similarity") or 0.0)))
+        return sorted(out, key=lambda x: (tier_order.get(x.get("tier"), 99), -(x.get("match") or 0.0)))
 
     def tier_summary(self) -> dict[str, int]:
         counts = {"S": 0, "A": 0, "B": 0, "C": 0, "D": 0, "unrated": 0}
@@ -901,10 +1037,12 @@ class Engine:
             out["score"] = entry.get("score")
         return out
 
-    def _result(self, j: int, sim: float, seed=None, matched_favorite: str | None = None) -> dict:
+    def _result(self, j: int, sim: float | None = None, seed=None, matched_favorite: str | None = None) -> dict:
         r = self.rows[j]
         out = self.public_row(j)
-        out["similarity"] = display_similarity(sim)
+        if sim is not None:
+            # The similarity to the seed show of the list
+            out["similarity"] = display_similarity(sim)
         if seed is not None:
             out["shared_tags"] = sorted(set(seed["tags"]) & set(r["tags"]))
         else:

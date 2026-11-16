@@ -47,6 +47,14 @@ def test_api_weights_endpoints(tmp_path):
         assert len(ratings_res.json()) == 1
         assert ratings_res.json()[0]["id"] == "al:1"
         assert ratings_res.json()[0]["tier"] == "S"
+        # Each list has the match of a show. Only a list with a seed has a similarity.
+        assert 0.0 <= ratings_res.json()[0]["match"] <= 100.0 and "similarity" not in ratings_res.json()[0]
+        assert client.get("/api/ratings?kinds=usual").status_code == 200
+        assert client.get("/api/ratings?kinds=other").status_code == 422
+        assert "match" in client.get("/api/show/al:3?kinds=usual").json()
+        assert all("match" in r and "similarity" in r for r in client.get("/api/similar?id=al:1").json())
+        assert all("match" in r and "similarity" not in r for r in client.get("/api/recommend").json())
+        assert all("match" in r for r in client.get("/api/review-queue").json())
 
         # 3. Check unrated_only queue
         unrated_res = client.get("/api/review-queue?unrated_only=true")
