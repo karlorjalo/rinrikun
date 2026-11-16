@@ -561,3 +561,53 @@ def test_hidden_library_series_with_an_announced_sequel_is_found(tmp_path):
     assert e.ids[e.entry_row[e.franchise["jf:1"]]] == "jf:1"
     rank, length = rank_of_hidden(e, "jf:1")
     assert rank < length
+
+
+def _tier_engine(tmp_path, monkeypatch):
+    """The user rated band shows S and mecha shows C. All shows have different, unrelated embeddings."""
+    import anime_vec.engine as engine_module
+    from anime_vec.store import Store
+    monkeypatch.setattr(engine_module, "TIER_MODEL_MIN_RATED", 4)
+    s = Store(tmp_path / "tier.db")
+    specs = [(f"al:{n}", 1, ["Band"], "S") for n in range(1, 5)]
+    specs += [(f"al:{n}", 1, ["Mecha"], "C") for n in range(5, 9)]
+    specs += [("al:20", 0, ["Band"], None), ("al:21", 0, ["Mecha"], None), ("al:22", 0, ["Idol"], None),
+              ("al:23", 0, ["Sports"], None)]
+    rng = np.random.default_rng(3)
+    for rid, owned, tags, tier in specs:
+        s.upsert_rows([{"id": rid, "source": "anilist", "title": rid, "title_native": "", "year": 2020,
+                        "format": "tv", "genres": [], "tags": tags, "tag_ranks": [90], "studios": [],
+                        "overview": "O", "score": 7.0, "owned": owned, "tmdbid": None,
+                        "anilist_id": int(rid.split(":")[1]), "poster": None}])
+        s.save_embedding(rid, rng.normal(size=16).astype(np.float32).tobytes())
+        if tier:
+            s.set_weight(rid, tier)
+    return Engine(s)
+
+
+def test_tier_model_learns_the_tags_of_the_high_and_the_low_tiers(tmp_path, monkeypatch):
+    e = _tier_engine(tmp_path, monkeypatch)
+    band, mecha, idol = e._predicted_tier([e.pos["al:20"], e.pos["al:21"], e.pos["al:22"]])
+    assert band > idol > mecha
+    # A show with tags that the user never rated gets the mean tier
+    assert idol == pytest.approx(2.5, abs=0.01)
+
+
+def test_tier_model_needs_enough_ratings(tmp_path):
+    e = _engine_from(tmp_path, [("al:1", [1, 0, 0, 0], 1, ["Band"], [90]), ("al:10", [0, 1, 0, 0], 0, ["Band"], [90])])
+    e.set_show_tier("al:1", "S")
+    assert list(e._predicted_tier([e.pos["al:10"]])) == [0.0]
+
+
+def test_tier_penalty_moves_a_low_prediction_down_and_gives_no_bonus(tmp_path, monkeypatch):
+    import anime_vec.engine as engine_module
+    e = _tier_engine(tmp_path, monkeypatch)
+    # Without the other terms that use the low tiers, only the tier penalty can change the order
+    monkeypatch.setattr(engine_module, "DISLIKE_WEIGHT", 0.0)
+    monkeypatch.setattr(engine_module, "TIER_PENALTY", 0.0)
+    before = [r["id"] for r in e.recommend(k=4)]
+    monkeypatch.setattr(engine_module, "TIER_PENALTY", 5.0)
+    after = [r["id"] for r in e.recommend(k=4)]
+    assert after[-1] == "al:21"
+    # The other shows keep their order: the show with the high prediction does not move up
+    assert [i for i in after if i != "al:21"] == [i for i in before if i != "al:21"]

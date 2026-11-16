@@ -26,6 +26,17 @@ LINK_WEIGHT = 0.5
 DISLIKE_WEIGHT = 0.5
 # Number of nearest disliked shows that give the dislike score of a candidate
 DISLIKED_K = 3
+# The tier model predicts the tier that the user will give to a show, as a number
+TIER_VALUES = {"S": 4.0, "A": 3.0, "B": 2.0, "C": 1.0, "D": 0.0}
+# Strength of the ridge regression of the tier model. A larger value gives a smoother model.
+TIER_RIDGE = 3.0
+# The tier model needs this number of rated shows
+TIER_MODEL_MIN_RATED = 20
+# A candidate gets the tier penalty if its predicted tier is more than this number of standard
+# deviations below the mean of the candidates
+TIER_MARGIN = 0.5
+# Weight of the tier penalty in the hybrid score
+TIER_PENALTY = 1.0
 
 
 def _entry_key(r: dict) -> tuple:
@@ -292,6 +303,12 @@ class Engine:
             bad_tag, _, _ = _knn_score(self.tag_M[cand_indices], self.tag_M[disliked], ones, DISLIKED_K)
             scores = scores - DISLIKE_WEIGHT * _zscore(0.5 * _zscore(bad_text) + 0.5 * _zscore(bad_tag))
 
+        # A candidate that the tier model puts clearly below the other candidates gets a lower score.
+        # A high prediction gives no bonus: in the hidden franchise test a bonus made the list worse,
+        # and the penalty moved the S-tier and A-tier shows up.
+        low = np.maximum(0.0, -_zscore(self._predicted_tier(cand_indices)) - TIER_MARGIN)
+        scores = scores - TIER_PENALTY * low
+
         if mode == "diverse":
             # Maximal marginal relevance: balance the score against the similarity to the shows already selected
             span = float(scores.max() - scores.min())
@@ -325,6 +342,23 @@ class Engine:
                 r["linked_favorite"] = self._favorite_title(source)
             out.append(r)
         return out
+
+    def _predicted_tier(self, indices: list[int]) -> np.ndarray:
+        """Predict the tier that the user will give to each row, as a number (4 = S, 0 = D).
+
+        The model is a ridge regression on the tags of the shows that the user rated: it learns
+        which tags go with high tiers and which go with low tiers. The crowd score of a show does
+        not predict the tier of this user, but the tiers of the user for shows with the same tags do.
+        All predictions are 0 if the user has too few ratings.
+        """
+        rated = [i for i in self.owned_idx if self.rows[i].get("tier") in TIER_VALUES]
+        values = np.array([TIER_VALUES[self.rows[i]["tier"]] for i in rated], dtype=np.float64)
+        if len(rated) < TIER_MODEL_MIN_RATED or values.std() < 1e-9:
+            return np.zeros(len(indices), dtype=np.float32)
+        R = self.tag_M[rated].astype(np.float64)
+        alpha = np.linalg.solve(R @ R.T + TIER_RIDGE * np.eye(len(rated)), values - values.mean())
+        predicted = self.tag_M[indices].astype(np.float64) @ (R.T @ alpha) + values.mean()
+        return predicted.astype(np.float32)
 
     def _build_entry_rows(self) -> dict[str, int]:
         """Return the entry point of each franchise: the earliest TV series, or the earliest show if none."""
