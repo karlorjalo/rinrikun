@@ -63,6 +63,8 @@ def row_from_media(m: dict) -> dict:
         "source": "anilist",
         "title": t.get("romaji") or t.get("english") or t.get("native") or "",
         "title_native": t.get("native") or "",
+        # The interface shows the romaji title and the Japanese title. Its search also uses the English title.
+        "title_english": t.get("english") or "",
         # A movie, an OVA or a special frequently has no season: use the year of its start date
         "year": m.get("seasonYear") or (m.get("startDate") or {}).get("year"),
         "format": (m.get("format") or "").lower() or None,

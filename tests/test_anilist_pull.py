@@ -284,3 +284,12 @@ def test_cache_without_the_start_date_refetches(tmp_path, monkeypatch):
     monkeypatch.setattr(anilist_pull, "_graphql_ids", lambda ids, timeout=60: {"data": {"Page": {"media": [
         dict(_media(i), seasonYear=None, startDate={"year": 1998}) for i in ids]}}})
     assert anilist_pull.fetch_by_ids([1])[0]["year"] == 1998
+
+
+def test_row_from_media_keeps_the_english_title():
+    m = dict(MEDIA, title={"romaji": "Saenai Heroine no Sodatekata", "native": "冴えない彼女の育てかた",
+                           "english": "Saekano: How to Raise a Boring Girlfriend"})
+    r = row_from_media(m)
+    assert r["title"] == "Saenai Heroine no Sodatekata"
+    assert r["title_english"] == "Saekano: How to Raise a Boring Girlfriend"
+    assert row_from_media(MEDIA)["title_english"] == ""

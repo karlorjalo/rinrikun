@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS rec_log (
 # The columns of the shows table that the build writes
 COLUMNS = ("id", "source", "title", "title_native", "year", "format", "genres", "tags", "tag_ranks", "studios",
            "overview", "score", "owned", "tmdbid", "anilist_id", "poster", "relations", "recommendations",
-           "library_id", "provider_ids", "seasons", "added_at", "status", "episodes")
+           "library_id", "provider_ids", "seasons", "added_at", "status", "episodes", "title_english")
 # The columns that hold JSON, with the value for a row that has no data
 JSON_COLUMNS = {"genres": [], "tags": [], "tag_ranks": [], "studios": [], "relations": [], "recommendations": [],
                 "provider_ids": {}, "seasons": []}
@@ -76,7 +76,7 @@ class Store:
         # Older databases do not have the columns that later features added
         columns = {r[1] for r in self.con.execute("PRAGMA table_info(shows)")}
         for column in ("relations", "recommendations", "library_id", "provider_ids", "seasons", "added_at",
-                       "status", "episodes"):
+                       "status", "episodes", "title_english"):
             if column not in columns:
                 kind = "INTEGER" if column == "episodes" else "TEXT"
                 self.con.execute(f"ALTER TABLE shows ADD COLUMN {column} {kind}")

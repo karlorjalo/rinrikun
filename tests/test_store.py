@@ -221,3 +221,29 @@ def test_log_of_recommendations(tmp_path):
     ro = Store(tmp_path / "log.db", read_only=True)
     ro.log_recommendations([("al:9", 0)], "all", "2026-11-19")
     assert "al:9" not in ro.get_rec_log() and len(ro.get_rec_log()) == 2
+
+
+def test_english_title_roundtrip(tmp_path):
+    s = Store(tmp_path / "english.db")
+    s.upsert_rows([make_row(1, title_english="An English Title"), make_row(2)])
+    rows = s.load_rows()
+    assert rows[0]["title_english"] == "An English Title"
+    assert rows[1]["title_english"] is None
+
+
+def test_old_database_gets_the_english_title_column(tmp_path):
+    import sqlite3
+    path = tmp_path / "old_english.db"
+    con = sqlite3.connect(str(path))
+    con.execute("CREATE TABLE shows (id TEXT PRIMARY KEY, source TEXT, title TEXT, title_native TEXT, "
+                "year INTEGER, format TEXT, genres TEXT, tags TEXT, tag_ranks TEXT, studios TEXT, "
+                "overview TEXT, score REAL, owned INTEGER, tmdbid TEXT, anilist_id INTEGER, "
+                "poster TEXT, text_hash TEXT, embedding BLOB)")
+    con.execute("INSERT INTO shows (id, source, title, genres, tags, tag_ranks, studios, owned) "
+                "VALUES ('al:1', 'anilist', 'Old', '[]', '[]', '[]', '[]', 0)")
+    con.commit()
+    con.close()
+    s = Store(path)
+    assert s.load_rows()[0]["title_english"] is None
+    s.upsert_rows([make_row(1, title_english="New")])
+    assert s.load_rows()[0]["title_english"] == "New"
