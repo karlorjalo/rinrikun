@@ -91,3 +91,26 @@ def test_cache_without_relations_refetches(tmp_path, monkeypatch):
     rows = anilist_pull.fetch_pool()
     assert rows[0]["relations"] == [7]
     assert json.loads((tmp_path / "page_1.json").read_text(encoding="utf-8")) == new_page
+
+
+def test_row_from_media_keeps_user_recommendations():
+    m = dict(MEDIA, recommendations={"nodes": [
+        {"rating": 120, "mediaRecommendation": {"id": 5, "type": "ANIME"}},
+        {"rating": 40, "mediaRecommendation": {"id": 6, "type": "MANGA"}},
+        {"rating": -3, "mediaRecommendation": {"id": 7, "type": "ANIME"}},
+        {"rating": 9, "mediaRecommendation": None},
+    ]})
+    assert row_from_media(m)["recommendations"] == [[5, 120]]
+    assert row_from_media(MEDIA)["recommendations"] == []
+
+
+def test_cache_without_recommendations_refetches(tmp_path, monkeypatch):
+    monkeypatch.setattr(anilist_pull, "CACHE_DIR", tmp_path)
+    _fake_time(monkeypatch)
+    old_media = dict(MEDIA, relations={"edges": []})
+    new_media = dict(old_media, recommendations={"nodes": [{"rating": 8, "mediaRecommendation": {"id": 5, "type": "ANIME"}}]})
+    page = lambda media: {"data": {"Page": {"pageInfo": {"lastPage": 1}, "media": [media]}}}
+    (tmp_path / "page_1.json").write_text(json.dumps(page(old_media)), encoding="utf-8")
+    monkeypatch.setattr(anilist_pull, "_graphql", lambda page_no, timeout=60: page(new_media))
+
+    assert anilist_pull.fetch_pool()[0]["recommendations"] == [[5, 8]]

@@ -43,11 +43,12 @@ class Store:
     def __init__(self, path):
         self.con = sqlite3.connect(str(path), check_same_thread=False)
         self.con.executescript(SCHEMA)
-        # Databases from before the franchise feature do not have this column
+        # Older databases do not have the columns that later features added
         columns = {r[1] for r in self.con.execute("PRAGMA table_info(shows)")}
-        if "relations" not in columns:
-            self.con.execute("ALTER TABLE shows ADD COLUMN relations TEXT")
-            self.con.commit()
+        for column in ("relations", "recommendations"):
+            if column not in columns:
+                self.con.execute(f"ALTER TABLE shows ADD COLUMN {column} TEXT")
+        self.con.commit()
 
     def get_manual_watched_ids(self) -> set[str]:
         cur = self.con.execute("SELECT id FROM watched_manual")
@@ -99,18 +100,19 @@ class Store:
         for r in rows:
             self.con.execute(
                 "INSERT INTO shows (id,source,title,title_native,year,format,genres,tags,"
-                "tag_ranks,studios,overview,score,owned,tmdbid,anilist_id,poster,relations) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "tag_ranks,studios,overview,score,owned,tmdbid,anilist_id,poster,relations,recommendations) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(id) DO UPDATE SET title=excluded.title, title_native=excluded.title_native,"
                 "year=excluded.year, format=excluded.format, genres=excluded.genres, tags=excluded.tags,"
                 "tag_ranks=excluded.tag_ranks, studios=excluded.studios, overview=excluded.overview,"
                 "score=excluded.score, owned=excluded.owned, tmdbid=excluded.tmdbid,"
-                "anilist_id=excluded.anilist_id, poster=excluded.poster, relations=excluded.relations",
+                "anilist_id=excluded.anilist_id, poster=excluded.poster, relations=excluded.relations,"
+                "recommendations=excluded.recommendations",
                 (r["id"], r["source"], r["title"], r["title_native"], r["year"], r["format"],
                  json.dumps(r["genres"], ensure_ascii=False), json.dumps(r["tags"], ensure_ascii=False),
                  json.dumps(r["tag_ranks"]), json.dumps(r["studios"], ensure_ascii=False),
                  r["overview"], r["score"], r["owned"], r["tmdbid"], r["anilist_id"], r["poster"],
-                 json.dumps(r.get("relations") or [])))
+                 json.dumps(r.get("relations") or []), json.dumps(r.get("recommendations") or [])))
         self.con.commit()
 
     def load_rows(self) -> list[dict]:
@@ -118,7 +120,8 @@ class Store:
         weights = self.get_weights()
         cur = self.con.execute(
             "SELECT id,source,title,title_native,year,format,genres,tags,tag_ranks,studios,"
-            "overview,score,owned,tmdbid,anilist_id,poster,text_hash,relations FROM shows ORDER BY id")
+            "overview,score,owned,tmdbid,anilist_id,poster,text_hash,relations,recommendations "
+            "FROM shows ORDER BY id")
         out = []
         for t in cur.fetchall():
             row_id = t[0]
@@ -135,7 +138,8 @@ class Store:
                         "tier": tier, "weight": weight,
                         "tmdbid": t[13], "anilist_id": t[14],
                         "poster": t[15], "text_hash": t[16],
-                        "relations": json.loads(t[17]) if t[17] else []})
+                        "relations": json.loads(t[17]) if t[17] else [],
+                        "recommendations": json.loads(t[18]) if t[18] else []})
         return out
 
     def save_embedding(self, row_id: str, blob: bytes):

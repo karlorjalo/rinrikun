@@ -93,5 +93,14 @@ def test_old_database_gets_relations_column(tmp_path):
     con.close()
     s = Store(path)
     assert s.load_rows()[0]["relations"] == []
-    s.upsert_rows([make_row(1, relations=[2])])
+    s.upsert_rows([make_row(1, relations=[2], recommendations=[[3, 50]])])
     assert s.load_rows()[0]["relations"] == [2]
+    assert s.load_rows()[0]["recommendations"] == [[3, 50]]
+
+
+def test_recommendations_roundtrip(tmp_path):
+    s = Store(tmp_path / "rec.db")
+    s.upsert_rows([make_row(1, recommendations=[[5, 120], [9, 3]]), make_row(2)])
+    rows = s.load_rows()
+    assert rows[0]["recommendations"] == [[5, 120], [9, 3]]
+    assert rows[1]["recommendations"] == []
