@@ -484,3 +484,33 @@ def test_unreleased_shows_are_not_recommended(tmp_path):
     assert "al:20" not in {r["id"] for r in e.recommend(k=10, seed_id="al:1")}
     e.by_id["al:20"]["status"] = "FINISHED"
     assert "al:20" in {r["id"] for r in e.recommend(k=10)}
+
+
+def test_manually_watched_pool_row_is_one_show_with_its_library_row(tmp_path):
+    from anime_vec.store import Store
+    s = Store(tmp_path / "manual_dup.db")
+    base = {"genres": [], "tags": [], "tag_ranks": [], "studios": [], "overview": "O", "score": 7.0,
+            "tmdbid": None, "poster": None, "year": 2015}
+    rows = [
+        dict(base, id="jf:1", source="library", title="ライブラリ", title_native="ライブラリ", format="series",
+             owned=1, anilist_id=None),
+        dict(base, id="al:10", source="anilist", title="Show", title_native="", format="tv", owned=1,
+             anilist_id=10, library_id="jf:1"),
+        dict(base, id="al:20", source="anilist", title="Other", title_native="", format="tv", owned=0, anilist_id=20),
+        dict(base, id="al:30", source="anilist", title="Third", title_native="", format="tv", owned=0, anilist_id=30),
+    ]
+    for n, r in enumerate(rows):
+        s.upsert_rows([r])
+        s.save_embedding(r["id"], np.eye(4, dtype=np.float32)[n].tobytes())
+    # Before the library had the show, the user marked the two pool rows as watched and gave a tier
+    s.set_manual_watched("al:10", True)
+    s.set_manual_watched("al:30", True)
+    s.set_weight("al:10", "S")
+    e = Engine(s)
+    assert e.duplicate_of == {"al:10": "jf:1"}
+    assert [e.ids[i] for i in e.owned_idx] == ["al:30", "jf:1"]
+    # The tier of the pool row goes to the library row, and the show is in the lists one time
+    assert e.by_id["jf:1"]["tier"] == "S"
+    assert [r["id"] for r in e.rated_shows()] == ["jf:1"]
+    assert [r["id"] for r in e.manual_shows()] == ["al:30"]
+    assert [p["id"] for p in e.get_vector_map()["points"] if p["owned"]] == ["al:30", "jf:1"]

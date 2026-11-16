@@ -44,3 +44,14 @@ def test_seasons_by_series_ignores_virtual_and_unnumbered_seasons():
         {"SeriesId": "b", "IndexNumber": None, "LocationType": "FileSystem"},
     ]
     assert seasons_by_series(items) == {"a": [1, 2]}
+
+
+def test_folder_style_name_is_cleaned():
+    from anime_vec.jellyfin_pull import clean_name
+    assert clean_name("冴えない彼女の育てかた (2015) [tmdbid-86561]") == "冴えない彼女の育てかた"
+    assert clean_name("Title [tvdbid-123]") == "Title"
+    assert clean_name("冴えない彼女の育てかた") == "冴えない彼女の育てかた"
+    # A year in the middle of a title is part of the title
+    assert clean_name("Blade Runner 2049") == "Blade Runner 2049"
+    assert clean_name("(2015)") == "(2015)"
+    assert row_from_item(dict(ITEM, Name="冴えない彼女の育てかた (2015) [tmdbid-86561]"))["title"] == "冴えない彼女の育てかた"

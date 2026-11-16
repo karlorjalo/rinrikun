@@ -1,4 +1,5 @@
 import json
+import re
 import urllib.request
 
 import json as _json
@@ -53,12 +54,22 @@ def poster_url(item_id: str) -> str:
     return f"{JELLYFIN}/Items/{item_id}/Images/Primary"
 
 
+def clean_name(name: str) -> str:
+    """Remove the folder suffix from a title, for example "Title (2015) [tmdbid-86561]".
+
+    Jellyfin uses the folder name as the title of an item that has no metadata.
+    """
+    cleaned = re.sub(r"\s*\[(tmdbid|tvdbid|imdbid)-[^\]]+\]", "", name or "")
+    cleaned = re.sub(r"\s*\((19|20)\d{2}\)\s*$", "", cleaned).strip()
+    return cleaned or (name or "")
+
+
 def row_from_item(i: dict, seasons: list[int] | None = None) -> dict:
     return {
         "id": f"jf:{i['Id']}",
         "source": "library",
-        "title": i.get("Name") or "",
-        "title_native": i.get("Name") or "",
+        "title": clean_name(i.get("Name")),
+        "title_native": clean_name(i.get("Name")),
         "year": i.get("ProductionYear"),
         "format": i.get("Type", "").lower() or None,
         "genres": i.get("Genres") or [],

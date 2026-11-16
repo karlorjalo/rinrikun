@@ -74,10 +74,11 @@ class Engine:
         self.counterparts: dict[str, list[str]] = {}
         if any(r.get("library_id") for r in self.rows):
             # The build connected the pool rows to the library rows. One library row can have
-            # more than one pool row: one for each season.
+            # more than one pool row: one for each season. A pool row that the user marked as
+            # watched by hand is also the same show as its library row.
             for r in self.rows:
                 lib_id = r.get("library_id")
-                if r["source"] == "anilist" and lib_id in self.by_id and not r.get("manual_watched"):
+                if r["source"] == "anilist" and lib_id in self.by_id:
                     self.duplicate_of[r["id"]] = lib_id
                     self.counterparts.setdefault(lib_id, []).append(r["id"])
                     self.counterparts.setdefault(r["id"], []).append(lib_id)
@@ -483,7 +484,8 @@ class Engine:
         c = self.taste_center() if self.owned_idx else None
         out = []
         for i, r in enumerate(self.rows):
-            if r["id"] in manual_ids:
+            # A show that the library has now is not a manually added show
+            if r["id"] in manual_ids and r["id"] not in self.duplicate_of:
                 sim = float(self.eff_M[i] @ c) if c is not None else 0.0
                 out.append(self._result(i, sim, seed=None))
         return out
