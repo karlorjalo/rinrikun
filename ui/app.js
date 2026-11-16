@@ -2560,6 +2560,43 @@ function initPetals() {
   ).join("");
 }
 
+// ---- Help for the tiers
+// The Review tab and the Ratings tab have a card with one question for each tier. The questions
+// say what a tier does in the recommender: S, A and B give more shows like the show (with the
+// weights 2, 1.5 and 1), and C and D give fewer. D also blocks a show that is almost the same.
+const TIER_HELP_KEY = "rinrikun-tier-help";
+const TIER_QUESTIONS = [
+  ["S", "Would I watch it again, or do I measure other shows by it?"],
+  ["A", "Would I be glad if my next show was like this one?"],
+  ["B", "Was it worth my time, and is one more show like it fine?"],
+  ["C", "Would I be disappointed if the list gave me a show like this?"],
+  ["D", "Is a show that is almost the same a certain no?"],
+];
+
+function initTierHelp() {
+  // The user can close the card. The browser keeps this, and the two cards have the same state.
+  let closed = false;
+  try { closed = localStorage.getItem(TIER_HELP_KEY) === "closed"; } catch (e) {}
+  const rows = TIER_QUESTIONS.map(([tier, question]) =>
+    `<div class="tier-help-row"><dt><span class="tier-pill tier-${tier.toLowerCase()}">${tier}</span></dt><dd>${esc(question)}</dd></div>`
+  ).join("");
+  document.querySelectorAll(".tier-help-slot").forEach((slot) => {
+    slot.innerHTML = `
+      <details class="tier-help"${closed ? "" : " open"}>
+        <summary>Which tier? One question for each tier</summary>
+        <p class="tier-help-note">A tier tells the recommender what you want. S, A and B give you more shows like this one. C and D give you fewer.</p>
+        <dl class="tier-help-list">${rows}</dl>
+      </details>`;
+    const card = slot.querySelector("details");
+    card.addEventListener("toggle", () => {
+      try { localStorage.setItem(TIER_HELP_KEY, card.open ? "open" : "closed"); } catch (e) {}
+      document.querySelectorAll(".tier-help").forEach((other) => {
+        if (other !== card && other.open !== card.open) other.open = card.open;
+      });
+    });
+  });
+}
+
 // ---- Settings
 // Each setting is a choice between options. The first option is the default. The value of a
 // setting is an attribute of the root element (data-<key>), so that the style sheet can use it.
@@ -2649,6 +2686,7 @@ function initSettings() {
 }
 
 initPetals();
+initTierHelp();
 initSettings();
 profile();
 initSearch();
