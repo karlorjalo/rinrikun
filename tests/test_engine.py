@@ -611,3 +611,57 @@ def test_tier_penalty_moves_a_low_prediction_down_and_gives_no_bonus(tmp_path, m
     assert after[-1] == "al:21"
     # The other shows keep their order: the show with the high prediction does not move up
     assert [i for i in after if i != "al:21"] == [i for i in before if i != "al:21"]
+
+
+def _dismiss_engine(tmp_path):
+    # al:10 and al:11 are almost the same show. al:12 is a different show that the user can also like.
+    return _engine_from(tmp_path, [
+        ("al:1", [1, 0, 0, 0], 1, ["Band"], [90]),
+        ("al:10", [0.9, 0.31, 0, 0], 0, ["Band", "Idol"], [90, 80]),
+        ("al:11", [0.9, 0.3, 0, 0], 0, ["Band", "Idol"], [90, 80]),
+        ("al:12", [0.6, 0, 0.8, 0], 0, ["Band", "Sports"], [90, 80]),
+        ("al:13", [0, 0, 0, 1], 0, ["Mecha"], [90]),
+    ])
+
+
+def test_dismissed_show_is_not_recommended(tmp_path):
+    e = _dismiss_engine(tmp_path)
+    assert e.by_id["al:10"]["dismissed"] == 0
+    e.set_dismissed("al:10", True)
+    assert e.by_id["al:10"]["dismissed"] == 1
+    for kwargs in ({"mode": "hybrid"}, {"mode": "diverse"}, {"seed_id": "al:11"}, {"mode": "hybrid", "new_only": True}):
+        assert "al:10" not in {r["id"] for r in e.recommend(k=10, **kwargs)}, kwargs
+    assert [r["id"] for r in e.dismissed_shows()] == ["al:10"]
+    # The choice stays after a restart
+    again = Engine(e.store)
+    assert again.dismissed == {"al:10"}
+    assert "al:10" not in {r["id"] for r in again.recommend(k=10)}
+    # The user can put the show back
+    e.set_dismissed("al:10", False)
+    assert "al:10" in {r["id"] for r in e.recommend(k=10)}
+    assert e.dismissed_shows() == []
+    with pytest.raises(KeyError):
+        e.set_dismissed("al:999", True)
+
+
+def test_dismissed_show_counts_as_a_dislike(tmp_path, monkeypatch):
+    import anime_vec.engine as engine_module
+    monkeypatch.setattr(engine_module, "DISLIKE_WEIGHT", 5.0)
+    e = _dismiss_engine(tmp_path)
+    before = [r["id"] for r in e.recommend(k=10)]
+    assert before.index("al:11") < before.index("al:12")
+    e.set_dismissed("al:10", True)
+    after = [r["id"] for r in e.recommend(k=10)]
+    # al:11 is almost the same show as the removed al:10, thus it is below al:12 now
+    assert after.index("al:12") < after.index("al:11")
+
+
+def test_dismissed_show_is_a_low_tier_example_for_the_tier_model(tmp_path, monkeypatch):
+    e = _tier_engine(tmp_path, monkeypatch)
+    idol = e.pos["al:22"]
+    assert e._predicted_tier([idol])[0] == pytest.approx(2.5, abs=0.01)
+    e.set_dismissed("al:22", True)
+    assert e._predicted_tier([idol])[0] < 2.4
+    # An owned show is not a dismissed example
+    e.set_dismissed("al:1", True)
+    assert e._dismissed_rows() == [idol]

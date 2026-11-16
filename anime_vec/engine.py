@@ -37,6 +37,8 @@ TIER_MODEL_MIN_RATED = 20
 TIER_MARGIN = 0.5
 # Weight of the tier penalty in the hybrid score
 TIER_PENALTY = 1.0
+# A show that the user removed from the recommendations counts as a C-tier show in the tier model
+DISMISSED_TIER = TIER_VALUES["C"]
 
 
 def _entry_key(r: dict) -> tuple:
@@ -81,6 +83,10 @@ class Engine:
         self.rows = [r for r in self.rows if store.get_embedding(r["id"])]
         self.ids = [r["id"] for r in self.rows]
         self.by_id = {r["id"]: r for r in self.rows}
+        # The shows that the user removed from the recommendations ("not interested")
+        self.dismissed = {i for i in store.get_dismissed_ids() if i in self.by_id}
+        for r in self.rows:
+            r["dismissed"] = 1 if r["id"] in self.dismissed else 0
         M = np.array([blob_to_vec(store.get_embedding(r["id"])) for r in self.rows], dtype=np.float32)
         self.M = M / np.clip(np.linalg.norm(M, axis=1, keepdims=True), 1e-9, None)
 
@@ -259,7 +265,8 @@ class Engine:
             exclude_ids = {seed_id} | set(self.counterparts.get(seed_id, []))
             allowed = [j for j in np.argsort(-sims)
                        if self.ids[j] not in exclude_ids and not self.rows[j]["owned"]
-                       and self.franchise[self.ids[j]] not in skip and _released(self.rows[j])]
+                       and self.franchise[self.ids[j]] not in skip and _released(self.rows[j])
+                       and self.ids[j] not in self.dismissed]
             return [self._result(j, float(sims[j]), seed=None) for j in self._one_per_franchise(allowed, k)]
 
         # A franchise that the user does not own has one candidate: its entry point. A franchise that
@@ -267,7 +274,7 @@ class Engine:
         owned = self.owned_franchises()
         cand_indices = [j for j, r in enumerate(self.rows)
                         if not r["owned"] and r["id"] not in self.duplicate_of and self.franchise[r["id"]] not in skip
-                        and _released(r)
+                        and _released(r) and r["id"] not in self.dismissed
                         and (self.franchise[r["id"]] in owned or self.entry_row[self.franchise[r["id"]]] == j)]
         if not cand_indices:
             return []
@@ -295,8 +302,9 @@ class Engine:
         link_score, link_source = self._link_scores(liked, liked_w)
         scores = scores + LINK_WEIGHT * _zscore(link_score[cand_fr])
 
-        # Shows that are similar to the C-tier and D-tier shows of the user get a lower score
-        disliked = [i for i in self.owned_idx if self.rows[i].get("tier") in ("C", "D")]
+        # Shows that are similar to the C-tier and D-tier shows of the user, or to the shows that
+        # the user removed from the recommendations, get a lower score
+        disliked = [i for i in self.owned_idx if self.rows[i].get("tier") in ("C", "D")] + self._dismissed_rows()
         if disliked:
             ones = np.ones(len(disliked), dtype=np.float32)
             bad_text, _, _ = _knn_score(cand_M, self.eff_M[disliked], ones, DISLIKED_K)
@@ -352,11 +360,15 @@ class Engine:
         All predictions are 0 if the user has too few ratings.
         """
         rated = [i for i in self.owned_idx if self.rows[i].get("tier") in TIER_VALUES]
-        values = np.array([TIER_VALUES[self.rows[i]["tier"]] for i in rated], dtype=np.float64)
+        # A removed recommendation is a show near the taste of the user that the user does not want.
+        # The model has few low tiers, thus these shows are its most useful examples.
+        dismissed = self._dismissed_rows()
+        values = np.array([TIER_VALUES[self.rows[i]["tier"]] for i in rated] + [DISMISSED_TIER] * len(dismissed),
+                          dtype=np.float64)
         if len(rated) < TIER_MODEL_MIN_RATED or values.std() < 1e-9:
             return np.zeros(len(indices), dtype=np.float32)
-        R = self.tag_M[rated].astype(np.float64)
-        alpha = np.linalg.solve(R @ R.T + TIER_RIDGE * np.eye(len(rated)), values - values.mean())
+        R = self.tag_M[rated + dismissed].astype(np.float64)
+        alpha = np.linalg.solve(R @ R.T + TIER_RIDGE * np.eye(len(values)), values - values.mean())
         predicted = self.tag_M[indices].astype(np.float64) @ (R.T @ alpha) + values.mean()
         return predicted.astype(np.float32)
 
@@ -517,6 +529,35 @@ class Engine:
         if r["source"] != "library":
             r["owned"] = 1 if watched else 0
         self.owned_idx = [i for i, row in enumerate(self.rows) if row["owned"] and row["id"] not in self.duplicate_of]
+
+    def _dismissed_rows(self) -> list[int]:
+        """Return the indexes of the shows that the user removed from the recommendations and does not own."""
+        return [self.pos[i] for i in sorted(self.dismissed)
+                if not self.by_id[i]["owned"] and i not in self.duplicate_of]
+
+    def set_dismissed(self, show_id: str, dismissed: bool):
+        """Remove a show from the recommendations, or put it back.
+
+        A removed show is never a recommendation. It also counts as a dislike: shows that are
+        similar to it get a lower score.
+        """
+        if show_id not in self.by_id:
+            raise KeyError(f"unknown show id {show_id}")
+        self.store.set_dismissed(show_id, dismissed)
+        self.by_id[show_id]["dismissed"] = 1 if dismissed else 0
+        if dismissed:
+            self.dismissed.add(show_id)
+        else:
+            self.dismissed.discard(show_id)
+
+    def dismissed_shows(self) -> list[dict]:
+        c = self.taste_center() if self.owned_idx else None
+        out = []
+        for show_id in sorted(self.dismissed):
+            i = self.pos[show_id]
+            sim = float(self.eff_M[i] @ c) if c is not None else 0.0
+            out.append(self._result(i, sim, seed=None))
+        return out
 
     def manual_shows(self) -> list[dict]:
         manual_ids = self.store.get_manual_watched_ids()

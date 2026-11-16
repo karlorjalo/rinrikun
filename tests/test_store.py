@@ -170,3 +170,24 @@ def test_delete_library_rows_except(tmp_path):
     # The tier stays: the show has it again if it comes back with the same id
     assert s.get_weights()["jf:gone"]["tier"] == "S"
     assert s.delete_library_rows_except({"jf:keep"}) == 0
+
+
+def test_dismissed_store(tmp_path):
+    s = Store(tmp_path / "dismissed.db")
+    s.upsert_rows([make_row(1), make_row(2)])
+    assert s.get_dismissed_ids() == set()
+    s.set_dismissed("al:1")
+    s.set_dismissed("al:1")
+    assert s.get_dismissed_ids() == {"al:1"}
+    s.set_dismissed("al:1", False)
+    assert s.get_dismissed_ids() == set()
+
+
+def test_read_only_store_without_the_dismissed_table(tmp_path):
+    import sqlite3
+    path = tmp_path / "old_dismissed.db"
+    con = sqlite3.connect(str(path))
+    con.execute("CREATE TABLE shows (id TEXT PRIMARY KEY)")
+    con.commit()
+    con.close()
+    assert Store(path, read_only=True).get_dismissed_ids() == set()

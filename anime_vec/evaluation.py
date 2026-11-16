@@ -15,8 +15,11 @@ def hidden(engine, ids):
     saved = [(i, engine.by_id[i]["owned"], engine.by_id[i].get("tier"), engine.by_id[i].get("weight"),
               engine.weights.get(i)) for i in ids]
     owned_idx = list(engine.owned_idx)
+    dismissed = set(engine.dismissed)
     hide = set(ids)
     try:
+        # A hidden show must be a possible recommendation, also if the user removed it at some time
+        engine.dismissed -= hide
         for i in ids:
             r = engine.by_id[i]
             r["owned"], r["tier"], r["weight"] = 0, None, 1.0
@@ -30,6 +33,7 @@ def hidden(engine, ids):
             if w is not None:
                 engine.weights[i] = w
         engine.owned_idx = owned_idx
+        engine.dismissed = dismissed
 
 
 def franchise_members(engine, franchise: str) -> list[str]:

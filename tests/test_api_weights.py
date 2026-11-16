@@ -109,3 +109,27 @@ def test_api_recommend_new_only(tmp_path):
         assert client.get("/api/recommend?mode=center").status_code == 422
     finally:
         serve.store, serve.engine = orig_store, orig_engine
+
+
+def test_api_dismissed(tmp_path):
+    import serve
+    store = Store(tmp_path / "api_dismissed.db")
+    store.upsert_rows([make_row(1, owned=1), make_row(2, owned=0), make_row(3, owned=0)])
+    for i in (1, 2, 3):
+        store.save_embedding(f"al:{i}", b"\x00" * 1536)
+    orig_store, orig_engine = serve.store, serve.engine
+    serve.store, serve.engine = store, Engine(store)
+    try:
+        client = TestClient(serve.app)
+        assert client.get("/api/dismissed").json() == []
+        res = client.post("/api/dismissed", json={"id": "al:2"})
+        assert res.status_code == 200 and res.json() == {"id": "al:2", "dismissed": True}
+        assert [r["id"] for r in client.get("/api/dismissed").json()] == ["al:2"]
+        assert [r["id"] for r in client.get("/api/recommend?k=10").json()] == ["al:3"]
+        assert client.get("/api/show/al:2").json()["dismissed"] == 1
+        res = client.post("/api/dismissed", json={"id": "al:2", "dismissed": False})
+        assert res.json() == {"id": "al:2", "dismissed": False}
+        assert {r["id"] for r in client.get("/api/recommend?k=10").json()} == {"al:2", "al:3"}
+        assert client.post("/api/dismissed", json={"id": "al:999"}).status_code == 404
+    finally:
+        serve.store, serve.engine = orig_store, orig_engine

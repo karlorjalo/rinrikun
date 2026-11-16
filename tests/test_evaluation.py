@@ -95,3 +95,13 @@ def test_recent_test_hides_only_the_newest_franchises(tmp_path):
     # A show without a date is not in the test
     e.by_id["al:11"]["added_at"] = None
     assert recent_test(e, count=10, tiers=("S",))["n"] == 3
+
+
+def test_hidden_makes_a_dismissed_show_a_possible_recommendation(tmp_path):
+    e = _engine(tmp_path)
+    e.set_dismissed("al:0", True)
+    with hidden(e, ["al:0"]):
+        assert "al:0" not in e.dismissed
+    assert e.dismissed == {"al:0"}
+    rank, length = rank_of_hidden(e, "al:0")
+    assert rank < length

@@ -19,6 +19,10 @@ CREATE TABLE IF NOT EXISTS show_weights (
   weight REAL NOT NULL,
   updated_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS dismissed (
+  id TEXT PRIMARY KEY,
+  created_at TEXT DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS layout (
   id TEXT PRIMARY KEY,
   x REAL NOT NULL,
@@ -76,6 +80,22 @@ class Store:
         else:
             self.con.execute("DELETE FROM watched_manual WHERE id=?", (show_id,))
             self.con.execute("UPDATE shows SET owned=0 WHERE id=? AND source != 'library'", (show_id,))
+        self.con.commit()
+
+    def get_dismissed_ids(self) -> set[str]:
+        """Return the ids of the shows that the user removed from the recommendations."""
+        try:
+            cur = self.con.execute("SELECT id FROM dismissed")
+        except sqlite3.OperationalError:
+            # A read-only database from an older version does not have this table
+            return set()
+        return {r[0] for r in cur.fetchall()}
+
+    def set_dismissed(self, show_id: str, dismissed: bool = True):
+        if dismissed:
+            self.con.execute("INSERT OR REPLACE INTO dismissed (id) VALUES (?)", (show_id,))
+        else:
+            self.con.execute("DELETE FROM dismissed WHERE id=?", (show_id,))
         self.con.commit()
 
     def get_weights(self) -> dict[str, dict]:

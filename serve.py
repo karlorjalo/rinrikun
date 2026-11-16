@@ -80,6 +80,21 @@ def post_watched(payload: dict):
     return {"id": show_id, "watched": watched, "owned": engine.by_id[show_id]["owned"]}
 
 
+@app.get("/api/dismissed")
+def get_dismissed():
+    return engine.dismissed_shows()
+
+
+@app.post("/api/dismissed")
+def post_dismissed(payload: dict):
+    show_id = payload.get("id")
+    if not show_id or show_id not in engine.by_id:
+        raise HTTPException(404, "unknown show id")
+    dismissed = bool(payload.get("dismissed", True))
+    engine.set_dismissed(show_id, dismissed)
+    return {"id": show_id, "dismissed": dismissed}
+
+
 @app.get("/api/similar")
 def similar(id: str, k: int = Query(24, le=100, ge=1)):
     if id not in engine.by_id:
