@@ -30,6 +30,14 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 """
 
+# The columns of the shows table that the build writes
+COLUMNS = ("id", "source", "title", "title_native", "year", "format", "genres", "tags", "tag_ranks", "studios",
+           "overview", "score", "owned", "tmdbid", "anilist_id", "poster", "relations", "recommendations",
+           "library_id", "provider_ids", "seasons", "added_at")
+# The columns that hold JSON, with the value for a row that has no data
+JSON_COLUMNS = {"genres": [], "tags": [], "tag_ranks": [], "studios": [], "relations": [], "recommendations": [],
+                "provider_ids": {}, "seasons": []}
+
 TIER_WEIGHTS = {
     "S": 2.0,
     "A": 1.5,
@@ -50,7 +58,7 @@ class Store:
         self.con.executescript(SCHEMA)
         # Older databases do not have the columns that later features added
         columns = {r[1] for r in self.con.execute("PRAGMA table_info(shows)")}
-        for column in ("relations", "recommendations"):
+        for column in ("relations", "recommendations", "library_id", "provider_ids", "seasons", "added_at"):
             if column not in columns:
                 self.con.execute(f"ALTER TABLE shows ADD COLUMN {column} TEXT")
         self.con.commit()
@@ -104,49 +112,35 @@ class Store:
         self.con.commit()
 
     def upsert_rows(self, rows: list[dict]):
+        updates = ", ".join(f"{c}=excluded.{c}" for c in COLUMNS if c not in ("id", "source"))
+        sql = (f"INSERT INTO shows ({','.join(COLUMNS)}) VALUES ({','.join('?' * len(COLUMNS))}) "
+               f"ON CONFLICT(id) DO UPDATE SET {updates}")
         for r in rows:
-            self.con.execute(
-                "INSERT INTO shows (id,source,title,title_native,year,format,genres,tags,"
-                "tag_ranks,studios,overview,score,owned,tmdbid,anilist_id,poster,relations,recommendations) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
-                "ON CONFLICT(id) DO UPDATE SET title=excluded.title, title_native=excluded.title_native,"
-                "year=excluded.year, format=excluded.format, genres=excluded.genres, tags=excluded.tags,"
-                "tag_ranks=excluded.tag_ranks, studios=excluded.studios, overview=excluded.overview,"
-                "score=excluded.score, owned=excluded.owned, tmdbid=excluded.tmdbid,"
-                "anilist_id=excluded.anilist_id, poster=excluded.poster, relations=excluded.relations,"
-                "recommendations=excluded.recommendations",
-                (r["id"], r["source"], r["title"], r["title_native"], r["year"], r["format"],
-                 json.dumps(r["genres"], ensure_ascii=False), json.dumps(r["tags"], ensure_ascii=False),
-                 json.dumps(r["tag_ranks"]), json.dumps(r["studios"], ensure_ascii=False),
-                 r["overview"], r["score"], r["owned"], r["tmdbid"], r["anilist_id"], r["poster"],
-                 json.dumps(r.get("relations") or []), json.dumps(r.get("recommendations") or [])))
+            values = []
+            for c in COLUMNS:
+                v = r.get(c)
+                if c in JSON_COLUMNS:
+                    v = json.dumps(v if v is not None else JSON_COLUMNS[c], ensure_ascii=False)
+                values.append(v)
+            self.con.execute(sql, values)
         self.con.commit()
 
     def load_rows(self) -> list[dict]:
         manual_ids = self.get_manual_watched_ids()
         weights = self.get_weights()
-        cur = self.con.execute(
-            "SELECT id,source,title,title_native,year,format,genres,tags,tag_ranks,studios,"
-            "overview,score,owned,tmdbid,anilist_id,poster,text_hash,relations,recommendations "
-            "FROM shows ORDER BY id")
+        cur = self.con.execute(f"SELECT {','.join(COLUMNS)},text_hash FROM shows ORDER BY id")
         out = []
         for t in cur.fetchall():
-            row_id = t[0]
-            is_manual = row_id in manual_ids
-            owned = 1 if (t[12] or is_manual) else 0
-            w_info = weights.get(row_id)
-            tier = w_info["tier"] if w_info else None
-            weight = w_info["weight"] if w_info else 1.0
-            out.append({"id": t[0], "source": t[1], "title": t[2], "title_native": t[3],
-                        "year": t[4], "format": t[5], "genres": json.loads(t[6]),
-                        "tags": json.loads(t[7]), "tag_ranks": json.loads(t[8]),
-                        "studios": json.loads(t[9]), "overview": t[10], "score": t[11],
-                        "owned": owned, "manual_watched": 1 if is_manual else 0,
-                        "tier": tier, "weight": weight,
-                        "tmdbid": t[13], "anilist_id": t[14],
-                        "poster": t[15], "text_hash": t[16],
-                        "relations": json.loads(t[17]) if t[17] else [],
-                        "recommendations": json.loads(t[18]) if t[18] else []})
+            r = dict(zip(COLUMNS + ("text_hash",), t))
+            for c, default in JSON_COLUMNS.items():
+                r[c] = json.loads(r[c]) if r[c] else type(default)()
+            is_manual = r["id"] in manual_ids
+            r["owned"] = 1 if (r["owned"] or is_manual) else 0
+            r["manual_watched"] = 1 if is_manual else 0
+            w_info = weights.get(r["id"])
+            r["tier"] = w_info["tier"] if w_info else None
+            r["weight"] = w_info["weight"] if w_info else 1.0
+            out.append(r)
         return out
 
     def save_embedding(self, row_id: str, blob: bytes):

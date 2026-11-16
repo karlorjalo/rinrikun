@@ -438,3 +438,38 @@ def test_new_franchise_appears_as_its_first_tv_season(tmp_path):
     e.set_watched("al:10", True)
     ids = [r["id"] for r in e.recommend(k=6, mode="hybrid")]
     assert len({"al:11", "al:12"} & set(ids)) == 1
+
+
+def test_library_row_with_two_seasons_by_id(tmp_path):
+    from anime_vec.store import Store
+    s = Store(tmp_path / "seasons.db")
+    base = {"genres": [], "tags": [], "tag_ranks": [], "studios": [], "overview": "O", "score": 7.0,
+            "tmdbid": None, "poster": None}
+    rows = [
+        dict(base, id="jf:1", source="library", title="ライブラリ", title_native="ライブラリ", year=2020,
+             format="series", owned=1, anilist_id=None),
+        # The titles are different from the library title: only the link connects them
+        dict(base, id="al:11", source="anilist", title="Show 2nd Season", title_native="", year=2021,
+             format="tv", owned=1, anilist_id=11, library_id="jf:1"),
+        dict(base, id="al:10", source="anilist", title="Show", title_native="", year=2019,
+             format="tv", owned=1, anilist_id=10, library_id="jf:1"),
+        dict(base, id="al:20", source="anilist", title="Other", title_native="", year=2020,
+             format="tv", owned=0, anilist_id=20),
+        dict(base, id="al:21", source="anilist", title="Other 2", title_native="", year=2020,
+             format="tv", owned=0, anilist_id=21),
+    ]
+    vectors = {"jf:1": [1, 0, 0, 0], "al:10": [0, 1, 0, 0], "al:11": [0, 0.9, 0.1, 0],
+               "al:20": [0, 0, 1, 0], "al:21": [0, 0, 0, 1]}
+    for r in rows:
+        s.upsert_rows([r])
+        s.save_embedding(r["id"], np.array(vectors[r["id"]], dtype=np.float32).tobytes())
+    e = Engine(s)
+    assert e.duplicate_of == {"al:10": "jf:1", "al:11": "jf:1"}
+    # The first counterpart is the first season
+    assert e.counterparts["jf:1"] == ["al:10", "al:11"]
+    assert [e.ids[i] for i in e.owned_idx] == ["jf:1"]
+    assert np.allclose(e.eff_M[e.pos["jf:1"]], e.eff_M[e.pos["al:10"]])
+    assert {r["id"] for r in e.recommend(k=10)} == {"al:20", "al:21"}
+    # A tier on the library row goes to the two seasons
+    e.set_show_tier("jf:1", "S")
+    assert e.by_id["al:10"]["tier"] == "S" and e.by_id["al:11"]["tier"] == "S"

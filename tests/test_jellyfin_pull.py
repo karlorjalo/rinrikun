@@ -11,7 +11,8 @@ ITEM = {
     "Studios": [{"Name": "A-1 Pictures"}],
     "Overview": "Tomoya is an otaku...",
     "CommunityRating": 8.1,
-    "ProviderIds": {"Tmdb": "86561"},
+    "ProviderIds": {"Tmdb": "86561", "Tvdb": "289882"},
+    "DateCreated": "2024-05-01T10:00:00.0000000Z",
 }
 
 def test_row_from_item():
@@ -24,3 +25,22 @@ def test_row_from_item():
     assert r["score"] == 8.1
     assert r["tmdbid"] == "86561"
     assert r["owned"] == 1
+
+
+def test_row_keeps_provider_ids_seasons_and_date():
+    r = row_from_item(ITEM, [1, 2])
+    assert r["provider_ids"] == {"tmdb": "86561", "tvdb": "289882"}
+    assert r["seasons"] == [1, 2]
+    assert r["added_at"] == "2024-05-01T10:00:00.0000000Z"
+    assert row_from_item(ITEM)["seasons"] == []
+
+
+def test_seasons_by_series_ignores_virtual_and_unnumbered_seasons():
+    from anime_vec.jellyfin_pull import seasons_by_series
+    items = [
+        {"SeriesId": "a", "IndexNumber": 2, "LocationType": "FileSystem"},
+        {"SeriesId": "a", "IndexNumber": 1, "LocationType": "FileSystem"},
+        {"SeriesId": "a", "IndexNumber": 3, "LocationType": "Virtual"},
+        {"SeriesId": "b", "IndexNumber": None, "LocationType": "FileSystem"},
+    ]
+    assert seasons_by_series(items) == {"a": [1, 2]}

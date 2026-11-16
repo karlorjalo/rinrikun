@@ -8,3 +8,4 @@ serve.log
 secrets.json
 .superpowers/
 scratch/
+idmap_cache/

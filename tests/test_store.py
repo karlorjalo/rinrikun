@@ -104,3 +104,16 @@ def test_recommendations_roundtrip(tmp_path):
     rows = s.load_rows()
     assert rows[0]["recommendations"] == [[5, 120], [9, 3]]
     assert rows[1]["recommendations"] == []
+
+
+def test_library_link_columns_roundtrip(tmp_path):
+    s = Store(tmp_path / "link.db")
+    s.upsert_rows([make_row(1, library_id="jf:9"),
+                   make_row(2, provider_ids={"tmdb": "5"}, seasons=[1, 2], added_at="2024-05-01T10:00:00Z")])
+    rows = s.load_rows()
+    assert rows[0]["library_id"] == "jf:9" and rows[0]["provider_ids"] == {} and rows[0]["seasons"] == []
+    assert rows[1]["library_id"] is None and rows[1]["provider_ids"] == {"tmdb": "5"}
+    assert rows[1]["seasons"] == [1, 2] and rows[1]["added_at"] == "2024-05-01T10:00:00Z"
+    # A later build without the link removes it
+    s.upsert_rows([make_row(1)])
+    assert s.load_rows()[0]["library_id"] is None

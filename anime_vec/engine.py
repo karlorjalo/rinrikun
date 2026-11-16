@@ -28,6 +28,12 @@ DISLIKE_WEIGHT = 0.5
 DISLIKED_K = 3
 
 
+def _entry_key(r: dict) -> tuple:
+    """Sort key that puts the entry point of a franchise first: a TV series, then the earliest year."""
+    format_rank = {"tv": 0, "tv_short": 1, "ona": 1}
+    return (format_rank.get(r.get("format"), 2), r.get("year") or 9999, r["id"])
+
+
 def _zscore(x: np.ndarray) -> np.ndarray:
     sd = float(x.std())
     return (x - x.mean()) / sd if sd > 1e-9 else np.zeros_like(x)
@@ -61,7 +67,21 @@ class Engine:
         lib_rows = [r for r in self.rows if r["source"] == "library"]
         self.duplicate_of: dict[str, str] = {}
         self.counterparts: dict[str, list[str]] = {}
-        if lib_rows:
+        if any(r.get("library_id") for r in self.rows):
+            # The build connected the pool rows to the library rows. One library row can have
+            # more than one pool row: one for each season.
+            for r in self.rows:
+                lib_id = r.get("library_id")
+                if r["source"] == "anilist" and lib_id in self.by_id and not r.get("manual_watched"):
+                    self.duplicate_of[r["id"]] = lib_id
+                    self.counterparts.setdefault(lib_id, []).append(r["id"])
+                    self.counterparts.setdefault(r["id"], []).append(lib_id)
+            # The first counterpart of a library row is its first TV season
+            for lib in lib_rows:
+                if lib["id"] in self.counterparts:
+                    self.counterparts[lib["id"]].sort(key=lambda c: _entry_key(self.by_id[c]))
+        elif lib_rows:
+            # A database from before the id match: connect the rows by title
             from anime_vec.match import OwnershipMatcher
             matcher = OwnershipMatcher([(r["id"], r["title_native"], r["title"]) for r in lib_rows])
             for r in self.rows:
@@ -296,12 +316,11 @@ class Engine:
 
     def _build_entry_rows(self) -> dict[str, int]:
         """Return the entry point of each franchise: the earliest TV series, or the earliest show if none."""
-        format_rank = {"tv": 0, "tv_short": 1, "ona": 1}
         entry: dict[str, tuple] = {}
         for j, r in enumerate(self.rows):
             if r["id"] in self.duplicate_of:
                 continue
-            key = (format_rank.get(r.get("format"), 2), r.get("year") or 9999, r["id"])
+            key = _entry_key(r)
             f = self.franchise[r["id"]]
             if f not in entry or key < entry[f][0]:
                 entry[f] = (key, j)

@@ -6,7 +6,8 @@ sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 from anime_vec.anilist_pull import fetch_pool
 from anime_vec.embed import build_text, embed_texts, text_hash, vec_to_blob
 from anime_vec.jellyfin_pull import fetch_library
-from anime_vec.match import OwnershipMatcher
+from anime_vec.idmap import IdMap, load_entries
+from anime_vec.match import link_library
 from anime_vec.store import Store
 
 DB = Path(__file__).resolve().parent / "anime_vec.db"
@@ -19,14 +20,15 @@ def main(refresh_anilist: bool = False):
     pool_rows = fetch_pool(force=refresh_anilist)
     print(f"anilist pool rows: {len(pool_rows)}")
 
-    matcher = OwnershipMatcher([(r["id"], r["title_native"], r["title"]) for r in lib_rows])
-    flagged = 0
-    for r in pool_rows:
-        hit = matcher.match(r["title"], r["title_native"])
-        if hit:
-            r["owned"] = 1
-            flagged += 1
-    print(f"pool rows matched to library: {flagged}")
+    try:
+        idmap = IdMap(load_entries())
+    except Exception as err:
+        print(f"WARNING no id map ({err!r}): the match uses only titles")
+        idmap = None
+    links = link_library(lib_rows, pool_rows, idmap)
+    print(f"pool rows matched to library: {links['by_id']} by id, {links['by_title']} by title")
+    print(f"library rows without a pool row: {len(links['unlinked_library_rows'])}")
+    print(f"AniList entries of the library that are not in the pool: {len(links['missing_ids'])}")
 
     manual_ids = store.get_manual_watched_ids()
     for r in pool_rows:
