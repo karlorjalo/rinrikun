@@ -697,8 +697,85 @@ async function apiWrite(url, options) {
     if (vectorMapData) changeMapPoints(change);
     else lateMapChanges.push(change);
     refreshOpenMaps();
+    // The change also changes the match of the other shows
+    scheduleMapMatch(1200);
   }
   return res;
+}
+
+// ---- The match gradient of the maps
+// With the setting "Match gradient" on, a poster on a map is brighter for a higher match, and a
+// dot of the catalog is stronger. The server gives the match of each point of the map, in the
+// order of the points. The page gets the values when the setting is on. It gets them again after
+// a change of a tier, of the watched state, of the removed shows or of the formula.
+
+// The brightness of a poster with a match of 0, as a part of the full brightness
+const MATCH_DARK = 0.12;
+// The dots of the catalog have this number of steps of strength
+const GRADIENT_STEPS = 8;
+// The page asks the server again this number of times when it does not get the match values
+const MATCH_RETRIES = 4;
+let mapMatchLoaded = false;
+let mapMatchRequest = 0;
+let mapMatchTimer = null;
+
+// The brightness of a poster for a match in percent, from MATCH_DARK to 1. The curve is steep at
+// the high end. The match is a rank in the catalog, thus one half of the catalog is below 50, and
+// the shows of interest are in the last part.
+function matchBrightness(match) {
+  const part = Math.max(0, Math.min(1, match / 100));
+  return MATCH_DARK + (1 - MATCH_DARK) * part * part;
+}
+
+function gradientOn() {
+  return document.documentElement.dataset.gradient === "on";
+}
+
+// The buttons of the maps show if the page has the match values: "loading", "ready" or "error"
+function setGradientState(state) {
+  document.documentElement.dataset.gradientState = state;
+  document.querySelectorAll(".vector-gradient-toggle").forEach((btn) => {
+    btn.title = state === "error"
+      ? "The server did not give the match values. Click two times to try again."
+      : "The brightness of a poster shows its match. A show with a high match is bright.";
+  });
+}
+
+async function loadMapMatch(attempt = 0) {
+  if (!gradientOn()) return;
+  const request = ++mapMatchRequest;
+  if (!mapMatchLoaded) setGradientState("loading");
+  try {
+    const data = await getVectorMap();
+    const res = await fetch(withFormula("/api/vector-map/match"));
+    if (!res.ok) throw new Error(`the server answered ${res.status}`);
+    const values = await res.json();
+    // An older request that ends late must not replace the values of a newer request
+    if (request !== mapMatchRequest) return;
+    if (!data || !Array.isArray(values) || values.length !== data.points.length) {
+      throw new Error("the list of values does not fit the map");
+    }
+    data.points.forEach((pt, i) => { pt.match = values[i]; });
+    mapMatchLoaded = true;
+    setGradientState("ready");
+    activeVectorMaps.forEach((ctrl) => ctrl.scheduleDraw());
+  } catch (e) {
+    console.error("Failed to load the match of the shows of the map", e);
+    if (request !== mapMatchRequest) return;
+    // The server can be busy, or it can start at this moment: try again some times
+    if (attempt < MATCH_RETRIES) {
+      clearTimeout(mapMatchTimer);
+      mapMatchTimer = setTimeout(() => loadMapMatch(attempt + 1), 2500 * (attempt + 1));
+    } else if (!mapMatchLoaded) {
+      setGradientState("error");
+    }
+  }
+}
+
+// Get the match values after `delay` milliseconds. A new call before that time replaces the old call.
+function scheduleMapMatch(delay = 0) {
+  clearTimeout(mapMatchTimer);
+  if (gradientOn()) mapMatchTimer = setTimeout(() => loadMapMatch(), delay);
 }
 
 const posterImgCache = new Map();
@@ -847,6 +924,8 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   let searchTimer = null;
   // The animation of a jump to a show
   let flight = null;
+  // The match gradient is on in the draw of now, and the page has the match values
+  let drawGradient = false;
 
   // The map positions and the grid positions of the shows, and their screen positions in the last draw
   const mapX = new Float32Array(n);
@@ -1022,6 +1101,22 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     dismissHint();
     scheduleDraw();
   };
+
+  // The button for the match gradient. The setting is the same for all maps: see "Settings".
+  const legend = box.parentElement.querySelector(".vector-map-legend");
+  if (legend && !legend.querySelector(".vector-gradient-toggle")) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "pill vector-gradient-toggle";
+    btn.title = "The brightness of a poster shows its match. A show with a high match is bright.";
+    btn.innerHTML = '<i class="gradient-swatch" aria-hidden="true"></i>Match gradient';
+    btn.classList.toggle("active", gradientOn());
+    btn.setAttribute("aria-pressed", String(gradientOn()));
+    btn.onclick = () => setSetting("gradient", gradientOn() ? "off" : "on");
+    const viewBox = legend.querySelector(".vector-view-pills");
+    if (viewBox) viewBox.after(btn);
+    else legend.prepend(btn);
+  }
 
   // ---- The search box of the map
   // The user types a part of a title. The map shows the found shows with a frame, and it makes
@@ -1348,6 +1443,12 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
         ctx.fillText((pt.title_native || pt.title || "?").trim()[0] || "?", cx, cy);
       }
     }
+    // The match gradient: a poster with a low match is dark. The title and the frame keep their
+    // brightness. The poster under the pointer also keeps it, so that the user can see the poster.
+    if (drawGradient && !isHovered && pt.match != null) {
+      ctx.fillStyle = `rgba(0, 0, 0, ${(1 - matchBrightness(pt.match)).toFixed(3)})`;
+      ctx.fillRect(x, y, pw, ph);
+    }
     if (pw >= TITLE_MIN) drawTitle(ctx, pt, x, y, pw, ph);
     ctx.restore();
 
@@ -1409,6 +1510,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       ink: isDark ? "#f5f2ea" : "#1c1917",
       shadow: isDark ? "rgba(0, 0, 0, 0.7)" : "rgba(28, 25, 23, 0.45)",
       find: rootStyle.getPropertyValue("--find").trim() || "#0e8177",
+      dot: isDark ? "rgb(222, 216, 206)" : "rgb(74, 68, 63)",
       tier: {},
     };
     for (const t of ["S", "A", "B", "C", "D"]) {
@@ -1416,6 +1518,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     }
     const view = viewMode();
     const cards = cardsOn(side);
+    drawGradient = gradientOn() && mapMatchLoaded;
     let shown = 0;
     let cardWidth = 0;
     // The search: see "The search box of the map"
@@ -1463,18 +1566,31 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       const fade = searching ? SEARCH_FADE : 1;
       ctx.globalAlpha = fade;
 
-      // 1. The dots of the catalog
-      ctx.fillStyle = colors.catalog;
-      ctx.beginPath();
+      // 1. The dots of the catalog. With the match gradient a dot is stronger and larger for a
+      // higher match. The dots are in steps, and each step is one path: one path for each dot is slow.
       const catR = dotRadius(false);
+      const steps = [];
+      for (let k = 0; k < (drawGradient ? GRADIENT_STEPS : 1); k++) steps.push([]);
       for (let i = 0; i < n; i++) {
         const pt = points[i];
         if (pt.owned || special(i)) continue;
         if (sx[i] < -20 || sx[i] > w + 20 || sy[i] < -20 || sy[i] > h + 20) continue;
-        ctx.moveTo(sx[i] + catR, sy[i]);
-        ctx.arc(sx[i], sy[i], catR, 0, Math.PI * 2);
+        const k = drawGradient ? Math.floor(matchBrightness(pt.match ?? 0) * GRADIENT_STEPS) : 0;
+        steps[Math.min(steps.length - 1, k)].push(i);
       }
-      ctx.fill();
+      ctx.fillStyle = drawGradient ? colors.dot : colors.catalog;
+      for (let k = 0; k < steps.length; k++) {
+        const part = (k + 0.5) / steps.length;
+        const r = drawGradient ? catR * (0.8 + 0.6 * part) : catR;
+        if (drawGradient) ctx.globalAlpha = fade * (0.05 + 0.9 * part);
+        ctx.beginPath();
+        for (const i of steps[k]) {
+          ctx.moveTo(sx[i] + r, sy[i]);
+          ctx.arc(sx[i], sy[i], r, 0, Math.PI * 2);
+        }
+        ctx.fill();
+      }
+      ctx.globalAlpha = fade;
 
       // 2. The dots of the shows of the user. A rated show has the color of its tier. S is last, on top.
       const libR = dotRadius(true);
@@ -1790,6 +1906,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       const metaParts = [];
       if (pt.year) metaParts.push(pt.year);
       if (pt.genres && pt.genres.length) metaParts.push(pt.genres.join(", "));
+      if (gradientOn() && mapMatchLoaded && pt.match != null) metaParts.push(`${formatMatch(pt.match)}% match`);
 
       const posterHtml = pt.poster
         ? `<div class="tt-poster-box"><img src="${esc(pt.poster)}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"><div class="tt-poster-fallback" style="display:none;">${esc((pt.title_native || pt.title || "?")[0])}</div></div>`
@@ -2275,6 +2392,8 @@ function initRecsFilters() {
       try { localStorage.setItem(FORMULA_KEY, recsKinds); } catch (e) {}
       paintRecsFormulaPills();
       recs();
+      // The match of a show comes from the formula
+      scheduleMapMatch();
     };
   });
 
@@ -2328,6 +2447,7 @@ async function setDismissed(r, dismissed) {
   });
   if (!res.ok) throw new Error(`dismiss failed: ${res.status}`);
   r.dismissed = dismissed ? 1 : 0;
+  scheduleMapMatch(1200);
 }
 
 function refreshRecsAfterDismiss() {
@@ -2968,6 +3088,15 @@ const SETTINGS = [
       { value: "off", label: "Off", text: "The page header has no petals." },
     ],
   },
+  {
+    key: "gradient",
+    title: "Match gradient on the maps",
+    options: [
+      { value: "off", label: "Off", text: "All posters on the maps have their full brightness." },
+      { value: "on", label: "On", text: "A poster on a map is brighter for a higher match: your best matches are bright, and the shows with a low match are dark. Each map also has a button for this setting." },
+    ],
+    apply: applyGradientSetting,
+  },
 ];
 const settings = {};
 
@@ -2983,6 +3112,18 @@ function applyFontSetting(value) {
   if (value === "sans" && document.fonts && document.fonts.load) {
     document.fonts.load('600 12px "Noto Sans JP"').then(redraw, () => {});
   }
+}
+
+// Each map has a button for the match gradient. Paint the buttons, get the match values and draw
+// the maps again.
+function applyGradientSetting(value) {
+  const on = value === "on";
+  document.querySelectorAll(".vector-gradient-toggle").forEach((btn) => {
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", String(on));
+  });
+  if (on) scheduleMapMatch();
+  activeVectorMaps.forEach((ctrl) => ctrl.scheduleDraw());
 }
 
 function applySetting(setting) {

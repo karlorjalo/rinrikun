@@ -584,3 +584,14 @@ h2::before { content: ""; display: inline-block; width: 11px; height: 8px; margi
 .vector-search-btn:hover { background: var(--hover); color: var(--text); }
 /* A phone makes the page larger when an input has small text. Text of 16 pixels prevents this. */
 @media (pointer: coarse) { .vector-search-input { font-size: 16px; } }
+/* The button of a map for the match gradient: see "The match gradient of the maps" in app.js */
+.vector-map-legend { flex-wrap: wrap; row-gap: 6px; }
+.vector-gradient-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; font-size: 11px;
+  border-color: var(--border); margin-right: 6px; }
+.vector-gradient-toggle.active { background: transparent; border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.gradient-swatch { width: 20px; height: 8px; border-radius: 2px; background: linear-gradient(90deg, #1c1917, #f3efe6);
+  border: 1px solid var(--border); }
+/* The page waits for the match values, or the server did not give them */
+:root[data-gradient-state="loading"] .vector-gradient-toggle.active { opacity: 0.6; }
+:root[data-gradient-state="error"] .vector-gradient-toggle.active { border-color: var(--tier-d); color: var(--tier-d); }
+:root[data-gradient-state="error"] .vector-gradient-toggle.active::after { content: "no data"; font-weight: 400; }
