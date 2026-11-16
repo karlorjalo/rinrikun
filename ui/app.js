@@ -110,6 +110,70 @@ function formatOverview(text) {
     .replace(/\n/g, "<br>");
 }
 
+// ---- Tooltips
+// An element with the attribute data-tip shows its text in a small box, at once, when the pointer
+// is on it, when it has the focus, or when the user taps it. The tooltip of the browser (the title
+// attribute) appears late, and it does not appear on a touch screen.
+const tipBox = document.createElement("div");
+tipBox.className = "tip-box";
+tipBox.setAttribute("role", "tooltip");
+tipBox.hidden = true;
+let tipTarget = null;
+
+function tipElement(node) {
+  return node && node.closest ? node.closest("[data-tip]") : null;
+}
+
+function showTip(el) {
+  tipTarget = el;
+  tipBox.textContent = el.dataset.tip;
+  // An open dialog is above all other parts of the page. The box must be in the dialog, or the
+  // dialog covers it.
+  const home = el.closest("dialog[open]") || document.body;
+  if (tipBox.parentElement !== home) home.appendChild(tipBox);
+  tipBox.hidden = false;
+  const rect = el.getBoundingClientRect();
+  const width = tipBox.offsetWidth;
+  const height = tipBox.offsetHeight;
+  const left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.left + rect.width / 2 - width / 2));
+  // Below the element. Above it if there is no space below.
+  const top = rect.bottom + 8 + height > window.innerHeight - 8 ? rect.top - height - 8 : rect.bottom + 8;
+  tipBox.style.left = `${left}px`;
+  tipBox.style.top = `${Math.max(8, top)}px`;
+}
+
+function hideTip() {
+  tipTarget = null;
+  tipBox.hidden = true;
+}
+
+document.addEventListener("mouseover", (e) => {
+  const el = tipElement(e.target);
+  if (el) showTip(el);
+  else if (tipTarget) hideTip();
+});
+document.addEventListener("focusin", (e) => {
+  const el = tipElement(e.target);
+  if (el) showTip(el);
+});
+document.addEventListener("focusout", hideTip);
+// A tap on a touch screen shows the box, and it does not open the show that the element is in
+document.addEventListener("click", (e) => {
+  const el = tipElement(e.target);
+  if (!el) {
+    hideTip();
+    return;
+  }
+  e.stopPropagation();
+  e.preventDefault();
+  if (tipTarget === el && !tipBox.hidden && e.detail && e.pointerType === "touch") hideTip();
+  else showTip(el);
+}, true);
+window.addEventListener("scroll", hideTip, true);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && tipTarget) hideTip();
+});
+
 // The address of a list of shows, with the formula of the Recommendations tab. The server uses
 // the formula for the match of each show.
 function withFormula(url) {
@@ -130,7 +194,7 @@ function matchHtml(r) {
   const title = r.owned
     ? `Without this show in your list, the formula would put it above ${text}% of the franchises that you do not have`
     : `The formula puts this show above ${text}% of the franchises that you do not have`;
-  return `<span class="affinity" title="${title}">${text}% match</span>`;
+  return `<span class="affinity" data-tip="${title}" tabindex="0">${text}% match</span>`;
 }
 
 // The tier guess of a show without a tier: the tier that a small model predicts from the tags of
@@ -139,12 +203,12 @@ function guessHtml(r) {
   if (!r.tier_guess || r.tier) return "";
   const title = "A guess of the tier that you will give, from the tags of the shows that you rated. " +
     "The guess is weak: in a test, 64% of the shows with the highest guesses were S or A, and 36% of the shows with the lowest guesses.";
-  return `<span class="tier-guess" title="${title}">guess ${r.tier_guess}</span>`;
+  return `<span class="tier-guess" data-tip="${title}" tabindex="0">guess ${r.tier_guess}</span>`;
 }
 
 // A list with a seed also has the similarity of each show to the seed
 function similarHtml(r) {
-  return r.similarity != null ? `<span title="The similarity to the seed show">${Math.round(r.similarity)}% similar</span>` : "";
+  return r.similarity != null ? `<span data-tip="The similarity to the seed show" tabindex="0">${Math.round(r.similarity)}% similar</span>` : "";
 }
 
 // Get the match of a show again after a change of a tier or of the watched state
