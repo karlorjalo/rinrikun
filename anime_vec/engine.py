@@ -52,6 +52,18 @@ DISMISSED_TIER = TIER_VALUES["C"]
 # quarter of the predictions 64% were S or A, and of the shows in the lowest quarter 36%.
 # Newer models (TabPFN v2, TabICLv2, boosted trees) were not better than this ridge regression.
 TIER_GUESS_LIMITS = (("S", 3.5), ("A", 2.5), ("B", 1.5), ("C", 0.5))
+# The taste model is a ridge regression on the tags of all shows of the catalog. It learns what
+# makes the liked shows of the user different from the catalog. The content score is the mean of
+# this model and of the score from the nearest liked shows. In the hidden franchise test (74 S-tier
+# and A-tier franchises, formula "usual kinds") the model moved the median place of a hidden
+# franchise from 55 to 33. Without the crowd links, the part of the hidden franchises in the first
+# 20 went from 15% to 26%.
+# Strength of the ridge regression, relative to the mean variance of one tag in the catalog
+TASTE_RIDGE = 1.0
+# The value that the model learns for a C-tier or D-tier show, and for a show that the user removed
+# from the recommendations. A liked show has its tier weight (S 2.0, A 1.5, B 1.0). Each other
+# show of the catalog has the value 0.
+TASTE_DISLIKED = -1.0
 # The "usual kinds" formula gives a higher score to the kinds of shows that the library has many of.
 # The kind of a show is its year, its format and its number of episodes. The crowd score counts
 # only as a lower limit.
@@ -222,6 +234,7 @@ class Engine:
         centered = bridged - self.corpus_mean
         self.eff_M = centered / np.clip(np.linalg.norm(centered, axis=1, keepdims=True), 1e-9, None)
         self.tag_M = self._build_tag_matrix()
+        self._build_taste_model()
         self.franchise = self._build_franchises()
         self._build_links()
         self.entry_row = self._build_entry_rows()
@@ -518,14 +531,22 @@ class Engine:
         liked, liked_w = self._liked()
         text_score, _, best = _knn_score(cand_M, self.eff_M[liked], liked_w)
         tag_score, _, _ = _knn_score(cand_T, self.tag_M[liked], liked_w)
-        content = 0.5 * _zscore(text_score) + 0.5 * _zscore(tag_score)
+        nearest = 0.5 * _zscore(text_score) + 0.5 * _zscore(tag_score)
+        # The nearest liked shows find a candidate that is like some shows of the user. The taste
+        # model finds a candidate that has what the liked shows have and the catalog does not
+        # have. The content score is the mean of the two. In the hidden franchise test the mean
+        # was better than each of the two alone.
+        taste = self._taste_scores(cand_indices)
+        content = 0.5 * _zscore(nearest) + 0.5 * _zscore(taste)
         scores = _zscore(content) - D_PENALTY * d_penalty
         extra_scores = np.zeros(len(extra), dtype=np.float32)
         if extra:
             skip = same_franchise(liked)
             extra_text = _knn_score_without(self.eff_M[extra], self.eff_M[liked], liked_w, skip)
             extra_tag = _knn_score_without(self.tag_M[extra], self.tag_M[liked], liked_w, skip)
-            extra_content = 0.5 * _scale_like(text_score, extra_text) + 0.5 * _scale_like(tag_score, extra_tag)
+            extra_nearest = 0.5 * _scale_like(text_score, extra_text) + 0.5 * _scale_like(tag_score, extra_tag)
+            extra_taste = self._taste_scores(extra, leave_out=True)
+            extra_content = 0.5 * _scale_like(nearest, extra_nearest) + 0.5 * _scale_like(taste, extra_taste)
             extra_scores = _scale_like(content, extra_content) - D_PENALTY * extra_d
 
         # Content tells the kind of a show. The AniList user recommendations tell which shows the
@@ -731,6 +752,61 @@ class Engine:
                 if row in position:
                     predicted[n] = without[position[row]]
         return predicted.astype(np.float32)
+
+    def _build_taste_model(self):
+        """Prepare the part of the taste model that does not change with the ratings of the user.
+
+        The taste model is a ridge regression on the tag vectors of all shows of the catalog.
+        The value that it learns is positive for a liked show, negative for a disliked show and
+        0 for each other show. Its weights are `taste_solver @ (sum of the centered tag vectors
+        of the rated shows, each multiplied by its value)`. `taste_solver` comes only from the
+        catalog. Thus a change of a tier needs no new calculation of the catalog.
+        """
+        unique = [i for i, r in enumerate(self.rows) if r["id"] not in self.duplicate_of]
+        tags = self.tag_M[unique].astype(np.float64)
+        size = self.tag_M.shape[1]
+        self.taste_mean = tags.mean(axis=0) if unique else np.zeros(size)
+        centered = tags - self.taste_mean
+        gram = centered.T @ centered
+        ridge = max(TASTE_RIDGE * float(np.trace(gram)) / size, 1e-9)
+        self.taste_solver = np.linalg.inv(gram + ridge * np.eye(size))
+
+    def _taste_scores(self, indices: list[int], leave_out: bool = False) -> np.ndarray:
+        """Return the score of the taste model for each row. A higher score is nearer to the taste of the user.
+
+        The model learns from the liked shows, from the C-tier and D-tier shows, and from the
+        shows that the user removed from the recommendations. All scores are 0 if the user has
+        none of these shows.
+
+        If leave_out is true, a row gets the score of a model that did not learn from the shows
+        of the franchise of the row. Thus a show of the user gets about the score that it would
+        have if the user did not have it.
+        """
+        liked, liked_w = self._liked()
+        disliked = [i for i in self.owned_idx if self.rows[i].get("tier") in ("C", "D")] + self._dismissed_rows()
+        rows = list(liked) + disliked
+        if not rows or not len(indices):
+            return np.zeros(len(indices), dtype=np.float32)
+        values = np.concatenate([np.asarray(liked_w, dtype=np.float64), np.full(len(disliked), TASTE_DISLIKED)])
+        examples = (self.tag_M[rows].astype(np.float64) - self.taste_mean) * values[:, None]
+        weights = self.taste_solver @ examples.sum(axis=0)
+        # The score of a row is (tag vector - mean) @ weights. The two products are computed
+        # apart: a centered copy of the tag vectors of all rows takes too much time.
+        tags = self.tag_M[indices]
+        scores = (tags @ weights.astype(np.float32)).astype(np.float64) - float(self.taste_mean @ weights)
+        if leave_out:
+            # The weights are a sum over the rated shows. Thus the model without one franchise
+            # is the model with all shows, minus the part that the shows of this franchise gave.
+            franchises, group = np.unique(self.row_fr[rows], return_inverse=True)
+            sums = np.zeros((len(franchises), examples.shape[1]))
+            np.add.at(sums, group, examples)
+            own = sums @ self.taste_solver
+            position = {int(f): g for g, f in enumerate(franchises)}
+            which = np.array([position.get(int(f), -1) for f in self.row_fr[indices]])
+            has = which >= 0
+            centered = tags[has].astype(np.float64) - self.taste_mean
+            scores[has] -= np.einsum("ij,ij->i", centered, own[which[has]])
+        return scores.astype(np.float32)
 
     def _build_kind_codes(self) -> np.ndarray:
         """Return the group of each row for each property of its kind. -1 = the property is not known.

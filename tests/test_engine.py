@@ -1100,3 +1100,82 @@ def test_other_titles_of_a_library_show_come_from_its_anilist_entries(tmp_path):
     points = {p["id"]: p for p in e.get_vector_map()["points"]}
     assert points["jf:1"]["aka"][0] == "Saenai Heroine no Sodatekata"
     assert "aka" not in points["al:20"]
+
+
+def _taste_engine(tmp_path):
+    """The three liked shows have the tag Band. The catalog has the tag School more frequently."""
+    return _engine_from(tmp_path, [
+        ("al:1", [1, 0, 0, 0, 0, 0, 0, 0], 1, ["Band", "School"], [90, 60]),
+        ("al:2", [0, 1, 0, 0, 0, 0, 0, 0], 1, ["Band", "School"], [80, 60]),
+        ("al:3", [0, 0, 1, 0, 0, 0, 0, 0], 1, ["Band", "Comedy"], [85, 60]),
+        ("al:4", [0, 0, 0, 1, 0, 0, 0, 0], 1, ["Mecha"], [90]),
+        ("al:10", [0, 0, 0, 0, 1, 0, 0, 0], 0, ["Band"], [90]),
+        ("al:11", [0, 0, 0, 0, 0, 1, 0, 0], 0, ["School"], [90]),
+        ("al:12", [0, 0, 0, 0, 0, 0, 1, 0], 0, ["School", "Space"], [70, 70]),
+        ("al:13", [0, 0, 0, 0, 0, 0, 0, 1], 0, ["Mecha"], [90]),
+        ("al:14", [0, 0, 0, 0, 1, 1, 0, 0], 0, ["School", "Idol"], [70, 70]),
+        ("al:15", [0, 0, 0, 0, 0, 1, 1, 0], 0, ["Space"], [90]),
+    ])
+
+
+def _taste_of(e, show_id, leave_out=False):
+    return float(e._taste_scores([e.pos[show_id]], leave_out=leave_out)[0])
+
+
+def test_taste_model_prefers_what_the_liked_shows_have(tmp_path):
+    e = _taste_engine(tmp_path)
+    for tier, show_id in (("S", "al:1"), ("A", "al:2"), ("B", "al:3")):
+        e.set_show_tier(show_id, tier)
+    # Band is the tag of all liked shows. School is a tag of two liked shows and of three other shows.
+    assert _taste_of(e, "al:10") > _taste_of(e, "al:11") > _taste_of(e, "al:15")
+    # A row that is not a show of the user has the same score with leave_out
+    assert _taste_of(e, "al:10", leave_out=True) == pytest.approx(_taste_of(e, "al:10"))
+
+
+def test_taste_model_learns_from_the_low_tiers_and_the_removed_shows(tmp_path):
+    e = _taste_engine(tmp_path)
+    for show_id in ("al:1", "al:2", "al:3"):
+        e.set_show_tier(show_id, "A")
+    before = _taste_of(e, "al:13")
+    e.set_show_tier("al:4", "C")
+    # al:13 has the tag of the C-tier show al:4
+    low_tier = _taste_of(e, "al:13")
+    assert low_tier < before
+    space = _taste_of(e, "al:12")
+    e.set_dismissed("al:15", True)
+    # al:12 has the tag Space of the removed show al:15
+    assert _taste_of(e, "al:12") < space
+
+
+def test_taste_model_has_no_scores_without_shows_of_the_user(tmp_path):
+    specs = [(f"al:{n}", [1, 0.1 * n, 0, 0], 0, ["Band"], [80]) for n in range(1, 5)]
+    e = _engine_from(tmp_path, specs)
+    assert not e._taste_scores(list(range(len(e.rows)))).any()
+
+
+def test_taste_score_of_a_show_of_the_user_ignores_its_franchise(tmp_path):
+    from anime_vec.evaluation import hidden
+    e = _taste_engine(tmp_path)
+    for tier, show_id in (("S", "al:1"), ("A", "al:2"), ("B", "al:3"), ("C", "al:4")):
+        e.set_show_tier(show_id, tier)
+    for show_id in ("al:1", "al:4"):
+        without = _taste_of(e, show_id, leave_out=True)
+        # The model learned from the show, thus the score with the show is nearer to its value
+        assert (without < _taste_of(e, show_id)) == (show_id == "al:1")
+        with hidden(e, [show_id]):
+            assert _taste_of(e, show_id) == pytest.approx(without, abs=1e-5)
+
+
+def test_hybrid_uses_the_taste_model(tmp_path, monkeypatch):
+    e = _taste_engine(tmp_path)
+    for show_id in ("al:1", "al:2", "al:3"):
+        e.set_show_tier(show_id, "A")
+    before = [r["id"] for r in e.recommend(k=10)]
+    last = before[-1]
+
+    def one_show(self, indices, leave_out=False):
+        return np.array([1.0 if self.ids[i] == last else 0.0 for i in indices], dtype=np.float32)
+
+    monkeypatch.setattr(Engine, "_taste_scores", one_show)
+    after = [r["id"] for r in e.recommend(k=10)]
+    assert after.index(last) < before.index(last)
