@@ -314,8 +314,6 @@ dialog#detail-modal::backdrop { background: rgba(20, 18, 16, 0.6); backdrop-filt
 }
 
 /* Watched Tab */
-.watched-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
-.watched-head h2 { margin: 0; }
 .watched-count-badge { font-size: 13px; color: var(--muted); background: var(--card); border: 1px solid var(--border);
   padding: 4px 12px; border-radius: 999px; }
 

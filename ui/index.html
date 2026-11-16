@@ -35,7 +35,6 @@
     <button data-tab="ratings">Ratings</button>
     <button data-tab="similar">Similar</button>
     <button data-tab="recs">Recommendations</button>
-    <button data-tab="watched">Watched</button>
   </nav>
 </header>
 <main>
@@ -84,6 +83,13 @@
             <button class="pill" data-tier="B">B <span class="pill-count" id="count-tier-b">0</span></button>
             <button class="pill" data-tier="C">C <span class="pill-count" id="count-tier-c">0</span></button>
             <button class="pill" data-tier="D">D <span class="pill-count" id="count-tier-d">0</span></button>
+          </div>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Show:</span>
+          <div class="filter-pills" id="ratings-source-pills">
+            <button class="pill active" data-source="rated">Rated</button>
+            <button class="pill" data-source="manual" title="Shows that you marked as watched and that are not in the library">Manually added <span class="pill-count" id="count-manual">0</span></button>
           </div>
         </div>
         <div class="filter-group">
@@ -165,13 +171,6 @@
       </div>
     </div>
     <div id="rresults" class="cards"></div>
-  </section>
-  <section id="tab-watched" hidden>
-    <div class="watched-head">
-      <h2>Manually added shows</h2>
-      <div class="watched-count-badge" id="watched-count-badge">0 shows</div>
-    </div>
-    <div id="wresults" class="cards"></div>
   </section>
 </main>
 <dialog id="detail-modal"></dialog>

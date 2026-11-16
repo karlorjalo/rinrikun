@@ -259,8 +259,8 @@ async function toggleWatched(r, next) {
       t.manual_watched = r.manual_watched;
       t.owned = r.owned;
     }
-    if (!$("#tab-watched").hidden) {
-      watched();
+    if (!$("#tab-ratings").hidden) {
+      loadRatings();
     }
     if (!$("#tab-profile").hidden) {
       profile();
@@ -1436,21 +1436,6 @@ async function recs() {
   initVectorMap("recs-vector-canvas", "recs-vector-tooltip", rawRecs.map((s) => s.id), "Recommended");
 }
 
-async function watched() {
-  const list = await (await fetch("/api/watched")).json();
-  const badge = $("#watched-count-badge");
-  if (badge) badge.textContent = `${list.length} ${list.length === 1 ? "show" : "shows"}`;
-  const box = $("#wresults");
-  box.innerHTML = "";
-  if (!list.length) {
-    box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:48px 20px;">No manually added shows yet. When you watch a show outside your local library, find it and click "+ Add to Watched".</p>`;
-    return;
-  }
-  list.forEach((r) => {
-    box.appendChild(card(r, "manually added"));
-  });
-}
-
 let reviewQueue = [];
 let reviewIndex = 0;
 let reviewFilter = "unrated";
@@ -1705,14 +1690,22 @@ function initReviewDeck() {
 }
 
 let ratedShows = [];
+// The shows that the user marked as watched and that are not in the library
+let manualShows = [];
+let ratingsSource = "rated";
 let ratingsTierFilter = "all";
 let ratingsSort = "tier";
 
 async function loadRatings() {
   try {
-    const res = await (await fetch("/api/ratings")).json();
+    const [res, manual] = await Promise.all([
+      fetch("/api/ratings").then((r) => r.json()),
+      fetch("/api/watched").then((r) => r.json()),
+    ]);
     if (!Array.isArray(res)) return;
     ratedShows = res;
+    manualShows = Array.isArray(manual) ? manual : [];
+    if ($("#count-manual")) $("#count-manual").textContent = manualShows.length;
 
     const counts = { S: 0, A: 0, B: 0, C: 0, D: 0 };
     ratedShows.forEach((s) => {
@@ -1743,7 +1736,8 @@ function renderRatingsGrid() {
   if (!box) return;
   box.innerHTML = "";
 
-  let filtered = ratedShows.filter((r) => {
+  const source = ratingsSource === "manual" ? manualShows : ratedShows;
+  let filtered = source.filter((r) => {
     if (ratingsTierFilter === "all") return true;
     return r.tier === ratingsTierFilter;
   });
@@ -1767,7 +1761,9 @@ function renderRatingsGrid() {
   });
 
   if (!filtered.length) {
-    if (!ratedShows.length) {
+    if (ratingsSource === "manual" && ratingsTierFilter === "all") {
+      box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:48px 20px;">No manually added shows yet. When you watch a show outside your local library, find it and click "+ Add to Watched".</p>`;
+    } else if (!ratedShows.length) {
       box.innerHTML = `
         <div style="grid-column:1/-1;text-align:center;padding:48px 20px;color:var(--muted);">
           <div style="font-size:32px;margin-bottom:8px;">★</div>
@@ -1799,6 +1795,18 @@ function initRatingsControls() {
     });
   }
 
+  const srcPills = $("#ratings-source-pills");
+  if (srcPills) {
+    srcPills.querySelectorAll(".pill").forEach((btn) => {
+      btn.onclick = () => {
+        ratingsSource = btn.dataset.source;
+        srcPills.querySelectorAll(".pill").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        renderRatingsGrid();
+      };
+    });
+  }
+
   const sPills = $("#ratings-sort-pills");
   if (sPills) {
     sPills.querySelectorAll(".pill").forEach((btn) => {
@@ -1821,7 +1829,6 @@ document.querySelectorAll("nav button").forEach((b) => {
     if (b.dataset.tab === "review") loadReviewQueue();
     if (b.dataset.tab === "ratings") loadRatings();
     if (b.dataset.tab === "recs") recs();
-    if (b.dataset.tab === "watched") watched();
     if (b.dataset.tab === "profile") profile();
   };
 });
