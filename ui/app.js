@@ -2632,8 +2632,7 @@ function initTierHelp() {
   document.querySelectorAll(".tier-help-slot").forEach((slot) => {
     slot.innerHTML = `
       <details class="tier-help"${closed ? "" : " open"}>
-        <summary>Which tier? One question for each tier</summary>
-        <p class="tier-help-note">A tier tells the recommender what you want. S, A and B give you more shows like this one. C and D give you fewer.</p>
+        <summary>Which tier?</summary>
         <dl class="tier-help-list">${rows}</dl>
       </details>`;
     const card = slot.querySelector("details");
