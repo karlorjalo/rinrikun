@@ -443,54 +443,6 @@ class Engine:
         T *= (np.log((len(self.rows) + 1) / (df + 1)) + 1.0).astype(np.float32)
         return T / np.clip(np.linalg.norm(T, axis=1, keepdims=True), 1e-9, None)
 
-    def defining_shows(self, k: int = 15) -> list[dict]:
-        c = self.taste_center()
-        sims = self.eff_M[self.owned_idx] @ c
-        has_rated = any(self.rows[i].get("tier") is not None for i in self.owned_idx)
-        if not has_rated:
-            order = np.argsort(-sims)[:k]
-            return [self._result(self.owned_idx[j], float(sims[j]), seed=None) for j in order]
-
-        scored = []
-        fallback = []
-        for j, i in enumerate(self.owned_idx):
-            r = self.rows[i]
-            tier = r.get("tier")
-            sim = float(sims[j])
-            if tier in ("S", "A", "B"):
-                w = self.weights.get(self.ids[i], 1.0)
-                scored.append((w * sim, j, sim))
-            elif tier not in ("C", "D"):
-                fallback.append((sim, j, sim))
-
-        scored.sort(key=lambda x: -x[0])
-        fallback.sort(key=lambda x: -x[0])
-        combined = scored + fallback
-        return [self._result(self.owned_idx[j], sim, seed=None) for _, j, sim in combined[:k]]
-
-    def owned_tag_summary(self, k: int = 20) -> list[tuple[str, int]]:
-        counts: dict[str, int] = {}
-        for i in self.owned_idx:
-            for t in self.rows[i]["tags"]:
-                counts[t] = counts.get(t, 0) + 1
-        return sorted(counts.items(), key=lambda x: -x[1])[:k]
-
-    def owned_genre_summary(self, k: int = 10) -> list[tuple[str, int]]:
-        counts: dict[str, int] = {}
-        for i in self.owned_idx:
-            for g in self.rows[i]["genres"]:
-                counts[g] = counts.get(g, 0) + 1
-        return sorted(counts.items(), key=lambda x: -x[1])[:k]
-
-    def owned_era_summary(self) -> list[tuple[str, int]]:
-        counts: dict[str, int] = {}
-        for i in self.owned_idx:
-            y = self.rows[i]["year"]
-            if y:
-                era = f"{(int(y) // 10) * 10}s"
-                counts[era] = counts.get(era, 0) + 1
-        return sorted(counts.items(), key=lambda x: x[0], reverse=True)
-
     def set_watched(self, show_id: str, watched: bool):
         if show_id not in self.by_id:
             raise KeyError(f"unknown show id {show_id}")

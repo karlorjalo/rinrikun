@@ -349,7 +349,6 @@ $("#detail-modal").onclick = (e) => {
   if (e.target === $("#detail-modal")) closeModal();
 };
 
-let activeProfileTag = null;
 let profileData = null;
 
 async function profile() {
@@ -362,86 +361,26 @@ function renderProfile() {
   const el = $("#tab-profile");
   if (!p) return;
 
-  const topGenre = (p.genre_summary && p.genre_summary[0]) ? p.genre_summary[0][0] : "Anime";
-  const topEra = (p.era_summary && p.era_summary[0]) ? p.era_summary[0][0] : "Modern";
-
-  let displayedShows = p.defining_shows;
-  if (activeProfileTag) {
-    displayedShows = p.defining_shows.filter((r) =>
-      (r.tags || []).concat(r.genres || []).map((x) => x.toLowerCase()).includes(activeProfileTag.toLowerCase())
-    );
-  }
+  const tiers = p.tier_summary || {};
+  const tierItem = (t) => `
+            <div class="tier-summary-item clickable" data-filter-tier="${t}" title="View ${t} tier ratings"><span class="tier-pill tier-${t.toLowerCase()}">${t}</span> <span class="tier-summary-count">${tiers[t] || 0}</span></div>`;
 
   el.innerHTML = `
     <div class="hero-dna">
       <div class="hero-dna-top">
-        <div class="hero-dna-title-wrap">
-          <h2 class="hero-dna-title">Taste profile</h2>
+        <h2 class="hero-dna-title">Taste profile</h2>
+        <span class="hero-dna-counts">${p.owned_count} watched · ${p.total_count.toLocaleString()} in the catalog</span>
+      </div>
+      <div class="tier-summary-box">
+        <div class="tier-summary-title">
+          <span>Preference distribution</span>
+          <span style="font-weight:400;color:var(--muted);font-size:12px;">S 2.0× · A 1.5× · B 1.0× · C 0.3× · D 0.0×</span>
         </div>
-        <div class="hero-stats-grid">
-          <div class="hero-stat-card">
-            <div class="hero-stat-val">${p.owned_count}</div>
-            <div class="hero-stat-lbl">Owned</div>
-          </div>
-          <div class="hero-stat-card">
-            <div class="hero-stat-val">${p.total_count.toLocaleString()}</div>
-            <div class="hero-stat-lbl">Indexed</div>
-          </div>
-          <div class="hero-stat-card">
-            <div class="hero-stat-val">${esc(topEra)}</div>
-            <div class="hero-stat-lbl">Dominant Era</div>
-          </div>
-          <div class="hero-stat-card">
-            <div class="hero-stat-val">${esc(topGenre)}</div>
-            <div class="hero-stat-lbl">Top Genre</div>
-          </div>
+        <div class="tier-summary-row">${["S", "A", "B", "C", "D"].map(tierItem).join("")}
+          <div class="tier-summary-item" style="color:var(--muted);"><span style="font-size:11.5px;">Unrated:</span> <span class="tier-summary-count">${tiers.unrated || 0}</span></div>
         </div>
       </div>
-
-      <div class="dna-section-title">Dominant tags</div>
-      <div class="tagbar" id="profile-tagbar">
-        ${p.tag_summary.map(([t, c]) => `
-          <button class="chip-interactive ${activeProfileTag === t ? 'active' : ''}" data-tag="${esc(t)}">
-            ${esc(t)} <b>${c}</b>
-          </button>
-        `).join("")}
-      </div>
-
-      ${p.genre_summary && p.genre_summary.length ? `
-        <div class="dna-section-title" style="margin-top:16px;">Genres</div>
-        <div class="tagbar" id="profile-genrebar">
-          ${p.genre_summary.map(([g, c]) => `
-            <button class="chip-interactive ${activeProfileTag === g ? 'active' : ''}" data-tag="${esc(g)}">
-              ${esc(g)} <b>${c}</b>
-            </button>
-          `).join("")}
-        </div>
-      ` : ""}
-
-      ${p.tier_summary ? `
-        <div class="tier-summary-box">
-          <div class="tier-summary-title">
-            <span>Preference distribution</span>
-            <span style="font-weight:400;color:var(--muted);font-size:12px;">S 2.0× · A 1.5× · B 1.0× · C 0.3× · D 0.0×</span>
-          </div>
-          <div class="tier-summary-row">
-            <div class="tier-summary-item clickable" data-filter-tier="S" title="View S tier ratings"><span class="tier-pill tier-s">S</span> <span class="tier-summary-count">${p.tier_summary.S || 0}</span></div>
-            <div class="tier-summary-item clickable" data-filter-tier="A" title="View A tier ratings"><span class="tier-pill tier-a">A</span> <span class="tier-summary-count">${p.tier_summary.A || 0}</span></div>
-            <div class="tier-summary-item clickable" data-filter-tier="B" title="View B tier ratings"><span class="tier-pill tier-b">B</span> <span class="tier-summary-count">${p.tier_summary.B || 0}</span></div>
-            <div class="tier-summary-item clickable" data-filter-tier="C" title="View C tier ratings"><span class="tier-pill tier-c">C</span> <span class="tier-summary-count">${p.tier_summary.C || 0}</span></div>
-            <div class="tier-summary-item clickable" data-filter-tier="D" title="View D tier ratings"><span class="tier-pill tier-d">D</span> <span class="tier-summary-count">${p.tier_summary.D || 0}</span></div>
-            <div class="tier-summary-item" style="color:var(--muted);"><span style="font-size:11.5px;">Unrated:</span> <span class="tier-summary-count">${p.tier_summary.unrated || 0}</span></div>
-          </div>
-        </div>
-      ` : ""}
     </div>
-
-    ${activeProfileTag ? `
-      <div class="active-filter-bar">
-        <span>Filtered by: <b>${esc(activeProfileTag)}</b> (${displayedShows.length} of ${p.defining_shows.length} defining shows match)</span>
-        <button id="clear-profile-filter">Clear filter ✕</button>
-      </div>
-    ` : ""}
 
     <div class="vector-map-wrap" id="profile-vector-map-wrap">
       <div class="vector-map-header">
@@ -457,7 +396,7 @@ function renderProfile() {
           <span class="legend-item"><i class="legend-dot dot-catalog"></i> Catalog</span>
           <span class="legend-item"><i class="legend-dot dot-library"></i> Watched</span>
           <span class="legend-item legend-tiers" title="A watched show has the color of its tier"><i class="legend-dot dot-tier-s"></i>S <i class="legend-dot dot-tier-a"></i>A <i class="legend-dot dot-tier-b"></i>B <i class="legend-dot dot-tier-c"></i>C <i class="legend-dot dot-tier-d"></i>D</span>
-          <span class="legend-item"><i class="legend-dot dot-highlight"></i> Defining shows</span>
+          <span class="legend-item"><i class="legend-dot dot-highlight"></i> S-tier shows</span>
         </div>
       </div>
       <div class="vector-canvas-box">
@@ -465,45 +404,20 @@ function renderProfile() {
         <div class="vector-map-tooltip" id="profile-vector-tooltip" hidden></div>
       </div>
     </div>
-
-    <div class="defining-header-wrap">
-      <h2>Defining shows</h2>
-    </div>
-    <div class="cards" id="profile-cards"></div>
   `;
 
   el.querySelectorAll(".tier-summary-item[data-filter-tier]").forEach((btn) => {
     btn.onclick = () => {
-      const tier = btn.dataset.filterTier;
-      ratingsTierFilter = tier;
+      ratingsTierFilter = btn.dataset.filterTier;
       document.querySelector('[data-tab="ratings"]').click();
     };
   });
 
-  el.querySelectorAll(".chip-interactive").forEach((btn) => {
-    btn.onclick = () => {
-      const tag = btn.dataset.tag;
-      activeProfileTag = (activeProfileTag === tag) ? null : tag;
-      renderProfile();
-    };
+  // The map shows the S-tier shows as posters
+  getVectorMap().then((data) => {
+    const sTier = ((data && data.points) || []).filter((pt) => pt.owned && pt.tier === "S").map((pt) => pt.id);
+    initVectorMap("profile-vector-canvas", "profile-vector-tooltip", sTier, "S tier");
   });
-
-  const clearBtn = $("#clear-profile-filter");
-  if (clearBtn) {
-    clearBtn.onclick = () => {
-      activeProfileTag = null;
-      renderProfile();
-    };
-  }
-
-  const cardsContainer = $("#profile-cards");
-  if (!displayedShows.length) {
-    cardsContainer.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:30px 0;">No defining shows contain the tag "${esc(activeProfileTag)}". Try another tag!</p>`;
-  } else {
-    displayedShows.forEach((r) => cardsContainer.appendChild(card(r, `${r.similarity}% to center`)));
-  }
-
-  initVectorMap("profile-vector-canvas", "profile-vector-tooltip", p.defining_shows.map((s) => s.id), "Defining show");
 }
 
 let vectorMapData = null;

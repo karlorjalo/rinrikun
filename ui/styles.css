@@ -152,27 +152,8 @@ h2 { font-family: var(--serif); font-weight: 600; font-size: 22px; margin: 26px 
   margin-bottom: 28px; box-shadow: 0 2px 8px rgba(28, 25, 23, .04); }
 .hero-dna-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px;
   flex-wrap: wrap; margin-bottom: 20px; }
-.hero-dna-title-wrap { max-width: 520px; }
-.hero-dna-title { font-family: var(--serif); font-size: 24px; font-weight: 700; margin: 0; color: var(--text); }
-.hero-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; flex: 1; min-width: 260px; }
-.hero-stat-card { background: var(--hover); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; text-align: center; }
-.hero-stat-val { font-family: var(--serif); font-size: 20px; font-weight: 700; color: var(--text); line-height: 1.2; }
-.hero-stat-lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-top: 3px; }
-.dna-section-title { font-family: var(--serif); font-size: 15px; font-weight: 600; margin: 18px 0 10px;
-  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-.tagbar { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip-interactive { font-family: var(--sans); background: var(--hover); border: 1px solid var(--border); color: var(--muted);
-  border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; transition: all .15s ease; user-select: none; }
-.chip-interactive:hover { border-color: var(--accent); color: var(--text); background: color-mix(in srgb, var(--accent) 8%, var(--hover)); }
-.chip-interactive.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-.chip-interactive.active b { color: var(--accent-ink); }
-.active-filter-bar { margin: 14px 0 18px; padding: 10px 14px; background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: 8px; display: flex;
-  align-items: center; justify-content: space-between; font-size: 13px; }
-.active-filter-bar button { background: transparent; border: 0; color: var(--accent); cursor: pointer; font-size: 12.5px; font-weight: 500; }
-.active-filter-bar button:hover { text-decoration: underline; }
-.defining-header-wrap { margin: 32px 0 14px; }
-.defining-header-wrap h2 { margin: 0; }
+.hero-dna-title { font-family: var(--serif); font-size: 24px; font-weight: 700; margin: 0; color: var(--text); }
+.hero-dna-counts { color: var(--muted); font-size: 13px; }
 
 /* Detail Modal */
 dialog#detail-modal { border: 1px solid var(--border); border-radius: 12px; background: var(--card);
@@ -477,7 +458,6 @@ dialog#detail-modal::backdrop { background: rgba(20, 18, 16, 0.6); backdrop-filt
   .cards { grid-template-columns: 1fr; gap: 10px; }
   .hero-dna { padding: 18px 14px; }
   .hero-dna-top { flex-direction: column; gap: 14px; }
-  .hero-stats-grid { width: 100%; min-width: 0; grid-template-columns: repeat(2, 1fr); }
   .modal-head { flex-direction: column; align-items: center; text-align: center; }
   .modal-info { padding-right: 0; }
   .modal-meta-row, .modal-actions { justify-content: center; }

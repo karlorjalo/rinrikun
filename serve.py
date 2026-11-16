@@ -22,10 +22,6 @@ engine = Engine(store)
 @app.get("/api/profile")
 def profile():
     return {
-        "defining_shows": engine.defining_shows(15),
-        "tag_summary": engine.owned_tag_summary(20),
-        "genre_summary": engine.owned_genre_summary(10),
-        "era_summary": engine.owned_era_summary(),
         "tier_summary": engine.tier_summary(),
         "owned_count": len(engine.owned_idx),
         "manual_count": len(store.get_manual_watched_ids()),

@@ -57,6 +57,7 @@ def test_api_weights_endpoints(tmp_path):
         # 4. Check profile tier summary
         prof_res = client.get("/api/profile")
         assert prof_res.status_code == 200
+        assert set(prof_res.json()) == {"tier_summary", "owned_count", "manual_count", "total_count"}
         summary = prof_res.json()["tier_summary"]
         assert summary["S"] == 1
         assert summary["unrated"] == 1

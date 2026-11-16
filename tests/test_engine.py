@@ -99,46 +99,10 @@ def test_k_zero_returns_empty(tmp_path):
     assert e.similar_to("al:0", k=0) == []
     assert e.recommend(k=0) == []
 
-def test_defining_shows_owned_only(tmp_path):
-    e, rows = make_engine(tmp_path)
-    res = e.defining_shows(k=2)
-    assert len(res) == 2
-    assert all(r["owned"] for r in res)
-
-
-def test_defining_shows_weighted_preference(tmp_path):
-    e, rows = make_engine(tmp_path)
-    # Owned shows: al:0, al:1, al:2
-    # Rate al:0 as S (2.0), al:1 as C (0.3), leave al:2 unrated
-    e.set_show_tier("al:0", "S")
-    e.set_show_tier("al:1", "C")
-    res = e.defining_shows(k=2)
-    # al:0 (S tier) must be #1
-    assert res[0]["id"] == "al:0"
-    assert res[0]["tier"] == "S"
-    # al:1 (C tier) must be excluded; al:2 (unrated fallback) takes the second slot
-    assert res[1]["id"] == "al:2"
-    assert all(r["id"] != "al:1" for r in res)
-
-    # Now rate al:2 as A (1.5)
-    e.set_show_tier("al:2", "A")
-    res2 = e.defining_shows(k=2)
-    assert [r["id"] for r in res2] == ["al:0", "al:2"]
-    assert res2[0]["tier"] == "S"
-    assert res2[1]["tier"] == "A"
-
 def test_unknown_id_raises(tmp_path):
     e, rows = make_engine(tmp_path)
     with pytest.raises(ValueError):
         e.similar_to("al:999", k=1)
-
-
-def test_genre_and_era_summaries(tmp_path):
-    e, rows = make_engine(tmp_path)
-    genres = e.owned_genre_summary(k=5)
-    assert genres == [("Drama", 3)]
-    eras = e.owned_era_summary()
-    assert eras == [("2020s", 3)]
 
 
 def test_engine_manual_watched(tmp_path):
