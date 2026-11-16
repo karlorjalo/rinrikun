@@ -484,3 +484,14 @@ dialog#detail-modal::backdrop { background: rgba(20, 18, 16, 0.6); backdrop-filt
 .recs-formula-note { font-size: 12.5px; line-height: 1.5; color: var(--muted); margin: -12px 2px 18px; }
 .recs-formula-note b { color: var(--text); font-weight: 600; }
 #recs-formula-pills .pill.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+/* The typeface setting "Noto Sans JP everywhere": titles and headings use the typeface of the other text */
+:root[data-font="sans"] { --serif: var(--sans); }
+.settings-heading { margin-top: 6px; }
+.settings-note { color: var(--muted); font-size: 13px; margin: -6px 0 18px; }
+.settings-list { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 4px 20px; }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 16px 0; flex-wrap: wrap; }
+.setting-row + .setting-row { border-top: 1px solid var(--border); }
+.setting-title { font-family: var(--serif); font-weight: 600; font-size: 15.5px; color: var(--text); }
+.setting-text { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.setting-options .pill { font-size: 12.5px; border-color: var(--border); }
+.setting-options .pill.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }

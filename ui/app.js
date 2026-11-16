@@ -2336,6 +2336,87 @@ document.querySelectorAll("nav button").forEach((b) => {
   };
 });
 
+// ---- Settings
+// Each setting is a choice between options. The first option is the default. The value of a
+// setting is an attribute of the root element (data-<key>), so that the style sheet can use it.
+// The browser keeps the values. To add a setting: add an entry to this list, and add its rules to
+// the style sheet. A setting that needs more than style rules has an `apply` function.
+const SETTINGS_KEY = "rinrikun-settings";
+const SETTINGS = [
+  {
+    key: "font",
+    title: "Typeface",
+    options: [
+      { value: "mixed", label: "Serif titles", text: "Titles and headings use Noto Serif JP. The other text uses Noto Sans JP." },
+      { value: "sans", label: "Noto Sans JP everywhere", text: "All text uses Noto Sans JP." },
+    ],
+    apply: applyFontSetting,
+  },
+];
+const settings = {};
+
+// The page loads Noto Sans JP in the weights 400, 500 and 700. Titles and headings have the weight
+// 600, thus "Noto Sans JP everywhere" also needs this weight. The style sheet for it is in the page
+// head and is off for "Serif titles", so that the look of "Serif titles" stays the same as before.
+function applyFontSetting(value) {
+  const link = document.getElementById("font-sans-600");
+  if (link) link.disabled = value !== "sans";
+  // The maps draw their text on a canvas. Draw them again when the typeface is ready.
+  const redraw = () => activeVectorMaps.forEach((ctrl) => ctrl.scheduleDraw());
+  redraw();
+  if (value === "sans" && document.fonts && document.fonts.load) {
+    document.fonts.load('600 12px "Noto Sans JP"').then(redraw, () => {});
+  }
+}
+
+function applySetting(setting) {
+  document.documentElement.dataset[setting.key] = settings[setting.key];
+  if (setting.apply) setting.apply(settings[setting.key]);
+}
+
+function setSetting(key, value) {
+  const setting = SETTINGS.find((x) => x.key === key);
+  if (!setting || !setting.options.some((o) => o.value === value)) return;
+  settings[key] = value;
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {}
+  applySetting(setting);
+  renderSettings();
+}
+
+function renderSettings() {
+  const list = $("#settings-list");
+  if (!list) return;
+  list.innerHTML = SETTINGS.map((setting) => {
+    const current = setting.options.find((o) => o.value === settings[setting.key]);
+    const pills = setting.options.map((o) => `
+          <button class="pill ${o === current ? "active" : ""}" data-key="${setting.key}" data-value="${o.value}" aria-pressed="${o === current}">${esc(o.label)}</button>`).join("");
+    return `
+      <div class="setting-row" data-setting="${setting.key}">
+        <div class="setting-info">
+          <div class="setting-title">${esc(setting.title)}</div>
+          <div class="setting-text">${esc(current.text)}</div>
+        </div>
+        <div class="filter-pills setting-options" role="group" aria-label="${esc(setting.title)}">${pills}
+        </div>
+      </div>`;
+  }).join("");
+  list.querySelectorAll(".pill").forEach((btn) => {
+    btn.onclick = () => setSetting(btn.dataset.key, btn.dataset.value);
+  });
+}
+
+function initSettings() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") || {}; } catch (e) {}
+  SETTINGS.forEach((setting) => {
+    const known = setting.options.some((o) => o.value === saved[setting.key]);
+    settings[setting.key] = known ? saved[setting.key] : setting.options[0].value;
+    applySetting(setting);
+  });
+  renderSettings();
+}
+
+initSettings();
 profile();
 initSearch();
 initRecsFilters();
