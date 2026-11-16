@@ -108,6 +108,14 @@ function formatOverview(text) {
     .replace(/\n/g, "<br>");
 }
 
+// AniList has each cover in a small file (100 pixels wide) and in a larger file. A large picture
+// uses the larger file. If the larger file does not load, the picture uses the small file.
+function largePoster(url) {
+  return url ? url.replace("/cover/small/", "/cover/medium/") : url;
+}
+const POSTER_ERROR = "if (!this.dataset.retry && this.dataset.small) { this.dataset.retry = '1'; this.src = this.dataset.small; } " +
+  "else { this.style.display = 'none'; this.nextElementSibling.classList.add('show'); }";
+
 async function openModal(r) {
   if (r.overview === undefined && r.id) {
     try {
@@ -122,7 +130,7 @@ async function openModal(r) {
   const scoreVal = r.score != null ? Number(r.score).toFixed(1) : null;
 
   const posterHtml = r.poster
-    ? `<img src="${esc(r.poster)}" loading="lazy" alt="${esc(main)}" onerror="this.style.display='none'; this.nextElementSibling.classList.add('show');">
+    ? `<img src="${esc(largePoster(r.poster))}" data-small="${esc(r.poster)}" loading="lazy" alt="${esc(main)}" onerror="${POSTER_ERROR}">
        <div class="poster-fallback" aria-hidden="true">${esc(main[0] || "?")}</div>`
     : `<div class="poster-fallback show" aria-hidden="true">${esc(main[0] || "?")}</div>`;
 
@@ -2052,7 +2060,7 @@ function renderDeckCard() {
   const tierBadge = show.tier ? `<span class="tier-pill tier-${show.tier.toLowerCase()}">${show.tier}</span>` : "";
 
   const posterHtml = show.poster
-    ? `<img src="${esc(show.poster)}" alt="${esc(main)}" onerror="this.style.display='none'; this.nextElementSibling.classList.add('show');">
+    ? `<img src="${esc(largePoster(show.poster))}" data-small="${esc(show.poster)}" alt="${esc(main)}" onerror="${POSTER_ERROR}">
        <div class="poster-fallback" aria-hidden="true">${esc(main[0] || "?")}</div>`
     : `<div class="poster-fallback show" aria-hidden="true">${esc(main[0] || "?")}</div>`;
 
