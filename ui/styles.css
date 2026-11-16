@@ -597,3 +597,45 @@ h2::before { content: ""; display: inline-block; width: 11px; height: 8px; margi
 :root[data-gradient-state="error"] .vector-gradient-toggle.active::after { content: "no data"; font-weight: 400; }
 .rec-results-formulas { margin-top: 6px; color: var(--muted); }
 .rec-results-formulas b { color: var(--text); font-weight: 600; }
+/* The story of the list: the button, and the panel on the Recommendations map */
+.story-btn { align-self: center; margin-left: 4px; padding: 3px 10px; font-size: 11.5px; border: 1px solid var(--border); border-radius: 999px; }
+.story-btn:hover { border-color: var(--accent); color: var(--accent); background: transparent; }
+.story-btn.active { background: transparent; border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.story-panel { position: absolute; right: 12px; top: 12px; z-index: 55; width: 264px; max-height: calc(100% - 24px); overflow: auto;
+  background: color-mix(in srgb, var(--card) 94%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 12px; box-shadow: 0 8px 26px rgba(0, 0, 0, 0.16); font-family: var(--sans); }
+.story-panel[hidden] { display: none; }
+.story-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.story-title { flex: 1; font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--text); }
+.story-progress { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.story-close { flex: none; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; background: transparent;
+  border: 0; border-radius: 5px; color: var(--muted); font-size: 12px; cursor: pointer; }
+.story-close:hover { background: var(--hover); color: var(--text); }
+.story-rows { display: flex; flex-direction: column; gap: 2px; }
+.story-row { position: relative; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; width: 100%;
+  padding: 3px 7px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-family: var(--sans); font-size: 12px;
+  line-height: 1.5; text-align: left; cursor: pointer; overflow: hidden; opacity: 0.5; transition: opacity .3s ease, color .3s ease; }
+.story-row:hover { opacity: 1; }
+.story-row::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent); transition: width .9s cubic-bezier(.2, .7, .2, 1), background .3s ease; }
+.story-row.is-done { opacity: 1; color: var(--text); }
+.story-row.is-done::before { width: var(--w); }
+.story-row.is-current { font-weight: 600; }
+.story-row.is-current::before { background: color-mix(in srgb, var(--accent) 36%, transparent); }
+.story-row > span { position: relative; }
+.story-row-count { font-variant-numeric: tabular-nums; }
+.story-text { margin: 9px 1px 8px; min-height: 6em; font-size: 12.5px; line-height: 1.5; color: var(--text); }
+.story-controls { display: flex; gap: 6px; }
+.story-play { padding: 3px 10px; border: 1px solid var(--border); color: var(--text); }
+.story-play:hover { border-color: var(--accent); color: var(--accent); background: transparent; }
+.story-note { margin: 8px 1px 0; font-size: 11px; line-height: 1.45; color: var(--muted); }
+/* The zoom buttons are not below the panel */
+.vector-canvas-box.story-open .vector-zoom-controls { right: 288px; }
+@media (max-width: 680px) {
+  /* On a small screen the panel is a strip at the bottom of the map, with only the step of now */
+  .story-panel { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; max-height: 60%; }
+  .story-row:not(.is-current), .story-note { display: none; }
+  .story-text { min-height: 0; margin: 6px 1px; }
+  .vector-canvas-box.story-open .vector-zoom-controls, .vector-canvas-box.story-open .vector-hint-pill { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .story-row, .story-row::before { transition: none; } }

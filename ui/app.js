@@ -956,6 +956,9 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   let flight = null;
   // The match gradient is on in the draw of now, and the page has the match values
   let drawGradient = false;
+  // The story of the list draws the dots of two steps and the change between them, or null.
+  // See "The story of the list".
+  let story = null;
 
   // The map positions and the grid positions of the shows, and their screen positions in the last draw
   const mapX = new Float32Array(n);
@@ -1501,6 +1504,61 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     ctx.restore();
   }
 
+  // The dots of the story of the list. `story.from` and `story.to` tell for each show if it stays
+  // in the step before and in the step of now. A show that stays is a strong dot, and each other
+  // show is a faint dot. Fewer shows stay in each step, thus their dots get stronger and larger.
+  // `strength` multiplies all opacities.
+  function drawStoryDots(ctx, w, h, colors, strength) {
+    if (strength <= 0) return;
+    const { from, to, ease, lookFrom, lookTo } = story;
+    const base = dotRadius(false);
+    const mix = (a, b) => a + (b - a) * ease;
+    // The groups: 0 = stays out, 1 = goes out, 2 = comes in, 3 = stays in
+    const groups = [[], [], [], []];
+    // The shows of the user are apart. A show of the user that is out has no dot.
+    const mine = [[], [], [], []];
+    for (let i = 0; i < n; i++) {
+      if (sx[i] < -20 || sx[i] > w + 20 || sy[i] < -20 || sy[i] > h + 20) continue;
+      (points[i].owned ? mine : groups)[(from[i] ? 1 : 0) + (to[i] ? 2 : 0)].push(i);
+    }
+    // All dots of a group are one path: one path for each dot is slow
+    const dots = (list, color, alpha, size) => {
+      if (!list.length || alpha <= 0.003) return;
+      const r = base * size;
+      ctx.fillStyle = color;
+      ctx.globalAlpha = Math.min(1, alpha) * strength;
+      ctx.beginPath();
+      for (const i of list) {
+        ctx.moveTo(sx[i] + r, sy[i]);
+        ctx.arc(sx[i], sy[i], r, 0, Math.PI * 2);
+      }
+      ctx.fill();
+    };
+    // The dots have the accent color from the step in which the taste of the user starts to count
+    const colorOf = (look) => (look.taste ? colors.accent : colors.dot);
+    dots(groups[0], colors.dot, STORY_FAINT, 1);
+    dots(groups[1], colorOf(lookFrom), mix(lookFrom.alpha, STORY_FAINT), mix(lookFrom.size, 1));
+    dots(groups[2], colorOf(lookTo), mix(STORY_FAINT, lookTo.alpha), mix(1, lookTo.size));
+    if (lookFrom.taste === lookTo.taste) {
+      dots(groups[3], colorOf(lookTo), mix(lookFrom.alpha, lookTo.alpha), mix(lookFrom.size, lookTo.size));
+    } else {
+      // The color changes: the dots of the old color go out, and the dots of the new color come in
+      const size = mix(lookFrom.size, lookTo.size);
+      dots(groups[3], colorOf(lookFrom), lookFrom.alpha * (1 - ease), size);
+      dots(groups[3], colorOf(lookTo), lookTo.alpha * ease, size);
+    }
+    // The shows of the user have the colors of their tiers, as on the usual map. They are in
+    // the catalog, and they go out in the second step.
+    const mineSize = dotRadius(true) / base;
+    const mineAlpha = [0, 1 - ease, ease, 1];
+    for (let g = 1; g < 4; g++) {
+      for (const tier of [null, "D", "C", "B", "A", "S"]) {
+        dots(mine[g].filter((i) => (points[i].tier || null) === tier), (tier && colors.tier[tier]) || colors.library, mineAlpha[g], mineSize);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
   function draw() {
     if (!canvas.isConnected) return;
     const { w, h, side } = viewSize();
@@ -1590,7 +1648,10 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       const foundCards = searching && markers && searchList.length <= SEARCH_POSTERS;
       const special = (i) => isFound(i) || (highlightSet.has(points[i].id) && (markers || highlightKind === "recommended"));
       // A search makes the other shows faint, so that the found shows are easy to see
-      const fade = searching ? SEARCH_FADE : 1;
+      // The story of the list draws its own dots. In its last step the usual picture comes back.
+      const usual = story ? (story.last ? story.ease : 0) : 1;
+      if (story) drawStoryDots(ctx, w, h, colors, 1 - usual);
+      const fade = (searching ? SEARCH_FADE : 1) * usual;
       ctx.globalAlpha = fade;
 
       // 1. The dots of the catalog. With the match gradient a dot is stronger and larger for a
@@ -1788,6 +1849,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     canvas.dataset.labels = String(regionCount);
     canvas.dataset.cards = cards ? "1" : "0";
     canvas.dataset.found = searching ? String(searchList.length) : "";
+    canvas.dataset.story = story && !cards ? String(story.step) : "";
     ctx.restore();
   }
 
@@ -1910,7 +1972,8 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       return;
     }
 
-    const pt = findNearest(mx, my);
+    // During the story of the list a dot is not a show under the pointer
+    const pt = story ? null : findNearest(mx, my);
     if (pt !== hoveredPoint) {
       hoveredPoint = pt;
       scheduleDraw();
@@ -2067,6 +2130,27 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       highlightSet.clear();
       ids.forEach((id) => highlightSet.add(id));
       scheduleDraw();
+    },
+    // The story of the list: see "The story of the list"
+    setStory: (state) => {
+      story = state;
+      if (state) {
+        hoveredPoint = null;
+        tooltip.hidden = true;
+        tooltip.style.display = "none";
+      }
+    },
+    // Show the full map. `dx` and `dy` move it, in pixels.
+    resetView: (dx = 0, dy = 0) => {
+      stopFlight();
+      scale = 1.0;
+      panX = dx;
+      panY = dy;
+      dismissHint();
+      scheduleDraw();
+    },
+    clearSearch: () => {
+      if (searchInput.value) clearSearch();
     },
     destroy: () => {
       destroyed = true;
@@ -2474,6 +2558,13 @@ function initRecsFilters() {
       recs();
     };
   };
+  const storyBtn = $("#recs-story-btn");
+  if (storyBtn) {
+    storyBtn.onclick = () => {
+      if (storyState) closeStory();
+      else startStory();
+    };
+  }
   bindSwitch("#recs-variety", (on) => { recsVariety = on; });
   bindSwitch("#recs-sequels", (on) => { recsSequels = on; });
 
@@ -2517,6 +2608,7 @@ async function setDismissed(r, dismissed) {
 }
 
 function refreshRecsAfterDismiss() {
+  closeStory();
   renderRecsGrid();
   renderRecsUndoBar();
   const map = activeVectorMaps.get("recs-vector-canvas");
@@ -2608,6 +2700,8 @@ function renderRecsGrid() {
 }
 
 async function recs() {
+  // The story of the list is for the list that the page showed
+  closeStory();
   lastDismissed = null;
   renderRecsUndoBar();
   renderRecsSeedBar();
@@ -2628,7 +2722,287 @@ async function recs() {
   const map = activeVectorMaps.get("recs-vector-canvas");
   // An open map keeps its zoom and its position: only the highlighted shows change
   if (map) map.setHighlight(ids);
-  else initVectorMap("recs-vector-canvas", "recs-vector-tooltip", ids, "Recommended");
+  else await initVectorMap("recs-vector-canvas", "recs-vector-tooltip", ids, "Recommended");
+  paintStoryButton();
+  if (request === recsRequest) autoStory();
+}
+
+// ---- The story of the list
+// An animation on the Recommendations map shows how the formula goes from the catalog to the list.
+// Each step is one part of the formula. The dots of the shows that stay are strong, and the other
+// dots are faint. A panel on the map has the number of shows and a short text for each step.
+// The server gives the steps: see /api/recommend/steps.
+const STORY_SEEN_KEY = "rinrikun-story-seen";
+// The time of one step in milliseconds, and the part of it in which the dots change
+const STORY_STEP_MS = 3400;
+const STORY_MOVE_MS = 1100;
+// The opacity of the dot of a show that does not stay
+const STORY_FAINT = 0.06;
+// The width of the panel on a wide screen, with its distance from the edge of the map box
+const STORY_PANEL_SPACE = 288;
+const storyNumber = (value) => Number(value).toLocaleString("en-US");
+const STORY_STEPS = {
+  catalog: {
+    name: "The catalog",
+    text: (step) => `Each dot is one show. The catalog has ${storyNumber(step.count)} shows.`,
+  },
+  new: {
+    name: "New for you",
+    text: (step, info) => `The ${storyNumber(info.shows)} shows that you have go out, with the other shows of their ${storyNumber(info.franchises)} franchises. `
+      + `Shows that are not released go out too${info.removed ? `, and the ${storyNumber(info.removed)} shows that you removed` : ""}. One show stays for each franchise.`,
+  },
+  content: {
+    name: "Your taste",
+    text: (step, info) => `The formula learns from the tags and the text of your ${storyNumber(info.liked)} liked shows. `
+      + "A show stays if it is like some of them, or if it has what they have and the catalog does not have.",
+  },
+  links: {
+    name: "Fans of your shows",
+    text: (step, info) => `AniList users who like your shows also recommend other shows. A show moves up if it has many of these links from your ${storyNumber(info.sources)} franchises.`,
+  },
+  dislikes: {
+    name: "Your dislikes",
+    text: (step, info) => (info.disliked || info.removed
+      ? `A show moves down if it is like your ${storyNumber(info.disliked)} C and D shows${info.removed ? " or like a show that you removed" : ""}. `
+      : "") + "A show moves down if the model of your tiers predicts a low tier for it.",
+  },
+  kind: {
+    name: "Your usual kinds",
+    text: () => "A show moves up if its year, its format and its length are usual for your library.",
+  },
+  list: {
+    name: "Your list",
+    text: (step) => `The formula adds all the parts. The ${storyNumber(step.count)} best shows are your list${recsVariety ? ", with more variety" : ""}.`,
+  },
+};
+// The story that plays, or null
+let storyState = null;
+// The number of the last request for the steps
+let storyRequest = 0;
+
+function storyPanel() {
+  const box = document.querySelector("#recs-vector-map-wrap .vector-canvas-box");
+  if (!box) return null;
+  let panel = box.querySelector(".story-panel");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.className = "story-panel";
+    panel.hidden = true;
+    box.appendChild(panel);
+  }
+  return panel;
+}
+
+function paintStoryButton() {
+  const btn = $("#recs-story-btn");
+  if (!btn) return;
+  btn.style.display = seed ? "none" : "";
+  btn.classList.toggle("active", !!storyState);
+  btn.setAttribute("aria-pressed", String(!!storyState));
+}
+
+// The look of the dots that stay in a step. Fewer shows stay in each step, thus the dots get
+// stronger and larger. `least` is the number of shows of the list.
+function storyLook(step, index, total, least) {
+  const span = Math.log(Math.max(total, least + 1) / least);
+  const part = Math.max(0, Math.min(1, 1 - Math.log(Math.max(step.count, least) / least) / span));
+  // The taste of the user counts from the third step
+  return { alpha: 0.26 + 0.6 * part, size: 1 + 1.4 * part, taste: index >= 2 };
+}
+
+async function startStory() {
+  const map = activeVectorMaps.get("recs-vector-canvas");
+  const panel = storyPanel();
+  if (!map || !panel || seed || !vectorMapData) return;
+  closeStory();
+  const request = ++storyRequest;
+  let data;
+  try {
+    const res = await fetch(withFormula(`/api/recommend/steps?k=${Math.max(1, rawRecs.length || 40)}&new_only=${!recsSequels}`));
+    if (!res.ok) throw new Error(`steps failed: ${res.status}`);
+    data = await res.json();
+  } catch (e) {
+    console.error("Failed to load the steps of the list", e);
+    return;
+  }
+  if (request !== storyRequest || !data.steps || data.steps.length < 3) return;
+
+  const points = vectorMapData.points;
+  const lit = data.steps.map((step) => {
+    const flags = new Uint8Array(points.length);
+    if (!step.points) flags.fill(1);
+    else for (const p of step.points) if (p < flags.length) flags[p] = 1;
+    return flags;
+  });
+  // The last step is the list that the page shows
+  const last = data.steps[data.steps.length - 1];
+  if (last.key === "list" && rawRecs.length) {
+    const position = new Map(points.map((pt, i) => [pt.id, i]));
+    const flags = new Uint8Array(points.length);
+    let count = 0;
+    for (const r of rawRecs) {
+      const i = position.get(r.id);
+      if (i === undefined) continue;
+      flags[i] = 1;
+      count++;
+    }
+    lit[lit.length - 1] = flags;
+    last.count = count;
+  }
+  const total = data.steps[0].count;
+  const least = Math.max(1, last.count);
+  storyState = {
+    map, panel, lit, steps: data.steps, info: data.info,
+    looks: data.steps.map((step, i) => storyLook(step, i, total, least)),
+    index: -1, playing: true, frame: null, timer: null,
+  };
+  renderStoryPanel();
+  paintStoryButton();
+  // The zoom buttons move away from the panel
+  panel.parentElement.classList.add("story-open");
+  // The panel covers a part of the map box. Move the map so that the panel does not cover it.
+  const box = panel.parentElement.getBoundingClientRect();
+  const rect = panel.getBoundingClientRect();
+  const side = Math.max(1, Math.min(box.width, box.height) - 48);
+  let dx = 0;
+  let dy = 0;
+  if (rect.width < box.width * 0.6) {
+    const over = (box.width + side) / 2 - (rect.left - box.left) + 12;
+    dx = -Math.max(0, Math.min(over, (box.width - side) / 2 - 8));
+  } else {
+    const over = (box.height + side) / 2 - (rect.top - box.top) + 12;
+    dy = -Math.max(0, Math.min(over, (box.height - side) / 2 - 56));
+  }
+  map.clearSearch();
+  map.resetView(dx, dy);
+  showStoryStep(0);
+}
+
+function renderStoryPanel() {
+  const st = storyState;
+  const total = st.steps[0].count;
+  const rows = st.steps.map((step, i) => {
+    // The bar of a step: the number of its shows, on a logarithmic scale
+    const width = Math.max(6, Math.round((100 * Math.log(Math.max(step.count, 2))) / Math.log(Math.max(total, 3))));
+    return `<button type="button" class="story-row" data-step="${i}" style="--w:${width}%">
+      <span class="story-row-name">${STORY_STEPS[step.key].name}</span>
+      <span class="story-row-count">${storyNumber(step.count)}</span>
+    </button>`;
+  }).join("");
+  st.panel.innerHTML = `
+    <div class="story-head">
+      <span class="story-title">How the list is made</span>
+      <span class="story-progress"></span>
+      <button type="button" class="story-close" aria-label="Close" title="Close">✕</button>
+    </div>
+    <div class="story-rows">${rows}</div>
+    <p class="story-text" aria-live="polite"></p>
+    <div class="story-controls"><button type="button" class="pill story-play"></button></div>
+    <p class="story-note">Each step keeps the best shows by the score up to that step. A later step can bring a show back.</p>`;
+  st.panel.hidden = false;
+  st.panel.querySelector(".story-close").onclick = closeStory;
+  st.panel.querySelectorAll(".story-row").forEach((row) => {
+    row.onclick = () => {
+      st.playing = false;
+      showStoryStep(Number(row.dataset.step));
+    };
+  });
+  st.panel.querySelector(".story-play").onclick = () => {
+    const ended = st.index === st.steps.length - 1;
+    st.playing = !st.playing;
+    if (!st.playing) {
+      clearTimeout(st.timer);
+      paintStoryPanel();
+    } else {
+      showStoryStep(ended ? 0 : st.index + 1);
+    }
+  };
+  st.panel.onkeydown = (e) => {
+    if (e.key === "Escape") closeStory();
+  };
+}
+
+function paintStoryPanel() {
+  const st = storyState;
+  if (!st) return;
+  const step = st.steps[st.index];
+  st.panel.querySelectorAll(".story-row").forEach((row, i) => {
+    row.classList.toggle("is-done", i <= st.index);
+    row.classList.toggle("is-current", i === st.index);
+    if (i === st.index) row.setAttribute("aria-current", "step");
+    else row.removeAttribute("aria-current");
+  });
+  st.panel.querySelector(".story-progress").textContent = `${st.index + 1} / ${st.steps.length}`;
+  st.panel.querySelector(".story-text").textContent = STORY_STEPS[step.key].text(step, st.info);
+  const ended = st.index === st.steps.length - 1;
+  st.panel.querySelector(".story-play").textContent = st.playing ? "⏸ Pause" : ended ? "▶ Play again" : "▶ Play";
+  // The state of the story, for the tests of the interface
+  st.panel.dataset.step = step.key;
+  st.panel.dataset.playing = String(st.playing);
+}
+
+// Go to a step. The dots change from the step that the map shows to this step.
+function showStoryStep(index) {
+  const st = storyState;
+  if (!st) return;
+  cancelAnimationFrame(st.frame);
+  clearTimeout(st.timer);
+  const before = st.index < 0 ? index : st.index;
+  st.index = index;
+  const last = index === st.steps.length - 1;
+  // No animation for a user who asked the system for less motion
+  const duration = before === index || matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : STORY_MOVE_MS;
+  const state = { from: st.lit[before], to: st.lit[index], lookFrom: st.looks[before], lookTo: st.looks[index], ease: 0, last, step: index };
+  paintStoryPanel();
+  const begin = performance.now();
+  const frame = (now) => {
+    if (storyState !== st) return;
+    const t = duration ? Math.max(0, Math.min(1, (now - begin) / duration)) : 1;
+    state.ease = t * t * (3 - 2 * t);
+    st.map.setStory(state);
+    st.map.draw();
+    if (t < 1) {
+      st.frame = requestAnimationFrame(frame);
+      return;
+    }
+    if (last) {
+      // The story ends with the usual picture of the map: the list as posters
+      st.map.setStory(null);
+      st.map.scheduleDraw();
+      st.playing = false;
+      paintStoryPanel();
+    } else if (st.playing) {
+      st.timer = setTimeout(() => showStoryStep(index + 1), STORY_STEP_MS - duration);
+    }
+  };
+  st.frame = requestAnimationFrame(frame);
+}
+
+function closeStory() {
+  storyRequest++;
+  const st = storyState;
+  if (!st) return;
+  storyState = null;
+  cancelAnimationFrame(st.frame);
+  clearTimeout(st.timer);
+  st.map.setStory(null);
+  st.map.scheduleDraw();
+  st.panel.hidden = true;
+  st.panel.innerHTML = "";
+  st.panel.parentElement.classList.remove("story-open");
+  paintStoryButton();
+}
+
+// The story plays one time without a click: with the first list of recommendations in this browser
+function autoStory() {
+  if (seed || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  try {
+    if (localStorage.getItem(STORY_SEEN_KEY)) return;
+    localStorage.setItem(STORY_SEEN_KEY, "1");
+  } catch (e) {
+    return;
+  }
+  startStory();
 }
 
 let reviewQueue = [];
@@ -3062,6 +3436,8 @@ document.querySelectorAll("nav button").forEach((b) => {
     b.classList.add("on");
     for (const s of document.querySelectorAll("main section")) s.hidden = true;
     $(`#tab-${b.dataset.tab}`).hidden = false;
+    // The story of the list plays only on the Recommendations tab
+    closeStory();
     if (b.dataset.tab === "review") loadReviewQueue();
     if (b.dataset.tab === "ratings") loadRatings();
     if (b.dataset.tab === "recs") recs();
