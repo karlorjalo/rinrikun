@@ -1016,3 +1016,29 @@ def test_shows_without_a_tier_are_in_the_order_of_the_guess_and_the_match(tmp_pa
     assert all(r["tier"] for r in queue[2:])
     assert [r["id"] for r in e.review_queue(unrated_only=True)] == ["al:7", "al:8"]
     assert e.watch_next_order([]) == [] and e.watch_next_order([rows[0]]) == [rows[0]]
+
+
+def test_threads_compute_the_match_one_time(tmp_path):
+    import threading
+    import time
+    e = _match_engine(tmp_path)
+    e.match_percent()
+    calls = []
+    original = e._hybrid
+
+    def slow_hybrid(*args, **kwargs):
+        calls.append(1)
+        time.sleep(0.2)
+        return original(*args, **kwargs)
+
+    e._hybrid = slow_hybrid
+    # A change of a tier makes the match stale. Four requests then ask for it at the same time.
+    e.set_show_tier("al:2", "B")
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(e.match_percent())) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(calls) == 1
+    assert all(r is results[0] for r in results)

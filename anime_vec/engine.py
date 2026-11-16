@@ -1,4 +1,5 @@
 import hashlib
+import threading
 from bisect import bisect_right
 
 import numpy as np
@@ -227,6 +228,11 @@ class Engine:
         self.kind_codes = self._build_kind_codes()
         # The match of each row, for each formula. See match_percent.
         self._match_cache: dict = {}
+        # The server answers requests in more than one thread. After a change of a tier, some
+        # requests need the match at the same time. One thread computes it and the other threads
+        # wait for the result. Without the lock each thread computed it, which took 2 to 3 seconds.
+        # A change of the data of the user also holds the lock.
+        self.lock = threading.RLock()
 
         self.coords_2d, self.grid_2d, self.cell = self._build_layout(unique)
         self.regions = self._build_regions(unique)
@@ -586,6 +592,11 @@ class Engine:
         part of the score ignores the shows of its own franchise. Thus the match of a show of the
         user tells how well the formula finds this show from the other shows of the user.
         """
+        with self.lock:
+            return self._match_percent(kinds)
+
+    def _match_percent(self, kinds: str) -> np.ndarray:
+        """Compute or get the result of match_percent. The caller holds the lock."""
         key = self._state_key()
         cached = self._match_cache.get(kinds)
         if cached is not None and cached[0] == key:
@@ -619,6 +630,11 @@ class Engine:
         The value is NaN if the user has too few ratings for the model. A row that the model
         learned from gets the prediction of a model without this row.
         """
+        with self.lock:
+            return self._tier_guess()
+
+    def _tier_guess(self) -> np.ndarray:
+        """Compute or get the result of tier_guess. The caller holds the lock."""
         key = self._state_key()
         cached = self._match_cache.get("tier guess")
         if cached is not None and cached[0] == key:

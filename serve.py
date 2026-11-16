@@ -53,14 +53,16 @@ def post_weights(payload: dict):
     if not show_id or show_id not in engine.by_id:
         raise HTTPException(404, "unknown show id")
     tier = payload.get("tier")
-    return engine.set_show_tier(show_id, tier)
+    with engine.lock:
+        return engine.set_show_tier(show_id, tier)
 
 
 @app.delete("/api/weights")
 def delete_weights(id: str = Query(...)):
     if not id or id not in engine.by_id:
         raise HTTPException(404, "unknown show id")
-    return engine.set_show_tier(id, None)
+    with engine.lock:
+        return engine.set_show_tier(id, None)
 
 
 # The formula of the match of a show: see Engine.match_percent
@@ -88,7 +90,8 @@ def post_watched(payload: dict):
     if not show_id or show_id not in engine.by_id:
         raise HTTPException(404, "unknown show id")
     watched = bool(payload.get("watched", True))
-    engine.set_watched(show_id, watched)
+    with engine.lock:
+        engine.set_watched(show_id, watched)
     return {"id": show_id, "watched": watched, "owned": engine.by_id[show_id]["owned"]}
 
 
@@ -103,7 +106,8 @@ def post_dismissed(payload: dict):
     if not show_id or show_id not in engine.by_id:
         raise HTTPException(404, "unknown show id")
     dismissed = bool(payload.get("dismissed", True))
-    engine.set_dismissed(show_id, dismissed)
+    with engine.lock:
+        engine.set_dismissed(show_id, dismissed)
     return {"id": show_id, "dismissed": dismissed}
 
 
