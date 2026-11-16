@@ -125,3 +125,23 @@ def test_status_and_episodes_roundtrip(tmp_path):
     rows = s.load_rows()
     assert rows[0]["status"] == "RELEASING" and rows[0]["episodes"] == 24
     assert rows[1]["status"] is None and rows[1]["episodes"] is None
+
+
+def test_read_only_store_reads_an_old_database(tmp_path):
+    import sqlite3
+    path = tmp_path / "old_ro.db"
+    con = sqlite3.connect(str(path))
+    con.executescript("""
+        CREATE TABLE shows (id TEXT PRIMARY KEY, source TEXT, title TEXT, title_native TEXT, year INTEGER,
+          format TEXT, genres TEXT, tags TEXT, tag_ranks TEXT, studios TEXT, overview TEXT, score REAL,
+          owned INTEGER, tmdbid TEXT, anilist_id INTEGER, poster TEXT, text_hash TEXT, embedding BLOB);
+        CREATE TABLE watched_manual (id TEXT PRIMARY KEY, created_at TEXT);
+        CREATE TABLE show_weights (id TEXT PRIMARY KEY, tier TEXT NOT NULL, weight REAL NOT NULL, updated_at TEXT);
+        INSERT INTO shows (id, source, title, genres, tags, tag_ranks, studios, owned)
+          VALUES ('al:1', 'anilist', 'Old', '["Drama"]', '[]', '[]', '[]', 0);
+    """)
+    con.commit()
+    con.close()
+    row = Store(path, read_only=True).load_rows()[0]
+    assert row["title"] == "Old" and row["genres"] == ["Drama"]
+    assert row["relations"] == [] and row["status"] is None and row["library_id"] is None

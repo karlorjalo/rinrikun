@@ -130,10 +130,14 @@ class Store:
     def load_rows(self) -> list[dict]:
         manual_ids = self.get_manual_watched_ids()
         weights = self.get_weights()
-        cur = self.con.execute(f"SELECT {','.join(COLUMNS)},text_hash FROM shows ORDER BY id")
+        # A read-only database from an older version does not have the newest columns
+        existing = {r[1] for r in self.con.execute("PRAGMA table_info(shows)")}
+        names = [c for c in COLUMNS + ("text_hash",) if c in existing]
+        cur = self.con.execute(f"SELECT {','.join(names)} FROM shows ORDER BY id")
         out = []
         for t in cur.fetchall():
-            r = dict(zip(COLUMNS + ("text_hash",), t))
+            r = dict.fromkeys(COLUMNS + ("text_hash",))
+            r.update(zip(names, t))
             for c, default in JSON_COLUMNS.items():
                 r[c] = json.loads(r[c]) if r[c] else type(default)()
             is_manual = r["id"] in manual_ids
