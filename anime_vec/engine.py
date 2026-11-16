@@ -864,18 +864,36 @@ class Engine:
                 counts["unrated"] += 1
         return counts
 
+    def poster_of(self, j: int) -> str | None:
+        """Return the address of the poster of row j for the interface.
+
+        The poster of a library row is on the Jellyfin server. Its address is frequently
+        "localhost", which a browser on a different computer cannot load. Thus a library row uses
+        the poster of its AniList entry (the first TV season). A library row without an AniList
+        entry gets an address of this server (/api/poster/<id>), which passes the poster on from
+        Jellyfin.
+        """
+        r = self.rows[j]
+        if r.get("source") != "library":
+            return r.get("poster")
+        entry = self._tag_source(j)
+        if entry is not r and entry.get("poster"):
+            return entry["poster"]
+        return f"/api/poster/{r['id']}" if r.get("poster") else None
+
     def public_row(self, j: int) -> dict:
         """Return a copy of row j for the interface.
 
         A library row has no AniList data of its own: its score is the rating from Jellyfin. It
         gets the AniList id and the crowd score of its AniList entry (the first TV season), so
         that the interface can link to AniList and shows the same kind of score for all shows.
-        The rating from Jellyfin moves to `library_score`. A library row without an AniList
-        entry does not change.
+        The rating from Jellyfin moves to `library_score`. The poster is the poster from
+        `poster_of`. The other data of a library row without an AniList entry does not change.
         """
         r = self.rows[j]
         out = dict(r)
         out.pop("text_hash", None)
+        out["poster"] = self.poster_of(j)
         entry = self._tag_source(j)
         if entry is not r:
             out["anilist_id"] = entry.get("anilist_id")
@@ -915,12 +933,7 @@ class Engine:
         for i, r in enumerate(self.rows):
             if r["id"] in self.duplicate_of:
                 continue
-            poster = r.get("poster")
-            if (not poster or "localhost" in poster or "127.0.0.1" in poster) and r.get("source") == "library":
-                for cp_id in self.counterparts.get(r["id"], []):
-                    if cp_id in self.by_id and self.by_id[cp_id].get("poster"):
-                        poster = self.by_id[cp_id]["poster"]
-                        break
+            poster = self.poster_of(i)
             points.append({
                 "id": r["id"],
                 "x": round(float(self.coords_2d[i, 0]), 4),

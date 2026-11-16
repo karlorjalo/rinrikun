@@ -1,5 +1,6 @@
 import sys
 import threading
+import urllib.request
 import webbrowser
 
 sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
@@ -8,7 +9,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from anime_vec.engine import Engine
@@ -131,9 +132,30 @@ def recommend(
 @app.get("/api/shows")
 def shows():
     return [{"id": r["id"], "title": r["title"], "title_native": r["title_native"],
-             "year": r["year"], "poster": r["poster"], "owned": r["owned"],
+             "year": r["year"], "poster": engine.poster_of(i), "owned": r["owned"],
              "manual_watched": r.get("manual_watched", 0),
-             "tier": r.get("tier"), "weight": r.get("weight", 1.0)} for r in engine.rows]
+             "tier": r.get("tier"), "weight": r.get("weight", 1.0)} for i, r in enumerate(engine.rows)]
+
+
+@app.get("/api/poster/{id:path}")
+def poster(id: str):
+    """Pass the poster of a library show on from Jellyfin.
+
+    The address of a poster of the library is on the Jellyfin server. A browser on a different
+    computer frequently cannot reach that server, but this server can. Only a library show
+    without an AniList entry uses this address: the other shows use the poster from AniList.
+    """
+    r = engine.by_id.get(id)
+    if r is None or r.get("source") != "library" or not r.get("poster"):
+        raise HTTPException(404, "no poster")
+    # A poster in the interface is small, thus ask Jellyfin for a small picture
+    url = r["poster"] + ("&" if "?" in r["poster"] else "?") + "maxWidth=400&quality=90"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as res:
+            data, media_type = res.read(), res.headers.get_content_type()
+    except Exception:
+        raise HTTPException(502, "the library server did not give the poster")
+    return Response(content=data, media_type=media_type, headers={"Cache-Control": "max-age=86400"})
 
 
 @app.get("/favicon.ico")

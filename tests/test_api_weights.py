@@ -162,3 +162,57 @@ def test_api_compresses_large_responses(tmp_path):
         assert len(res.json()["points"]) == 39
     finally:
         serve.store, serve.engine = orig_store, orig_engine
+
+
+def test_api_passes_the_poster_of_a_library_show_on(tmp_path, monkeypatch):
+    import email.message
+    import serve
+    store = Store(tmp_path / "api_poster.db")
+    store.upsert_rows([make_row(1, owned=0),
+                       dict(make_row(2), id="jf:2", source="library", anilist_id=None, format="series",
+                            poster="http://localhost:8096/Items/2/Images/Primary")])
+    for rid in ("al:1", "jf:2"):
+        store.save_embedding(rid, b"\x00" * 1536)
+
+    class FakeResponse:
+        def __init__(self):
+            self.headers = email.message.Message()
+            self.headers["Content-Type"] = "image/jpeg"
+
+        def read(self):
+            return b"picture"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    asked = []
+
+    def fake_urlopen(url, timeout=15):
+        asked.append(url)
+        if "fail" in url:
+            raise OSError("no connection")
+        return FakeResponse()
+
+    monkeypatch.setattr(serve.urllib.request, "urlopen", fake_urlopen)
+    orig_store, orig_engine = serve.store, serve.engine
+    serve.store, serve.engine = store, Engine(store)
+    try:
+        client = TestClient(serve.app)
+        # The list of titles gives the address of this server for the library show
+        by_id = {r["id"]: r["poster"] for r in client.get("/api/shows").json()}
+        assert by_id == {"al:1": None, "jf:2": "/api/poster/jf:2"}
+        res = client.get("/api/poster/jf:2")
+        assert res.status_code == 200 and res.content == b"picture"
+        assert res.headers["content-type"] == "image/jpeg" and "max-age" in res.headers["cache-control"]
+        assert asked == ["http://localhost:8096/Items/2/Images/Primary?maxWidth=400&quality=90"]
+        # An AniList show and an unknown show have no poster at this address
+        assert client.get("/api/poster/al:1").status_code == 404
+        assert client.get("/api/poster/jf:9").status_code == 404
+        # Jellyfin does not answer
+        serve.engine.by_id["jf:2"]["poster"] = "http://localhost:8096/fail"
+        assert client.get("/api/poster/jf:2").status_code == 502
+    finally:
+        serve.store, serve.engine = orig_store, orig_engine

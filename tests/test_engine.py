@@ -833,3 +833,33 @@ def test_library_row_gets_the_anilist_id_and_the_score_of_its_entry(tmp_path):
     # A library row without an AniList entry and an AniList row do not change
     assert e.public_row(e.pos["jf:2"])["score"] == 6.0 and "library_score" not in e.public_row(e.pos["jf:2"])
     assert e.public_row(e.pos["al:100"])["score"] == 7.1 and "library_score" not in e.public_row(e.pos["al:100"])
+
+
+def test_library_row_gets_a_poster_that_other_computers_can_load(tmp_path):
+    from anime_vec.store import Store
+    s = Store(tmp_path / "poster.db")
+    base = {"title_native": "", "genres": [], "tags": [], "tag_ranks": [], "studios": [], "overview": "O",
+            "owned": 1, "tmdbid": None, "year": 2021, "score": 7.0}
+    local = "http://localhost:8096/Items/{}/Images/Primary"
+    s.upsert_rows([dict(base, id="jf:1", source="library", title="Show", format="series", anilist_id=None, poster=local.format(1)),
+                   dict(base, id="jf:2", source="library", title="No entry", format="series", anilist_id=None, poster=local.format(2)),
+                   dict(base, id="jf:3", source="library", title="No poster", format="series", anilist_id=None, poster=None),
+                   dict(base, id="al:100", source="anilist", title="Show", format="tv", anilist_id=100, library_id="jf:1",
+                        poster="https://img.example/cover/small/100.jpg")])
+    for n, rid in enumerate(("jf:1", "jf:2", "jf:3", "al:100")):
+        vec = np.zeros(4, dtype=np.float32)
+        vec[n] = 1.0
+        s.save_embedding(rid, vec.tobytes())
+    e = Engine(s)
+    # A library show with an AniList entry uses the poster of the entry
+    assert e.poster_of(e.pos["jf:1"]) == "https://img.example/cover/small/100.jpg"
+    # A library show without an entry gets an address of this server
+    assert e.poster_of(e.pos["jf:2"]) == "/api/poster/jf:2"
+    assert e.poster_of(e.pos["jf:3"]) is None
+    assert e.poster_of(e.pos["al:100"]) == "https://img.example/cover/small/100.jpg"
+    # The lists and the map use these posters. No address has "localhost".
+    posters = {r["id"]: r["poster"] for r in e.review_queue()}
+    assert posters == {"jf:1": "https://img.example/cover/small/100.jpg", "jf:2": "/api/poster/jf:2", "jf:3": None}
+    assert {p["id"]: p["poster"] for p in e.get_vector_map()["points"]} == posters
+    # The row of the database does not change
+    assert e.by_id["jf:1"]["poster"] == local.format(1)
