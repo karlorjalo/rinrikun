@@ -109,9 +109,7 @@ def similar(id: str, k: int = Query(24, le=100, ge=1)):
 def show(id: str):
     if id not in engine.by_id:
         raise HTTPException(404, "unknown id")
-    r = dict(engine.by_id[id])
-    r.pop("text_hash", None)
-    return r
+    return engine.public_row(engine.pos[id])
 
 
 @app.get("/api/recommend")

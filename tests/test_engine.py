@@ -804,3 +804,32 @@ def test_show_without_a_tier_gives_links_with_a_smaller_weight(tmp_path):
     sources, _ = e._link_sources(*e._liked())
     assert [e.ids[i] for i in sources] == ["al:1"]
     assert "linked_favorite" not in {r["id"]: r for r in e.recommend(k=4)}["al:11"]
+
+
+def test_library_row_gets_the_anilist_id_and_the_score_of_its_entry(tmp_path):
+    from anime_vec.store import Store
+    s = Store(tmp_path / "entry.db")
+    base = {"title_native": "", "genres": [], "tags": [], "tag_ranks": [], "studios": [], "overview": "O",
+            "owned": 1, "tmdbid": None, "poster": None}
+    s.upsert_rows([dict(base, id="jf:1", source="library", title="Show", year=2021, format="series",
+                        score=8.9, anilist_id=None),
+                   dict(base, id="jf:2", source="library", title="No entry", year=2020, format="series",
+                        score=6.0, anilist_id=None),
+                   dict(base, id="al:101", source="anilist", title="Show 2", year=2023, format="tv",
+                        score=7.6, anilist_id=101, library_id="jf:1"),
+                   dict(base, id="al:100", source="anilist", title="Show", year=2021, format="tv",
+                        score=7.1, anilist_id=100, library_id="jf:1")])
+    for n, rid in enumerate(("jf:1", "jf:2", "al:101", "al:100")):
+        vec = np.zeros(4, dtype=np.float32)
+        vec[n] = 1.0
+        s.save_embedding(rid, vec.tobytes())
+    e = Engine(s)
+    # The entry is the first TV season: al:100
+    out = e.public_row(e.pos["jf:1"])
+    assert (out["anilist_id"], out["score"], out["library_score"]) == (100, 7.1, 8.9)
+    assert {r["id"]: r["anilist_id"] for r in e.review_queue()} == {"jf:1": 100, "jf:2": None}
+    # The row of the database does not change
+    assert e.by_id["jf:1"]["anilist_id"] is None and e.by_id["jf:1"]["score"] == 8.9
+    # A library row without an AniList entry and an AniList row do not change
+    assert e.public_row(e.pos["jf:2"])["score"] == 6.0 and "library_score" not in e.public_row(e.pos["jf:2"])
+    assert e.public_row(e.pos["al:100"])["score"] == 7.1 and "library_score" not in e.public_row(e.pos["al:100"])

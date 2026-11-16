@@ -810,10 +810,28 @@ class Engine:
                 counts["unrated"] += 1
         return counts
 
-    def _result(self, j: int, sim: float, seed=None, matched_favorite: str | None = None) -> dict:
+    def public_row(self, j: int) -> dict:
+        """Return a copy of row j for the interface.
+
+        A library row has no AniList data of its own: its score is the rating from Jellyfin. It
+        gets the AniList id and the crowd score of its AniList entry (the first TV season), so
+        that the interface can link to AniList and shows the same kind of score for all shows.
+        The rating from Jellyfin moves to `library_score`. A library row without an AniList
+        entry does not change.
+        """
         r = self.rows[j]
         out = dict(r)
         out.pop("text_hash", None)
+        entry = self._tag_source(j)
+        if entry is not r:
+            out["anilist_id"] = entry.get("anilist_id")
+            out["library_score"] = r.get("score")
+            out["score"] = entry.get("score")
+        return out
+
+    def _result(self, j: int, sim: float, seed=None, matched_favorite: str | None = None) -> dict:
+        r = self.rows[j]
+        out = self.public_row(j)
         out["similarity"] = display_similarity(sim)
         if seed is not None:
             out["shared_tags"] = sorted(set(seed["tags"]) & set(r["tags"]))

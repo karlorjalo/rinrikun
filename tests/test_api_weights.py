@@ -80,6 +80,12 @@ def test_api_weights_endpoints(tmp_path):
         rec_invalid = client.get("/api/recommend?mode=invalid")
         assert rec_invalid.status_code == 422
 
+        # The data of one show
+        show_res = client.get("/api/show/al:1")
+        assert show_res.status_code == 200
+        assert show_res.json()["anilist_id"] == 1 and "text_hash" not in show_res.json()
+        assert client.get("/api/show/al:99").status_code == 404
+
         # 8. Check vector-map endpoint
         vm_res = client.get("/api/vector-map")
         assert vm_res.status_code == 200
