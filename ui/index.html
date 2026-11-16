@@ -37,8 +37,16 @@
 <header>
   <div class="header-top">
     <div class="mast">
-      <h1>りんりくん</h1>
-      <p class="sub" lang="ja">「倫理君、次の攻略対象はもう決めたのかしら？」</p>
+      <!-- The title has the style of the logo of the circle "blessing software" from Saekano:
+           a cherry blossom, a bold slanted name with a small flower, and a line of small spaced capitals.
+           The blossom is a new drawing. -->
+      <h1 class="brand" aria-label="りんりくん">
+        <svg class="brand-mark" viewBox="0 0 100 100" aria-hidden="true"><path id="brand-petal" d="M50 43 C41 38 29 29 33 15 C35 8 40 4 44 4 L50 13 L56 4 C60 4 65 8 67 15 C71 29 59 38 50 43 Z"/><use href="#brand-petal" transform="rotate(72 50 50)"/><use href="#brand-petal" transform="rotate(144 50 50)"/><use href="#brand-petal" transform="rotate(216 50 50)"/><use href="#brand-petal" transform="rotate(288 50 50)"/><circle cx="50" cy="50" r="4.5"/></svg>
+        <span class="brand-text" aria-hidden="true">
+          <span class="brand-name" lang="ja">りんりくん<svg class="brand-flower" viewBox="0 0 100 100"><use href="#brand-petal"/><use href="#brand-petal" transform="rotate(72 50 50)"/><use href="#brand-petal" transform="rotate(144 50 50)"/><use href="#brand-petal" transform="rotate(216 50 50)"/><use href="#brand-petal" transform="rotate(288 50 50)"/></svg></span>
+          <span class="brand-sub"><i>R</i><i>I</i><i>N</i><i>R</i><i>I</i><i>K</i><i>U</i><i>N</i></span>
+        </span>
+      </h1>
     </div>
     <button id="theme" aria-label="Toggle theme" title="Toggle theme"></button>
   </div>
