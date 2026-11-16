@@ -2,7 +2,7 @@
 
 Semantic taste map for your anime library: embeds your Jellyfin library plus a pool of popular AniList anime into a local vector index, then serves a web UI for taste profiling, similar-to search, and recommendations.
 
-The name is the nickname 倫理君 (rinri-kun) that Utaha Kasumigaoka gives to Tomoya Aki in 冴えない彼女の育てかた (Saekano). The interface has some design choices from that series: a title in the style of the logo of the circle blessing software, cherry blossom petals, and message windows as in a visual novel. The lines in these windows are in the voice of Utaha. They are new text, not quotations from the series.
+The name is the nickname 倫理君 (rinri-kun) that Utaha Kasumigaoka gives to Tomoya Aki in 冴えない彼女の育てかた (Saekano). The interface has some design choices from that series: a title in the style of the later logo of the circle blessing software (the logo of 6 years later, in Saekano Fine), cherry blossom petals, and message windows as in a visual novel. The lines in these windows are in the voice of Utaha. They are new text, not quotations from the series.
 
 ## What it does
 

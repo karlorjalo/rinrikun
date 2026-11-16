@@ -500,19 +500,20 @@ dialog#detail-modal::backdrop { background: rgba(20, 18, 16, 0.6); backdrop-filt
 body { background-image: radial-gradient(1100px 300px at 50% -70px, color-mix(in srgb, var(--accent) 11%, var(--bg)), var(--bg)); background-repeat: no-repeat; }
 header, main { z-index: 1; }
 main { position: relative; }
-/* The title, in the style of the logo of the circle "blessing software": a cherry blossom, a bold
-   slanted name with a small flower above its end, and a line of small spaced capitals */
-header h1.brand { display: inline-flex; align-items: center; gap: 13px; margin: 0; font-family: var(--sans);
-  font-size: 37px; font-weight: 700; letter-spacing: 0; line-height: 1; color: var(--text); }
-.brand-mark { width: 56px; height: 56px; flex: none; fill: currentColor; }
-.brand-text { display: flex; flex-direction: column; align-items: stretch; transform: skewX(-9deg); }
-.brand-name { position: relative; white-space: nowrap; }
-.brand-flower { position: absolute; top: -9px; right: -15px; width: 15px; height: 15px; fill: currentColor; }
-.brand-sub { display: flex; justify-content: space-between; margin-top: 7px; padding: 0 3px; font-size: 10.5px; font-weight: 700; }
+/* The title, in the style of the later logo of the circle "blessing software": a round blossom
+   above the name, the name in thin upright letters, and a line of small spaced capitals */
+header h1.brand { display: inline-flex; flex-direction: column; align-items: center; gap: 9px; margin: 0;
+  font-family: "Noto Sans JP", "Yu Gothic", sans-serif; font-size: 40px; font-weight: 200; letter-spacing: .05em;
+  line-height: 1; color: var(--text); }
+.brand-mark { width: 62px; height: 62px; flex: none; }
+.brand-text { display: flex; flex-direction: column; align-items: stretch; }
+.brand-name { white-space: nowrap; margin-right: -.05em; }
+.brand-sub { display: flex; justify-content: space-between; margin-top: 9px; padding: 0 4px; font-size: 9.5px;
+  font-weight: 500; letter-spacing: 0; }
 .brand-sub i { font-style: normal; }
 @media (max-width: 480px) {
-  header h1.brand { font-size: 29px; gap: 10px; }
-  .brand-mark { width: 44px; height: 44px; }
+  header h1.brand { font-size: 32px; gap: 7px; }
+  .brand-mark { width: 50px; height: 50px; }
 }
 /* Cherry blossom petals that fall behind the page header */
 .petals { position: absolute; top: 0; left: 0; right: 0; height: 300px; overflow: hidden; pointer-events: none; z-index: 0;
