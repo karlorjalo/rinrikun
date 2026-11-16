@@ -41,13 +41,19 @@ TIER_PENALTY = 1.0
 # A show that the user removed from the recommendations counts as a C-tier show in the tier model
 DISMISSED_TIER = TIER_VALUES["C"]
 # The "usual kinds" formula gives a higher score to the kinds of shows that the library has many of.
-# The kind of a show is its year, its format, its number of episodes and its crowd score.
+# The kind of a show is its year, its format and its number of episodes. The crowd score counts
+# only as a lower limit.
 # Weight of this part in the hybrid score, in standard deviations
 KIND_WEIGHT = 1.0
-# The limits between the groups of a year, of a number of episodes and of a crowd score
+# The limits between the groups of a year and of a number of episodes
 KIND_YEARS = (1990, 2000, 2005, 2010, 2015, 2020)
 KIND_EPISODES = (2, 7, 14, 27, 61)
-KIND_SCORES = (6.0, 6.5, 7.0, 7.5, 8.0)
+# The crowd score has two groups: below this limit, and not below it. The crowd score does not
+# predict the tier that the user gives (rank correlation 0.07 for 179 rated franchises), thus a
+# higher crowd score must not give an advantage. But the library has few shows that the crowd
+# rates very low, and the catalog has many. In the hidden franchise test this one limit gives
+# the same result as six groups of the crowd score.
+KIND_SCORES = (6.5,)
 # The group of each format. A format that is not in this table is in group 6.
 KIND_FORMATS = {"tv": 0, "series": 0, "movie": 1, "ova": 2, "ona": 3, "special": 4, "tv_short": 5}
 # The number of groups of each property: year, format, number of episodes, crowd score
@@ -377,7 +383,7 @@ class Engine:
 
         # The "usual kinds" formula: a candidate of a kind that the library has many of moves up.
         # In the hidden franchise test this part moves the S-tier and A-tier shows up in the full
-        # list (the first 100 more than the first 20). It also puts more well-known shows at the top.
+        # list (the first 100 more than the first 20).
         if kinds == "usual":
             scores = scores + KIND_WEIGHT * _zscore(self._kind_score(cand_indices, owned))
 
@@ -460,8 +466,8 @@ class Engine:
     def _kind_score(self, indices: list[int], owned: set[str]) -> np.ndarray:
         """Score each row by how usual its kind is in the library of the user.
 
-        For each property (year, format, number of episodes, crowd score) the score compares two
-        shares: the share of the library that is in the group of the row, and the share of the
+        For each property (year, format, number of episodes, crowd score below the limit or not)
+        the score compares two shares: the share of the library that is in the group of the row, and the share of the
         rows in `indices` that is in this group. The score is the sum of the logarithms of these
         ratios. A group that is more frequent in the library than in `indices` gives a positive
         value. A property that is not known gives the mean value of the rows that have it.

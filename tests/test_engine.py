@@ -768,3 +768,23 @@ def test_hidden_franchise_test_uses_the_kinds(tmp_path):
     # movie and the OVA
     rank, length = rank_of_hidden(e, "al:1", kinds="usual")
     assert length == 6 and rank <= 3
+
+
+def test_a_higher_crowd_score_gives_no_advantage(tmp_path):
+    from anime_vec.store import Store
+    s = Store(tmp_path / "crowd.db")
+    specs = [(1, 1, 7.0), (2, 1, 7.2), (3, 1, 6.6), (10, 0, 6.6), (11, 0, 8.9), (12, 0, 6.4), (13, 0, 5.0)]
+    for rid, owned, score in specs:
+        s.upsert_rows([{"id": f"al:{rid}", "source": "anilist", "title": f"T{rid}", "title_native": "", "year": 2020,
+                        "format": "tv", "genres": [], "tags": [], "tag_ranks": [], "studios": [], "overview": "O",
+                        "score": score, "owned": owned, "tmdbid": None, "anilist_id": rid, "poster": None,
+                        "episodes": 12}])
+        vec = np.zeros(4, dtype=np.float32)
+        vec[0 if owned else 1] = 1.0
+        s.save_embedding(f"al:{rid}", vec.tobytes())
+    e = Engine(s)
+    fair, high, low, lowest = e._kind_score([e.pos[f"al:{i}"] for i in (10, 11, 12, 13)], e.owned_franchises())
+    # 6.6 and 8.9 are in the same group. 6.4 and 5.0 are below the limit, and they are equal too.
+    assert fair == high
+    assert low == lowest
+    assert fair > low

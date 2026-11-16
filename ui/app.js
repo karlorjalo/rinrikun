@@ -1684,11 +1684,11 @@ const FORMULA_KEY = "rinrikun-formula";
 const FORMULAS = {
   usual: {
     name: "My usual kinds",
-    text: "Shows of the kinds that your library has many of move up. The kind of a show is its year, its format, its length and its crowd score. The top of the list has more well-known shows.",
+    text: "Shows of the kinds that your library has many of move up. The kind of a show is its year, its format and its length. A show with an AniList score below 6.5 moves down. A higher AniList score gives no advantage.",
   },
   all: {
     name: "All kinds",
-    text: "The year, the format, the length and the crowd score of a show do not change its position. The top of the list has more shows that are less well-known.",
+    text: "The year, the format, the length and the AniList score of a show do not change its position.",
   },
   seed: {
     name: "Similar to the seed",
