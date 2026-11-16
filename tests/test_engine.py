@@ -68,6 +68,7 @@ def test_vector_map(tmp_path):
         assert "title" in pt
         assert "poster" in pt
         assert "owned" in pt
+        assert pt["score"] == 7.0
 
 def test_recommend_excludes_seed(tmp_path):
     e, rows = make_engine(tmp_path)

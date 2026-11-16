@@ -686,6 +686,8 @@ class Engine:
                 "genres": r.get("genres", [])[:2],
                 "owned": r.get("owned", 0),
                 "tier": r.get("tier"),
+                # The map uses the score to select which posters it shows first
+                "score": self._tag_source(i).get("score"),
             })
         return {
             "center": {"x": round(c_proj[0], 4), "y": round(c_proj[1], 4)} if c_proj else None,
