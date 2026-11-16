@@ -37,6 +37,7 @@ Without these packages the build uses the CPU. A full build is then much slower,
 python build.py                # pull Jellyfin + AniList pool, embed, persist to anime_vec.db
 python build.py --refresh-anilist   # force re-pull of the AniList pool
 python serve.py                # serves http://localhost:8765 and opens it
+python serve.py --host 0.0.0.0 --port 8771   # also accepts connections from other computers
 ```
 
 Rebuilds are incremental: unchanged rows keep their cached embeddings. A change of the model or of the prompt in `anime_vec/embed.py` makes all embeddings stale. The build also computes the map layout (about 1 minute) and keeps it in the database until the embeddings change.
@@ -44,7 +45,7 @@ Rebuilds are incremental: unchanged rows keep their cached embeddings. A change 
 ## Notes
 
 - AniList pages are cached in `anilist_cache/` (corrupt files are refetched automatically; requires a browser User-Agent, which is handled for you).
-- Index + cache + secrets are gitignored; everything runs on 127.0.0.1, no auth — keep it that way.
+- Index + cache + secrets are gitignored. The default host is 127.0.0.1 and the API has no auth. With `--host 0.0.0.0`, each computer that can connect to the port can read and change the ratings, so use it only on a network that you trust (for example behind a firewall rule for your VPN).
 - Scale target: ~20k titles (brute-force numpy cosine).
 - All similarities use mean-centered vectors: the engine subtracts the corpus mean before it computes a cosine.
 - Without scikit-learn, or with less than 100 titles, the map uses PCA.

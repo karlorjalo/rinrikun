@@ -134,6 +134,8 @@ app.mount("/ui", StaticFiles(directory=ROOT / "ui"), name="ui")
 
 if __name__ == "__main__":
     port = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else 8765
+    # The default host accepts connections only from this computer. The API has no login.
+    host = sys.argv[sys.argv.index("--host") + 1] if "--host" in sys.argv else "127.0.0.1"
     threading.Timer(1.0, webbrowser.open, args=[f"http://localhost:{port}"]).start()
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=port)
+    uvicorn.run(app, host=host, port=port)
