@@ -18,15 +18,15 @@ python -m pip install -r requirements.txt
 # Jellyfin URL / user id live in anime_vec/jellyfin_pull.py (localhost by default).
 ```
 
-First build downloads the ~1.2 GB local embedding model (fastembed, google/embeddinggemma-300m — no API keys, fully offline). The model is multilingual, because the Jellyfin rows are in Japanese and the AniList rows are in English.
+First build downloads the ~1.1 GB local embedding model (EmbeddingGemma 2, the ONNX build `onnx-community/embeddinggemma-2-ONNX`, run with onnxruntime — no API keys, fully offline). The model is multilingual, because the Jellyfin rows are in Japanese and the AniList rows are in English.
 
 ### GPU (optional)
 
 The build uses an NVIDIA GPU when the GPU packages are installed. A full build of 4300 titles then takes less than 1 minute.
 
 ```
-python -m pip uninstall -y fastembed onnxruntime
-python -m pip install fastembed-gpu "onnxruntime-gpu[cuda,cudnn]"
+python -m pip uninstall -y onnxruntime
+python -m pip install "onnxruntime-gpu[cuda,cudnn]"
 ```
 
 Without these packages the build uses the CPU. A full build is then much slower, but later builds embed only the changed rows.
@@ -39,7 +39,7 @@ python build.py --refresh-anilist   # force re-pull of the AniList pool
 python serve.py                # serves http://localhost:8765 and opens it
 ```
 
-Rebuilds are incremental: unchanged rows keep their cached embeddings. A change of the model in `anime_vec/embed.py` makes all embeddings stale. The build also computes the map layout (about 1 minute) and keeps it in the database until the embeddings change.
+Rebuilds are incremental: unchanged rows keep their cached embeddings. A change of the model or of the prompt in `anime_vec/embed.py` makes all embeddings stale. The build also computes the map layout (about 1 minute) and keeps it in the database until the embeddings change.
 
 ## Notes
 

@@ -1,4 +1,6 @@
-fastembed>=0.3,<2
+onnxruntime
+tokenizers
+huggingface_hub
 numpy
 scikit-learn
 fastapi

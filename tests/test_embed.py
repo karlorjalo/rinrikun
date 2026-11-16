@@ -51,3 +51,52 @@ def test_gpu_providers_follow_onnxruntime(monkeypatch):
 
     fake.get_available_providers = lambda: ["CPUExecutionProvider"]
     assert embed.gpu_providers() is None
+
+
+def test_hash_changes_with_prompt(monkeypatch):
+    import anime_vec.embed as embed
+    before = embed.text_hash(ROW)
+    monkeypatch.setattr(embed, "PROMPT", "task: clustering | query: ")
+    assert embed.text_hash(ROW) != before
+
+
+def test_embed_texts_batches_by_length_and_keeps_the_order(monkeypatch):
+    import numpy as np
+    from types import SimpleNamespace
+    import anime_vec.embed as embed
+
+    class FakeTokenizer:
+        def encode(self, text):
+            return SimpleNamespace(ids=list(range(1, len(text) + 1)))
+
+    class FakeSession:
+        def __init__(self):
+            self.feeds = []
+
+        def get_inputs(self):
+            return [SimpleNamespace(name="input_ids", shape=["batch_size", "sequence_length"]),
+                    SimpleNamespace(name="attention_mask", shape=["batch_size", "sequence_length"]),
+                    SimpleNamespace(name="image_features", shape=["num_image_tokens", 512])]
+
+        def run(self, output_names, feed):
+            assert output_names == ["sentence_embedding"]
+            self.feeds.append(feed)
+            out = np.zeros((feed["input_ids"].shape[0], embed.DIM), dtype=np.float32)
+            # The first value of each vector is the number of tokens that are not padding
+            out[:, 0] = feed["attention_mask"].sum(axis=1)
+            return [out]
+
+    session = FakeSession()
+    monkeypatch.setattr(embed, "_get_model", lambda: (FakeTokenizer(), session))
+    monkeypatch.setattr(embed, "BATCH_SIZE", 2)
+    texts = ["ccc", "a", "eeeee", "bb", "dddd"]
+    vecs = embed.embed_texts(texts)
+
+    assert vecs.shape == (5, embed.DIM)
+    assert [int(v) for v in vecs[:, 0]] == [len(embed.PROMPT) + len(t) for t in texts]
+    assert len(session.feeds) == 3
+    # Each batch has the width of its longest text, and the padding has mask 0
+    assert session.feeds[0]["input_ids"].shape == (2, len(embed.PROMPT) + 2)
+    assert session.feeds[0]["attention_mask"][0].sum() == len(embed.PROMPT) + 1
+    # Text-only use gives an empty array for the image input
+    assert session.feeds[0]["image_features"].shape == (0, 512)
