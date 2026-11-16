@@ -99,6 +99,33 @@ class Engine:
         self.franchise = self._build_franchises()
 
         self.coords_2d = self._build_layout(unique)
+        self.regions = self._build_regions(unique)
+
+    def _build_regions(self, unique: list[int]) -> list[dict]:
+        """Divide the map into regions and name each region after its most typical tags.
+
+        The directions on a t-SNE map have no meaning. The labels tell the user what a region contains.
+        """
+        if len(unique) < layout.REGION_MIN_ROWS or not self.tag_names:
+            return []
+        P = self.coords_2d[unique]
+        T = self.tag_M[unique]
+        labels, _ = layout.kmeans(P, layout.REGION_COUNT)
+        corpus_mean = T.mean(axis=0)
+        regions = []
+        for c in range(int(labels.max()) + 1):
+            members = np.where(labels == c)[0]
+            if len(members) < layout.REGION_MIN_SIZE:
+                continue
+            # The tags that are much more frequent in this region than in the full index
+            lift = T[members].mean(axis=0) - corpus_mean
+            top = [j for j in np.argsort(-lift)[:2] if lift[j] > 0]
+            if not top:
+                continue
+            x, y = P[members].mean(axis=0)
+            regions.append({"x": round(float(x), 4), "y": round(float(y), 4),
+                            "label": " · ".join(self.tag_names[j] for j in top), "count": int(len(members))})
+        return regions
 
     def _build_layout(self, unique: list[int]) -> np.ndarray:
         """Return the 2D map position of each row, in the square from 0 to 1."""
@@ -336,6 +363,8 @@ class Engine:
             for g in r.get("genres") or []:
                 f[vocab.setdefault("g:" + g, len(vocab))] = 1.0
             feats.append(f)
+        # Column names without the "t:" or "g:" prefix
+        self.tag_names = [name[2:] for name, _ in sorted(vocab.items(), key=lambda kv: kv[1])]
         T = np.zeros((len(self.rows), max(len(vocab), 1)), dtype=np.float32)
         for i, f in enumerate(feats):
             for col, val in f.items():
@@ -533,4 +562,5 @@ class Engine:
         return {
             "center": {"x": round(c_proj[0], 4), "y": round(c_proj[1], 4)} if c_proj else None,
             "points": points,
+            "regions": self.regions,
         }

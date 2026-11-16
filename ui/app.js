@@ -244,7 +244,7 @@ async function openModal(r) {
 
 async function toggleWatched(r, next) {
   try {
-    await fetch("/api/watched", {
+    await apiWrite("/api/watched", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: r.id, watched: next })
@@ -269,7 +269,7 @@ async function toggleWatched(r, next) {
 
 async function setTier(r, tier) {
   try {
-    await fetch("/api/weights", {
+    await apiWrite("/api/weights", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: r.id, tier: tier })
@@ -312,7 +312,7 @@ async function setTier(r, tier) {
 
 async function clearTier(r) {
   try {
-    await fetch(`/api/weights?id=${encodeURIComponent(r.id)}`, { method: "DELETE" });
+    await apiWrite(`/api/weights?id=${encodeURIComponent(r.id)}`, { method: "DELETE" });
     r.tier = null;
     const t = titles.find((x) => x.id === r.id);
     if (t) t.tier = null;
@@ -453,6 +453,7 @@ function renderProfile() {
           </div>
           <span class="legend-item"><i class="legend-dot dot-catalog"></i> Catalog</span>
           <span class="legend-item"><i class="legend-dot dot-library"></i> Watched</span>
+          <span class="legend-item legend-tiers" title="A watched show has the color of its tier"><i class="legend-dot dot-tier-s"></i>S <i class="legend-dot dot-tier-a"></i>A <i class="legend-dot dot-tier-b"></i>B <i class="legend-dot dot-tier-c"></i>C <i class="legend-dot dot-tier-d"></i>D</span>
           <span class="legend-item"><i class="legend-dot dot-highlight"></i> Defining shows</span>
         </div>
       </div>
@@ -503,6 +504,12 @@ function renderProfile() {
 }
 
 let vectorMapData = null;
+
+// The map shows tiers and watched state. Thus a change of these makes the cached map data stale.
+function apiWrite(url, options) {
+  vectorMapData = null;
+  return fetch(url, options);
+}
 async function getVectorMap() {
   if (!vectorMapData) {
     try {
@@ -570,6 +577,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   const highlightSet = new Set(highlightIds);
   const points = data.points;
   const center = data.center;
+  const regions = data.regions || [];
 
   if (activeVectorMaps.has(canvasId)) {
     const prev = activeVectorMaps.get(canvasId);
@@ -739,19 +747,43 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     }
     ctx.fill();
 
-    // 2. Draw Library points
-    ctx.fillStyle = libraryColor;
-    ctx.beginPath();
+    // 2. Draw Library points. A rated show has the color of its tier. The S tier is drawn last, on top.
     const libR = Math.max(2.4, Math.min(5.0, 2.8 * Math.sqrt(scale)));
-    for (let i = 0; i < points.length; i++) {
-      const pt = points[i];
-      if (!pt.owned || highlightSet.has(pt.id)) continue;
-      const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
-      if (px < -20 || px > w + 20 || py < -20 || py > h + 20) continue;
-      ctx.moveTo(px + libR, py);
-      ctx.arc(px, py, libR, 0, Math.PI * 2);
+    const rootStyle = getComputedStyle(document.documentElement);
+    for (const tier of [null, "D", "C", "B", "A", "S"]) {
+      const tierColor = tier ? rootStyle.getPropertyValue(`--tier-${tier.toLowerCase()}`).trim() : "";
+      ctx.fillStyle = tierColor || libraryColor;
+      ctx.beginPath();
+      for (let i = 0; i < points.length; i++) {
+        const pt = points[i];
+        if (!pt.owned || highlightSet.has(pt.id) || (pt.tier || null) !== tier) continue;
+        const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
+        if (px < -20 || px > w + 20 || py < -20 || py > h + 20) continue;
+        ctx.moveTo(px + libR, py);
+        ctx.arc(px, py, libR, 0, Math.PI * 2);
+      }
+      ctx.fill();
     }
-    ctx.fill();
+
+    // 2b. Draw the region labels: the main tags of each part of the map
+    if (regions.length) {
+      ctx.save();
+      const fontSize = Math.max(10.5, Math.min(15, 10.5 * Math.sqrt(scale)));
+      ctx.font = `600 ${fontSize}px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = isDark ? "rgba(38, 38, 36, 0.9)" : "rgba(252, 251, 249, 0.9)";
+      ctx.fillStyle = isDark ? "rgba(235, 230, 220, 0.82)" : "rgba(40, 36, 33, 0.78)";
+      for (const region of regions) {
+        const { x: px, y: py } = toScreen(region.x, region.y, w, h, pad, plotW, plotH);
+        if (px < -80 || px > w + 80 || py < -20 || py > h + 20) continue;
+        ctx.strokeText(region.label, px, py);
+        ctx.fillText(region.label, px, py);
+      }
+      ctx.restore();
+    }
 
     // 3. Draw Taste Center marker
     if (center) {
@@ -1656,7 +1688,7 @@ async function rateReviewShow(tier) {
   if (t) t.tier = tier;
 
   try {
-    await fetch("/api/weights", {
+    await apiWrite("/api/weights", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: show.id, tier })
@@ -1685,13 +1717,13 @@ async function undoReview() {
 
   try {
     if (last.prevTier) {
-      await fetch("/api/weights", {
+      await apiWrite("/api/weights", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: show.id, tier: last.prevTier })
       });
     } else {
-      await fetch(`/api/weights?id=${encodeURIComponent(show.id)}`, { method: "DELETE" });
+      await apiWrite(`/api/weights?id=${encodeURIComponent(show.id)}`, { method: "DELETE" });
     }
   } catch (e) {
     console.error("Failed to undo review show", e);

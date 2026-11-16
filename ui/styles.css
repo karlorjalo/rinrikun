@@ -362,6 +362,12 @@ dialog#detail-modal::backdrop { background: rgba(20, 18, 16, 0.6); backdrop-filt
 }
 .legend-dot.dot-catalog { background: #999; opacity: 0.5; }
 .legend-dot.dot-library { background: var(--text); opacity: 0.7; }
+.legend-dot.dot-tier-s { background: var(--tier-s); }
+.legend-dot.dot-tier-a { background: var(--tier-a); }
+.legend-dot.dot-tier-b { background: var(--tier-b); }
+.legend-dot.dot-tier-c { background: var(--tier-c); }
+.legend-dot.dot-tier-d { background: var(--tier-d); }
+.legend-tiers .legend-dot { margin-left: 4px; }
 .legend-dot.dot-highlight {
   background: var(--accent);
   box-shadow: 0 0 6px var(--accent);

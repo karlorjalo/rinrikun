@@ -75,3 +75,37 @@ def test_engine_layout_is_in_the_unit_square(tmp_path):
     assert e.coords_2d.min() >= 0.0 and e.coords_2d.max() <= 1.0
     x, y = e.center_2d()
     assert 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0
+
+
+def test_kmeans_finds_separate_groups():
+    rng = np.random.default_rng(0)
+    P = np.concatenate([rng.normal(size=(40, 2)) * 0.1, rng.normal(size=(40, 2)) * 0.1 + [5, 5]])
+    labels, centers = layout.kmeans(P, 2)
+    assert centers.shape == (2, 2)
+    assert len(set(labels[:40])) == 1 and len(set(labels[40:])) == 1
+    assert labels[0] != labels[40]
+
+
+def test_regions_are_named_after_their_typical_tags(tmp_path, monkeypatch):
+    monkeypatch.setattr(layout, "REGION_MIN_ROWS", 10)
+    monkeypatch.setattr(layout, "REGION_COUNT", 2)
+    monkeypatch.setattr(layout, "REGION_MIN_SIZE", 3)
+    s = Store(tmp_path / "regions.db")
+    rng = np.random.default_rng(0)
+    for i in range(20):
+        band = i < 10
+        vec = (np.array([1, 0, 0, 0] if band else [0, 1, 0, 0]) + rng.normal(size=4) * 0.02).astype(np.float32)
+        s.upsert_rows([{"id": f"al:{i}", "source": "anilist", "title": f"T{i}", "title_native": "",
+                        "year": 2020, "format": "tv", "genres": [], "tags": ["Band" if band else "Mecha", "School"],
+                        "tag_ranks": [90, 40], "studios": [], "overview": "O", "score": 7.0, "owned": 0,
+                        "tmdbid": None, "anilist_id": i, "poster": None}])
+        s.save_embedding(f"al:{i}", vec.tobytes())
+    e = Engine(s)
+    regions = e.get_vector_map()["regions"]
+    assert sorted(r["label"].split(" · ")[0] for r in regions) == ["Band", "Mecha"]
+    assert all(0.0 <= r["x"] <= 1.0 and 0.0 <= r["y"] <= 1.0 and r["count"] == 10 for r in regions)
+
+
+def test_small_index_has_no_regions(tmp_path):
+    e = Engine(_store_with_rows(tmp_path, 12))
+    assert e.get_vector_map()["regions"] == []

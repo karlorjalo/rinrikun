@@ -6,6 +6,11 @@ VERSION = "tsne-v1"
 # t-SNE needs more rows than its perplexity. Smaller indexes use PCA.
 TSNE_MIN_ROWS = 100
 TSNE_PERPLEXITY = 30
+# The map gets region labels only when the index has this number of rows or more
+REGION_MIN_ROWS = 200
+REGION_COUNT = 14
+# A region with less than this number of rows gets no label
+REGION_MIN_SIZE = 15
 
 
 def can_use_tsne(n_rows: int) -> bool:
@@ -55,3 +60,30 @@ def fit_unit_square(P: np.ndarray) -> np.ndarray:
     # Put the shorter axis in the middle of the square
     Q += (1.0 - Q.max(axis=0)) / 2.0
     return Q.astype(np.float32)
+
+
+def kmeans(P: np.ndarray, k: int, iterations: int = 50, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
+    """Divide the points into k groups. Return the group of each point and the centers of the groups."""
+    P = np.asarray(P, dtype=np.float64)
+    k = max(1, min(k, len(P)))
+    rng = np.random.default_rng(seed)
+    # k-means++ start: each new center is probably far from the centers that exist
+    centers = [P[rng.integers(len(P))]]
+    for _ in range(1, k):
+        d = np.min([((P - c) ** 2).sum(axis=1) for c in centers], axis=0)
+        total = d.sum()
+        pick = rng.choice(len(P), p=d / total) if total > 0 else rng.integers(len(P))
+        centers.append(P[pick])
+    centers = np.array(centers)
+    labels = np.full(len(P), -1)
+    for _ in range(iterations):
+        dist = ((P[:, None, :] - centers[None, :, :]) ** 2).sum(axis=2)
+        new_labels = dist.argmin(axis=1)
+        if (new_labels == labels).all():
+            break
+        labels = new_labels
+        for c in range(k):
+            members = P[labels == c]
+            if len(members):
+                centers[c] = members.mean(axis=0)
+    return labels, centers
