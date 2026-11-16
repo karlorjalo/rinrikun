@@ -396,3 +396,54 @@ def test_recommend_marks_and_hides_owned_franchises(tmp_path):
         assert ids, kwargs
         assert not {"al:10", "al:11", "al:12"} & set(ids), kwargs
         assert all(not r["franchise_owned"] for r in e.recommend(k=10, new_only=True, **kwargs)), kwargs
+
+
+def _link_engine(tmp_path, extra=()):
+    """al:1 is liked. al:10 and al:11 have the same embedding. AniList users link al:1 to al:10."""
+    from anime_vec.store import Store
+    s = Store(tmp_path / "links.db")
+    specs = [
+        ("al:1", [1, 0, 0, 0], 1, [[10, 80]]),
+        ("al:10", [0, 1, 0, 0], 0, []),
+        ("al:11", [0, 1, 0, 0], 0, []),
+        ("al:12", [0, 0, 1, 0], 0, []),
+        ("al:13", [0, 0, 0, 1], 0, [[12, 5]]),
+    ] + list(extra)
+    for rid, vec, owned, recommendations in specs:
+        s.upsert_rows([{"id": rid, "source": "anilist", "title": rid, "title_native": "",
+                        "year": 2020, "format": "tv", "genres": [], "tags": [], "tag_ranks": [],
+                        "studios": [], "overview": "O", "score": 7.0, "owned": owned, "tmdbid": None,
+                        "anilist_id": int(rid.split(":")[1]), "poster": None,
+                        "recommendations": recommendations}])
+        s.save_embedding(rid, np.array(vec, dtype=np.float32).tobytes())
+    return Engine(s)
+
+
+def test_link_matrix_connects_franchises_in_two_directions(tmp_path):
+    e = _link_engine(tmp_path)
+    a, b, c = (e.row_fr[e.pos[i]] for i in ("al:1", "al:10", "al:11"))
+    assert e.link_M[a, b] > 0 and e.link_M[a, b] == e.link_M[b, a]
+    assert e.link_M[a, c] == 0
+
+
+def test_hybrid_uses_the_user_recommendations(tmp_path):
+    e = _link_engine(tmp_path)
+    res = e.recommend(k=4, mode="hybrid")
+    ids = [r["id"] for r in res]
+    # al:10 and al:11 have the same content. Only the link is different.
+    assert ids.index("al:10") < ids.index("al:11")
+    by_id = {r["id"]: r for r in res}
+    assert by_id["al:10"]["linked_favorite"] == "al:1"
+    assert "linked_favorite" not in by_id["al:11"]
+
+
+def test_hybrid_moves_shows_like_the_disliked_shows_down(tmp_path):
+    # al:2 is owned and gets tier C. al:12 has the same embedding as al:2.
+    e = _link_engine(tmp_path, extra=[("al:2", [0, 0, 1, 0], 1, [])])
+    e.set_show_tier("al:1", "S")
+    before = [r["id"] for r in e.recommend(k=4, mode="hybrid")]
+    e.set_show_tier("al:2", "C")
+    after = [r["id"] for r in e.recommend(k=4, mode="hybrid")]
+    assert after.index("al:12") > before.index("al:12") or after[-1] == "al:12"
+    assert after[-1] == "al:12"
+

@@ -78,7 +78,8 @@ h2 { font-family: var(--serif); font-weight: 600; font-size: 22px; margin: 26px 
 .chip { display: inline-block; background: var(--hover); color: var(--muted); border-radius: 4px;
   padding: 1px 7px; font-size: 11.5px; }
 .chip.chip-shared { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
-.chip.chip-matched { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent); font-weight: 500; }
+.chip.chip-matched { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent); font-weight: 500; }
+.chip.chip-linked { background: color-mix(in srgb, var(--tier-b) 12%, transparent); color: var(--tier-b); border: 1px solid color-mix(in srgb, var(--tier-b) 28%, transparent); font-weight: 500; }
 .chip.chip-why { color: var(--text); font-weight: 500; }
 .chip b { color: var(--text); font-weight: 500; }
 .simbar { height: 3px; border-radius: 2px; background: var(--border); margin-top: 6px; overflow: hidden; }

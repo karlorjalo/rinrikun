@@ -40,8 +40,11 @@ function card(r, why) {
     tagHtml = `<span class="chip chip-why">${esc(why)}</span>`;
   } else if (r.matched_favorite) {
     const matchChip = `<span class="chip chip-matched" title="Matches your favorite: ${esc(r.matched_favorite)}">✦ ${esc(r.matched_favorite)}</span>`;
-    const otherChips = (r.tags || []).slice(0, 2).map((t) => `<span class="chip">${esc(t)}</span>`).join("");
-    tagHtml = matchChip + otherChips;
+    const linkChip = r.linked_favorite
+      ? `<span class="chip chip-linked" title="AniList users recommend this show to people who like: ${esc(r.linked_favorite)}">⇄ ${esc(r.linked_favorite)}</span>`
+      : "";
+    const otherChips = (r.tags || []).slice(0, linkChip ? 1 : 2).map((t) => `<span class="chip">${esc(t)}</span>`).join("");
+    tagHtml = matchChip + linkChip + otherChips;
   } else if (r.shared_tags && r.shared_tags.length) {
     tagHtml = r.shared_tags.slice(0, 3).map((t) => `<span class="chip chip-shared" title="Shared tag">${esc(t)}</span>`).join("");
   } else if (r.tags && r.tags.length) {

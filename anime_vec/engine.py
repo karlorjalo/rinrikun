@@ -20,6 +20,12 @@ def display_similarity(sim: float) -> float:
 LIKED_K = 5
 # Weight of the D-tier penalty in the hybrid score, in standard deviations
 D_PENALTY = 1.0
+# Weight of the AniList user recommendations in the hybrid score, relative to the content score
+LINK_WEIGHT = 0.5
+# Weight of the similarity to the C-tier and D-tier shows, which decreases the hybrid score
+DISLIKE_WEIGHT = 0.5
+# Number of nearest disliked shows that give the dislike score of a candidate
+DISLIKED_K = 3
 
 
 def _zscore(x: np.ndarray) -> np.ndarray:
@@ -97,6 +103,7 @@ class Engine:
         self.eff_M = centered / np.clip(np.linalg.norm(centered, axis=1, keepdims=True), 1e-9, None)
         self.tag_M = self._build_tag_matrix()
         self.franchise = self._build_franchises()
+        self._build_links()
 
         self.coords_2d = self._build_layout(unique)
         self.regions = self._build_regions(unique)
@@ -250,7 +257,21 @@ class Engine:
         liked, liked_w = self._liked()
         text_score, text_sims, best = _knn_score(cand_M, self.eff_M[liked], liked_w)
         tag_score, _, _ = _knn_score(self.tag_M[cand_indices], self.tag_M[liked], liked_w)
-        scores = 0.5 * _zscore(text_score) + 0.5 * _zscore(tag_score) - D_PENALTY * d_penalty
+        scores = _zscore(0.5 * _zscore(text_score) + 0.5 * _zscore(tag_score)) - D_PENALTY * d_penalty
+
+        # Content tells the kind of a show. The AniList user recommendations tell which shows the
+        # people who like one show also like. This second signal comes from other people.
+        cand_fr = self.row_fr[cand_indices]
+        link_score, link_source = self._link_scores(liked, liked_w)
+        scores = scores + LINK_WEIGHT * _zscore(link_score[cand_fr])
+
+        # Shows that are similar to the C-tier and D-tier shows of the user get a lower score
+        disliked = [i for i in self.owned_idx if self.rows[i].get("tier") in ("C", "D")]
+        if disliked:
+            ones = np.ones(len(disliked), dtype=np.float32)
+            bad_text, _, _ = _knn_score(cand_M, self.eff_M[disliked], ones, DISLIKED_K)
+            bad_tag, _, _ = _knn_score(self.tag_M[cand_indices], self.tag_M[disliked], ones, DISLIKED_K)
+            scores = scores - DISLIKE_WEIGHT * _zscore(0.5 * _zscore(bad_text) + 0.5 * _zscore(bad_tag))
 
         if mode == "diverse":
             # Maximal marginal relevance: balance the score against the similarity to the shows already selected
@@ -275,9 +296,57 @@ class Engine:
         else:
             order = self._one_per_franchise(np.argsort(-scores), k, cand_indices)
 
-        return [self._result(cand_indices[j], float(text_sims[j]), seed=None,
+        out = []
+        for j in order:
+            r = self._result(cand_indices[j], float(text_sims[j]), seed=None,
                              matched_favorite=self._favorite_title(liked[best[j]]))
-                for j in order]
+            source = link_source.get(int(cand_fr[j]))
+            if source is not None:
+                # The liked show that AniList users connect most strongly to this candidate
+                r["linked_favorite"] = self._favorite_title(source)
+            out.append(r)
+        return out
+
+    def _build_links(self):
+        """Build the link matrix between franchises from the AniList user recommendations.
+
+        A link between two shows gets less weight when the two shows have many links, so that
+        very popular shows do not fill the list.
+        """
+        names = sorted(set(self.franchise.values()))
+        fr_pos = {f: k for k, f in enumerate(names)}
+        self.row_fr = np.array([fr_pos[self.franchise[i]] for i in self.ids], dtype=np.int64)
+        by_anilist = {r["anilist_id"]: self.row_fr[i] for i, r in enumerate(self.rows)
+                      if r.get("anilist_id") is not None}
+        A = np.zeros((len(names), len(names)), dtype=np.float32)
+        for i, r in enumerate(self.rows):
+            a = self.row_fr[i]
+            for other, rating in r.get("recommendations") or []:
+                b = by_anilist.get(other)
+                if b is not None and b != a and rating > 0:
+                    A[a, b] += rating
+        # A recommendation connects the two shows in the two directions
+        A = np.maximum(A, A.T)
+        degree = np.maximum(A.sum(axis=1), 1.0)
+        self.link_M = A / np.sqrt(np.outer(degree, degree))
+
+    def _link_scores(self, liked: list[int], liked_w: np.ndarray) -> tuple[np.ndarray, dict[int, int]]:
+        """Return the link score of each franchise, and the liked show with the strongest link to it."""
+        weight = np.zeros(self.link_M.shape[0], dtype=np.float32)
+        best_row: dict[int, int] = {}
+        for i, w in zip(liked, liked_w):
+            f = int(self.row_fr[i])
+            if w > weight[f]:
+                weight[f] = w
+                best_row[f] = i
+        sources = np.nonzero(weight)[0]
+        if len(sources) == 0:
+            return np.zeros(self.link_M.shape[0], dtype=np.float32), {}
+        links = self.link_M[sources] * weight[sources, None]
+        strongest = links.argmax(axis=0)
+        source = {int(g): best_row[int(sources[strongest[g]])]
+                  for g in np.nonzero(links.max(axis=0) > 0)[0]}
+        return links.sum(axis=0), source
 
     def _one_per_franchise(self, order, k: int, index_map: list[int] | None = None) -> list[int]:
         """Keep the first k entries of an ordered list, with a maximum of one entry for each franchise.
