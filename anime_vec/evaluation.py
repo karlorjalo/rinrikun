@@ -47,14 +47,15 @@ def franchise_members(engine, franchise: str) -> list[str]:
     return out
 
 
-def rank_of_hidden(engine, show_id: str, mode: str = "hybrid", k: int = 100000, kinds: str = "all") -> tuple[int, int]:
+def rank_of_hidden(engine, show_id: str, mode: str = "hybrid", k: int = 100000, kinds: str = "all",
+                   links: bool = True) -> tuple[int, int]:
     """Hide the franchise of a show and return (rank of the franchise in the list, length of the list).
 
     Rank 0 is the top of the list. If the franchise is not in the list, the rank is the length of the list.
     """
     franchise = engine.franchise[show_id]
     with hidden(engine, franchise_members(engine, franchise)):
-        results = engine.recommend(k=k, mode=mode, new_only=True, kinds=kinds)
+        results = engine.recommend(k=k, mode=mode, new_only=True, kinds=kinds, links=links)
     for position, r in enumerate(results):
         if engine.franchise[r["id"]] == franchise:
             return position, len(results)
@@ -90,13 +91,16 @@ def summarize(ranks: list[tuple[int, int]]) -> dict:
 
 
 def hidden_franchise_test(engine, tiers=("S", "A"), mode: str = "hybrid", k: int = 100000,
-                          kinds: str = "all") -> dict:
-    """Run the test for each rated franchise with a tier from `tiers` and return the summary."""
-    return summarize([rank_of_hidden(engine, show_id, mode, k, kinds) for show_id in rated_shows(engine, tiers)])
+                          kinds: str = "all", links: bool = True) -> dict:
+    """Run the test for each rated franchise with a tier from `tiers` and return the summary.
+
+    `kinds` and `links` select the formula: see Engine.recommend.
+    """
+    return summarize([rank_of_hidden(engine, show_id, mode, k, kinds, links) for show_id in rated_shows(engine, tiers)])
 
 
 def recent_test(engine, count: int = 20, tiers=("S", "A"), mode: str = "hybrid", k: int = 100000,
-                kinds: str = "all") -> dict:
+                kinds: str = "all", links: bool = True) -> dict:
     """Hide the `count` rated franchises that the user added last, all at the same time.
 
     This is nearer to real use than the test of one franchise: the engine sees only the older
@@ -111,7 +115,7 @@ def recent_test(engine, count: int = 20, tiers=("S", "A"), mode: str = "hybrid",
     franchises = {engine.franchise[i] for i in newest}
     members = [m for f in franchises for m in franchise_members(engine, f)]
     with hidden(engine, members):
-        results = engine.recommend(k=k, mode=mode, new_only=True, kinds=kinds)
+        results = engine.recommend(k=k, mode=mode, new_only=True, kinds=kinds, links=links)
     position = {}
     for rank, r in enumerate(results):
         position.setdefault(engine.franchise[r["id"]], rank)

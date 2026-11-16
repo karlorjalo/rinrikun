@@ -1179,3 +1179,33 @@ def test_hybrid_uses_the_taste_model(tmp_path, monkeypatch):
     monkeypatch.setattr(Engine, "_taste_scores", one_show)
     after = [r["id"] for r in e.recommend(k=10)]
     assert after.index(last) < before.index(last)
+
+
+def test_formula_without_the_crowd_links(tmp_path, monkeypatch):
+    e = _link_engine(tmp_path)
+    pos = e.pos
+    with_links = e.match_percent()
+    without = e.match_percent(links=False)
+    # al:10 and al:11 have the same content. Only the crowd link of al:10 is different.
+    assert with_links[pos["al:10"]] > with_links[pos["al:11"]]
+    assert without[pos["al:10"]] == without[pos["al:11"]]
+    # Each formula keeps its own values
+    assert e.match_percent(links=False) is without and e.match_percent() is with_links
+    assert all("linked_favorite" not in r for r in e.recommend(k=4, links=False))
+    assert [r["match"] for r in e.with_match(e.recommend(k=4, links=False), links=False)] == sorted(
+        (r["match"] for r in e.with_match(e.recommend(k=4, links=False), links=False)), reverse=True)
+    # The formula without the links is the formula with a link weight of 0
+    monkeypatch.setattr("anime_vec.engine.LINK_WEIGHT", 0.0)
+    e._match_cache.clear()
+    assert np.allclose(e.match_percent(), without)
+
+
+def test_lists_of_the_user_use_the_formula_without_the_links(tmp_path):
+    e = _match_engine(tmp_path)
+    for links in (True, False):
+        match = e.match_percent(links=links)
+        assert [r["match"] for r in e.rated_shows(links=links)] == [
+            round(float(match[e.pos[r["id"]]]), 1) for r in e.rated_shows(links=links)]
+        assert [r["match"] for r in e.review_queue(links=links)] == [
+            round(float(match[e.pos[r["id"]]]), 1) for r in e.review_queue(links=links)]
+        assert e.map_match(links=links) == [round(float(v), 1) for v in match]

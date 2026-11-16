@@ -108,6 +108,11 @@ def test_api_weights_endpoints(tmp_path):
             assert mm_res.status_code == 200
             assert len(mm_res.json()) == 3
         assert client.get("/api/vector-map/match?kinds=other").status_code == 422
+        # Each list of shows also accepts the formula without the crowd links
+        for url in ("/api/vector-map/match", "/api/review-queue", "/api/ratings", "/api/watched", "/api/dismissed",
+                    "/api/similar?id=al:1", "/api/show/al:3"):
+            assert client.get(url + ("&" if "?" in url else "?") + "kinds=usual&links=false").status_code == 200
+        assert client.get("/api/ratings?links=maybe").status_code == 422
 
         # 10. The list of the shows has the other titles of each show, for the search
         assert all(x["aka"] == [] for x in client.get("/api/shows").json())
@@ -135,6 +140,9 @@ def test_api_recommend_new_only(tmp_path):
         assert [r["id"] for r in client.get("/api/recommend?k=10&kinds=usual").json()] != []
         assert client.get("/api/recommend?kinds=all").status_code == 200
         assert client.get("/api/recommend?kinds=other").status_code == 422
+        # The formula without the crowd links
+        no_links = client.get("/api/recommend?k=10&kinds=usual&links=false")
+        assert no_links.status_code == 200 and all("linked_favorite" not in r for r in no_links.json())
         # The Center and Peak formulas do not exist now
         assert client.get("/api/recommend?mode=center").status_code == 422
     finally:
@@ -265,5 +273,34 @@ def test_api_logs_the_recommendations_and_their_results(tmp_path):
         assert res["tiers"] == {"S": 0, "A": 1, "B": 0, "C": 0, "D": 0}
         assert {x["id"]: x["tier"] for x in res["shows"]} == {"al:3": "A", "al:4": None}
         assert res["since"] is not None
+        # All these shows came from a list with the crowd links
+        assert res["formulas"] == {"links": {"shown": 3, "added": 2, "removed": 1},
+                                   "no links": {"shown": 0, "added": 0, "removed": 0}}
+    finally:
+        serve.store, serve.engine = orig_store, orig_engine
+
+
+def test_api_log_keeps_the_formula_of_the_first_list(tmp_path):
+    import serve
+    store = Store(tmp_path / "api_log_formula.db")
+    store.upsert_rows([make_row(1, owned=1), make_row(3, owned=0), make_row(4, owned=0)])
+    for i in (1, 3, 4):
+        store.save_embedding(f"al:{i}", b"\x00" * 1536)
+    orig_store, orig_engine = serve.store, serve.engine
+    serve.store, serve.engine = store, Engine(store)
+    try:
+        client = TestClient(serve.app)
+        # The first list has no crowd links, and it has only the first show
+        assert len(client.get("/api/recommend?k=1&kinds=usual&links=false").json()) == 1
+        first = next(iter(store.get_rec_log()))
+        client.get("/api/recommend?k=10&kinds=usual")
+        log = store.get_rec_log()
+        other = next(i for i in log if i != first)
+        assert log[first]["kinds"] == "usual, no links" and log[other]["kinds"] == "usual"
+        client.post("/api/watched", json={"id": first, "watched": True})
+        client.post("/api/dismissed", json={"id": other, "dismissed": True})
+        res = client.get("/api/rec-log").json()
+        assert res["formulas"] == {"links": {"shown": 1, "added": 0, "removed": 1},
+                                   "no links": {"shown": 1, "added": 1, "removed": 0}}
     finally:
         serve.store, serve.engine = orig_store, orig_engine

@@ -411,7 +411,7 @@ class Engine:
         return {self.franchise[self.ids[i]] for i in self.owned_idx}
 
     def recommend(self, k: int = 20, seed_id: str | None = None, mode: str = "hybrid",
-                  new_only: bool = False, kinds: str = "all") -> list[dict]:
+                  new_only: bool = False, kinds: str = "all", links: bool = True) -> list[dict]:
         """Return the recommendations. Each result says if the user owns a show of the same franchise.
 
         The mode is "hybrid" (the best scores) or "diverse" (the same scores, with more variety).
@@ -420,16 +420,21 @@ class Engine:
         `kinds` selects the formula. "all" gives each kind of show the same chance. "usual" gives
         a higher score to the kinds of shows that the library has many of. A list with a seed
         is ordered by the similarity to the seed, and `kinds` has no effect on it.
+
+        If `links` is false, the formula does not use the crowd links: the recommendations of
+        AniList users. The list then comes only from the ratings of the user and from the facts
+        of the shows. `links` also has no effect on a list with a seed.
         """
         if kinds not in KINDS:
             raise ValueError(f"unknown kinds {kinds}")
         owned = self.owned_franchises()
-        out = self._recommend(k, seed_id, mode, owned if new_only else set(), kinds)
+        out = self._recommend(k, seed_id, mode, owned if new_only else set(), kinds, links)
         for r in out:
             r["franchise_owned"] = self.franchise[r["id"]] in owned
         return out
 
-    def _recommend(self, k: int, seed_id: str | None, mode: str, skip: set[str], kinds: str = "all") -> list[dict]:
+    def _recommend(self, k: int, seed_id: str | None, mode: str, skip: set[str], kinds: str = "all",
+                   links: bool = True) -> list[dict]:
         if k <= 0:
             return []
 
@@ -456,7 +461,7 @@ class Engine:
             return []
 
         mode = (mode or "hybrid").lower()
-        hybrid = self._hybrid(cand_indices, kinds, owned)
+        hybrid = self._hybrid(cand_indices, kinds, owned, links=links)
         scores, best, liked = hybrid["scores"], hybrid["best"], hybrid["liked"]
         link_source, cand_fr = hybrid["link_source"], hybrid["cand_fr"]
         cand_M = self.eff_M[cand_indices]
@@ -494,8 +499,11 @@ class Engine:
             out.append(r)
         return out
 
-    def _hybrid(self, cand_indices: list[int], kinds: str, owned: set[str], extra: list[int] | None = None) -> dict:
+    def _hybrid(self, cand_indices: list[int], kinds: str, owned: set[str], extra: list[int] | None = None,
+                links: bool = True) -> dict:
         """Compute the hybrid score of each candidate.
+
+        If `links` is false, the score has no part from the crowd links.
 
         `extra` are rows that are not candidates, for example the shows of the user. Each of them
         gets a score on the scale of the candidates: each part of its score uses the mean and the
@@ -550,13 +558,16 @@ class Engine:
             extra_scores = _scale_like(content, extra_content) - D_PENALTY * extra_d
 
         # Content tells the kind of a show. The AniList user recommendations tell which shows the
-        # people who like one show also like. This second signal comes from other people.
+        # people who like one show also like. This second signal comes from other people, and it
+        # starts at the liked shows of the user. The user can turn it off.
         # A franchise has no link to itself, thus an extra row needs no special rule here.
-        link_score, link_source = self._link_scores(*self._link_sources(liked, liked_w))
-        cand_links = link_score[cand_fr]
-        scores = scores + LINK_WEIGHT * _zscore(cand_links)
-        if extra:
-            extra_scores = extra_scores + LINK_WEIGHT * _scale_like(cand_links, link_score[extra_fr])
+        link_source: dict[int, int] = {}
+        if links:
+            link_score, link_source = self._link_scores(*self._link_sources(liked, liked_w))
+            cand_links = link_score[cand_fr]
+            scores = scores + LINK_WEIGHT * _zscore(cand_links)
+            if extra:
+                extra_scores = extra_scores + LINK_WEIGHT * _scale_like(cand_links, link_score[extra_fr])
 
         # Shows that are similar to the C-tier and D-tier shows of the user, or to the shows that
         # the user removed from the recommendations, get a lower score
@@ -601,25 +612,25 @@ class Engine:
         """Return a value that changes when the shows, the tiers or the removed shows of the user change."""
         return tuple(self.owned_idx), tuple(sorted(self.weights.items())), tuple(sorted(self.dismissed))
 
-    def match_percent(self, kinds: str = "all") -> np.ndarray:
+    def match_percent(self, kinds: str = "all", links: bool = True) -> np.ndarray:
         """Return the match of each row in percent. The value is NaN for a row without a match.
 
         The match of a show is the part of the new franchises of the catalog that have a lower
         hybrid score than the show. 99 means: the show scores higher than 99% of the franchises
         that the user does not have. It uses the same formula as the recommendations, thus the
-        first recommendation has the highest match.
+        first recommendation has the highest match. `kinds` and `links` select the formula.
 
         A show of the user gets the score that it would have if the user did not have it: each
         part of the score ignores the shows of its own franchise. Thus the match of a show of the
         user tells how well the formula finds this show from the other shows of the user.
         """
         with self.lock:
-            return self._match_percent(kinds)
+            return self._match_percent(kinds, links)
 
-    def _match_percent(self, kinds: str) -> np.ndarray:
+    def _match_percent(self, kinds: str, links: bool = True) -> np.ndarray:
         """Compute or get the result of match_percent. The caller holds the lock."""
         key = self._state_key()
-        cached = self._match_cache.get(kinds)
+        cached = self._match_cache.get((kinds, links))
         if cached is not None and cached[0] == key:
             return cached[1]
         out = np.full(len(self.rows), np.nan, dtype=np.float32)
@@ -632,7 +643,7 @@ class Engine:
         if cand and self.owned_idx:
             cand_set = set(cand)
             extra = [j for j in unique if j not in cand_set]
-            hybrid = self._hybrid(cand, kinds, owned, extra)
+            hybrid = self._hybrid(cand, kinds, owned, extra, links)
             # The reference: the franchises that the user does not have
             new = np.array([self.franchise[self.ids[j]] not in owned for j in cand])
             reference = np.sort(hybrid["scores"][new] if new.any() else hybrid["scores"])
@@ -642,7 +653,7 @@ class Engine:
             # An AniList row of a library show has the match of the library show
             for dup_id, lib_id in self.duplicate_of.items():
                 out[self.pos[dup_id]] = out[self.pos[lib_id]]
-        self._match_cache[kinds] = (key, out)
+        self._match_cache[(kinds, links)] = (key, out)
         return out
 
     def tier_guess(self) -> np.ndarray:
@@ -670,7 +681,7 @@ class Engine:
         self._match_cache["tier guess"] = (key, out)
         return out
 
-    def watch_next_order(self, rows: list[int], kinds: str = "all") -> list[int]:
+    def watch_next_order(self, rows: list[int], kinds: str = "all", links: bool = True) -> list[int]:
         """Order shows without a tier: the shows that the user will probably rate highest are first.
 
         The order uses two signals with the same weight: the match, and the tier guess. In a test
@@ -681,19 +692,19 @@ class Engine:
         rows = list(rows)
         if len(rows) < 2:
             return rows
-        score = _zscore(_ranks(np.nan_to_num(self.match_percent(kinds)[rows], nan=0.0)))
+        score = _zscore(_ranks(np.nan_to_num(self.match_percent(kinds, links)[rows], nan=0.0)))
         guess = self.tier_guess()[rows]
         if not np.isnan(guess).any():
             score = score + _zscore(guess.astype(np.float64))
         return [rows[k] for k in np.argsort(-score, kind="stable")]
 
-    def with_match(self, results: list[dict], kinds: str = "all") -> list[dict]:
+    def with_match(self, results: list[dict], kinds: str = "all", links: bool = True) -> list[dict]:
         """Add the match (see match_percent) to each result. The value is None for a show without a match.
 
         A show without a tier also gets `tier_guess`: the letter of the tier that the tier model
         predicts for it, or None.
         """
-        match = self.match_percent(kinds)
+        match = self.match_percent(kinds, links)
         guess = self.tier_guess()
         for r in results:
             j = self.pos[r["id"]]
@@ -703,13 +714,13 @@ class Engine:
                 r["tier_guess"] = next((letter for letter, limit in TIER_GUESS_LIMITS if guess[j] >= limit), "D")
         return results
 
-    def map_match(self, kinds: str = "all") -> list:
+    def map_match(self, kinds: str = "all", links: bool = True) -> list:
         """Return the match of each point of the map, in the order of the points of get_vector_map.
 
         A value is the match in percent with one decimal, or None for a show without a match.
         The map uses the values for its match gradient.
         """
-        match = self.match_percent(kinds)
+        match = self.match_percent(kinds, links)
         return [None if np.isnan(match[i]) else round(float(match[i]), 1)
                 for i, r in enumerate(self.rows) if r["id"] not in self.duplicate_of]
 
@@ -1134,23 +1145,24 @@ class Engine:
         changed = [sid for sid in target_ids if sid in self.by_id]
         return {"id": show_id, "tier": primary["tier"], "weight": primary["weight"], "ids": changed}
 
-    def review_queue(self, unrated_only: bool = False, kinds: str = "all") -> list[dict]:
+    def review_queue(self, unrated_only: bool = False, kinds: str = "all", links: bool = True) -> list[dict]:
         """Return the shows of the user: the shows without a tier first, then the rated shows by their match.
 
         A show without a tier is frequently a show that the user did not watch yet. These shows
         have the order of watch_next_order, thus the start of the list is also the answer to
         "which show of mine do I watch next?".
         """
-        match = np.nan_to_num(self.match_percent(kinds), nan=-1.0)
-        order = self.watch_next_order([i for i in self.owned_idx if self.rows[i].get("tier") is None], kinds)
+        match = np.nan_to_num(self.match_percent(kinds, links), nan=-1.0)
+        order = self.watch_next_order([i for i in self.owned_idx if self.rows[i].get("tier") is None], kinds, links)
         if not unrated_only:
             order += sorted((i for i in self.owned_idx if self.rows[i].get("tier") is not None),
                             key=lambda i: -float(match[i]))
-        return self.with_match([self._result(i) for i in order], kinds)
+        return self.with_match([self._result(i) for i in order], kinds, links)
 
-    def rated_shows(self, kinds: str = "all") -> list[dict]:
+    def rated_shows(self, kinds: str = "all", links: bool = True) -> list[dict]:
         """Return the shows that the user rated: by tier, then by their match."""
-        out = self.with_match([self._result(i) for i in self.owned_idx if self.rows[i].get("tier") is not None], kinds)
+        out = self.with_match([self._result(i) for i in self.owned_idx if self.rows[i].get("tier") is not None],
+                              kinds, links)
         tier_order = {"S": 0, "A": 1, "B": 2, "C": 3, "D": 4}
         return sorted(out, key=lambda x: (tier_order.get(x.get("tier"), 99), -(x.get("match") or 0.0)))
 
@@ -1160,6 +1172,9 @@ class Engine:
         The log has each show of a new franchise that a list of recommendations gave. A show
         counts as "added" if the user now has a show of its franchise. Its tier is the best tier
         of these shows. The result cannot tell if the user added a show because of the list.
+
+        `formulas` has the numbers for the lists with the crowd links and for the lists without
+        them. A show counts for the formula of the first list that gave it.
         """
         log = self.store.get_rec_log()
         mine: dict[str, list[int]] = {}
@@ -1167,16 +1182,20 @@ class Engine:
             mine.setdefault(self.franchise[self.ids[i]], []).append(i)
         order = ["S", "A", "B", "C", "D"]
         out = {"since": None, "shown": 0, "added": 0, "unrated": 0, "removed": 0,
-               "tiers": {t: 0 for t in order}, "shows": []}
+               "tiers": {t: 0 for t in order}, "shows": [],
+               "formulas": {name: {"shown": 0, "added": 0, "removed": 0} for name in ("links", "no links")}}
         for show_id, entry in log.items():
             if show_id not in self.by_id:
                 continue
+            formula = out["formulas"]["no links" if (entry.get("kinds") or "").endswith("no links") else "links"]
             out["shown"] += 1
+            formula["shown"] += 1
             if out["since"] is None or entry["first_seen"] < out["since"]:
                 out["since"] = entry["first_seen"]
             rows = mine.get(self.franchise[show_id])
             if rows:
                 out["added"] += 1
+                formula["added"] += 1
                 rated = sorted((self.rows[i]["tier"] for i in rows if self.rows[i].get("tier") in order), key=order.index)
                 tier = rated[0] if rated else None
                 if tier:
@@ -1188,6 +1207,7 @@ class Engine:
                                      "tier": tier, "first_seen": entry["first_seen"], "best_rank": entry["best_rank"]})
             elif show_id in self.dismissed:
                 out["removed"] += 1
+                formula["removed"] += 1
         out["shows"].sort(key=lambda x: (x["first_seen"], x["id"]), reverse=True)
         return out
 

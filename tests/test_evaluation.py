@@ -105,3 +105,24 @@ def test_hidden_makes_a_dismissed_show_a_possible_recommendation(tmp_path):
     assert e.dismissed == {"al:0"}
     rank, length = rank_of_hidden(e, "al:0")
     assert rank < length
+
+
+def test_the_tests_use_the_formula_without_the_crowd_links(tmp_path, monkeypatch):
+    e = _engine(tmp_path)
+    calls = []
+    original = Engine.recommend
+
+    def spy(self, *args, **kwargs):
+        calls.append(kwargs.get("links"))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Engine, "recommend", spy)
+    rank_of_hidden(e, "al:0", links=False)
+    hidden_franchise_test(e, ("S",), links=False)
+    for rid, date in (("al:0", "2021-01-01"), ("al:10", "2023-01-01")):
+        e.by_id[rid]["added_at"] = date
+    recent_test(e, count=2, tiers=("S",), links=False)
+    assert calls and all(links is False for links in calls)
+    calls.clear()
+    rank_of_hidden(e, "al:0")
+    assert calls == [True]
