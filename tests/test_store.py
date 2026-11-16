@@ -145,3 +145,28 @@ def test_read_only_store_reads_an_old_database(tmp_path):
     row = Store(path, read_only=True).load_rows()[0]
     assert row["title"] == "Old" and row["genres"] == ["Drama"]
     assert row["relations"] == [] and row["status"] is None and row["library_id"] is None
+
+
+def test_copy_weight(tmp_path):
+    s = Store(tmp_path / "copy.db")
+    s.upsert_rows([make_row(1), make_row(2), make_row(3)])
+    s.set_weight("al:1", "A")
+    s.set_weight("al:3", "S")
+    assert s.copy_weight("al:1", "al:2") is True
+    assert s.get_weights()["al:2"] == {"tier": "A", "weight": 1.5}
+    # A show that has a tier keeps it, and a show without a tier gives nothing
+    assert s.copy_weight("al:1", "al:3") is False
+    assert s.get_weights()["al:3"]["tier"] == "S"
+    assert s.copy_weight("al:9", "al:2") is False
+
+
+def test_delete_library_rows_except(tmp_path):
+    s = Store(tmp_path / "gone.db")
+    s.upsert_rows([make_row(1), dict(make_row(2), id="jf:keep", source="library"),
+                   dict(make_row(3), id="jf:gone", source="library")])
+    s.set_weight("jf:gone", "S")
+    assert s.delete_library_rows_except({"jf:keep"}) == 1
+    assert [r["id"] for r in s.load_rows()] == ["al:1", "jf:keep"]
+    # The tier stays: the show has it again if it comes back with the same id
+    assert s.get_weights()["jf:gone"]["tier"] == "S"
+    assert s.delete_library_rows_except({"jf:keep"}) == 0

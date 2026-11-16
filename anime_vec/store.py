@@ -97,6 +97,27 @@ class Store:
         self.con.execute("DELETE FROM show_weights WHERE id=?", (show_id,))
         self.con.commit()
 
+    def copy_weight(self, from_id: str, to_id: str) -> bool:
+        """Give the tier of one show to a show that has no tier. Return True if the tier was copied."""
+        weights = self.get_weights()
+        if from_id not in weights or to_id in weights:
+            return False
+        self.set_weight(to_id, weights[from_id]["tier"], weights[from_id]["weight"])
+        return True
+
+    def delete_library_rows_except(self, keep_ids) -> int:
+        """Delete the library rows whose id is not in `keep_ids`. Return the number of deleted rows.
+
+        A show that the library does not have now must not stay in the lists. Its tier stays in
+        the database: if the show comes back with the same id, it has its tier again.
+        """
+        keep = set(keep_ids)
+        gone = [r[0] for r in self.con.execute("SELECT id FROM shows WHERE source='library'") if r[0] not in keep]
+        for row_id in gone:
+            self.con.execute("DELETE FROM shows WHERE id=?", (row_id,))
+        self.con.commit()
+        return len(gone)
+
     def get_layout(self, signature: str) -> dict[str, tuple[float, float]] | None:
         """Return the cached map layout, or None if the cache is for other embeddings."""
         t = self.con.execute("SELECT value FROM meta WHERE key='layout_signature'").fetchone()

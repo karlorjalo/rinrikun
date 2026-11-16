@@ -45,9 +45,37 @@ def seasons_by_series(season_items: list[dict]) -> dict[str, list[int]]:
     return {k: sorted(v) for k, v in out.items()}
 
 
+def merge_same_items(items: list[dict]) -> list[dict]:
+    """Return one item for each show.
+
+    Jellyfin makes two items when a movie folder has two files, or when one series is in two
+    folders. The two items have the same type and the same TMDB id. The item that the library
+    got first stays. Its "MergedIds" are the ids of the other items of the same show.
+    """
+    first: dict[tuple, dict] = {}
+    out = []
+    for item in sorted(items, key=lambda i: i.get("DateCreated") or ""):
+        tmdb = (item.get("ProviderIds") or {}).get("Tmdb")
+        key = (item.get("Type"), tmdb)
+        if tmdb and key in first:
+            first[key].setdefault("MergedIds", []).append(item["Id"])
+            continue
+        item = dict(item)
+        if tmdb:
+            first[key] = item
+        out.append(item)
+    return out
+
+
 def fetch_library() -> list[dict]:
     seasons = seasons_by_series(_items("Season", "ProviderIds"))
-    return [row_from_item(i, seasons.get(i["Id"], [])) for i in _items("Series,Movie", FIELDS)]
+    rows = []
+    for item in merge_same_items(_items("Series,Movie", FIELDS)):
+        own = set(seasons.get(item["Id"], []))
+        for other in item.get("MergedIds") or []:
+            own |= set(seasons.get(other, []))
+        rows.append(row_from_item(item, sorted(own)))
+    return rows
 
 
 def poster_url(item_id: str) -> str:
@@ -86,4 +114,6 @@ def row_from_item(i: dict, seasons: list[int] | None = None) -> dict:
         "provider_ids": {k.lower(): v for k, v in (i.get("ProviderIds") or {}).items()},
         "seasons": list(seasons or []),
         "added_at": i.get("DateCreated"),
+        # The library rows of the other Jellyfin items of the same show. The build uses their tiers.
+        "merged_ids": [f"jf:{other}" for other in i.get("MergedIds") or []],
     }

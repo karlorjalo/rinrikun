@@ -55,3 +55,25 @@ def test_folder_style_name_is_cleaned():
     assert clean_name("Blade Runner 2049") == "Blade Runner 2049"
     assert clean_name("(2015)") == "(2015)"
     assert row_from_item(dict(ITEM, Name="冴えない彼女の育てかた (2015) [tmdbid-86561]"))["title"] == "冴えない彼女の育てかた"
+
+
+def test_two_items_of_one_show_are_one_row():
+    from anime_vec.jellyfin_pull import merge_same_items
+    items = [
+        {"Id": "b", "Type": "Movie", "Name": "センコロール", "ProviderIds": {"Tmdb": "37928"}, "DateCreated": "2024-01-15"},
+        {"Id": "a", "Type": "Movie", "Name": "センコロール", "ProviderIds": {"Tmdb": "37928"}, "DateCreated": "2024-01-14"},
+        # A series and a movie can have the same number at TMDB: they are different shows
+        {"Id": "c", "Type": "Series", "Name": "Other", "ProviderIds": {"Tmdb": "37928"}, "DateCreated": "2024-01-13"},
+        # Items without a TMDB id are never one show
+        {"Id": "d", "Type": "Movie", "Name": "No id", "ProviderIds": {}, "DateCreated": "2024-01-12"},
+        {"Id": "e", "Type": "Movie", "Name": "No id", "ProviderIds": {}, "DateCreated": "2024-01-11"},
+    ]
+    merged = merge_same_items(items)
+    assert [i["Id"] for i in merged] == ["e", "d", "c", "a"]
+    assert merged[3]["MergedIds"] == ["b"]
+    assert "MergedIds" not in merged[2]
+    # The function does not change its input
+    assert "MergedIds" not in items[1]
+    row = row_from_item(dict(ITEM, MergedIds=["b"]))
+    assert row["merged_ids"] == ["jf:b"]
+    assert row_from_item(ITEM)["merged_ids"] == []

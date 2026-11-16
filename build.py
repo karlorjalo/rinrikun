@@ -17,6 +17,14 @@ def main(refresh_anilist: bool = False, pool_only: bool = False):
     store = Store(DB)
     lib_rows = fetch_library()
     print(f"library rows: {len(lib_rows)}")
+    if lib_rows:
+        # Two Jellyfin items of one show are one row: the row keeps the tier of the other item
+        for lib in lib_rows:
+            for other in lib["merged_ids"]:
+                store.copy_weight(other, lib["id"])
+        removed = store.delete_library_rows_except(r["id"] for r in lib_rows)
+        if removed:
+            print(f"library rows that Jellyfin does not have now, removed: {removed}")
     pool_rows = fetch_pool(force=refresh_anilist)
     print(f"anilist pool rows: {len(pool_rows)}")
 
