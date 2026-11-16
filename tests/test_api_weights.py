@@ -54,7 +54,7 @@ def test_api_weights_endpoints(tmp_path):
         assert "match" in client.get("/api/show/al:3?kinds=usual").json()
         assert all("match" in r and "similarity" in r for r in client.get("/api/similar?id=al:1").json())
         assert all("match" in r and "similarity" not in r for r in client.get("/api/recommend").json())
-        assert all("match" in r for r in client.get("/api/review-queue").json())
+        assert all("match" in r and "tier_guess" in r for r in client.get("/api/review-queue").json())
 
         # 3. Check unrated_only queue
         unrated_res = client.get("/api/review-queue?unrated_only=true")

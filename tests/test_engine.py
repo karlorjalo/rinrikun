@@ -931,6 +931,8 @@ def test_review_queue_has_the_shows_without_a_tier_first_by_match(tmp_path):
     e = _match_engine(tmp_path)
     queue = e.review_queue()
     assert [r["id"] for r in queue] == ["al:3", "al:1", "al:2"] or [r["id"] for r in queue] == ["al:3", "al:2", "al:1"]
+    # Three rated shows are too few for the tier model: no show has a tier guess
+    assert all(r["tier_guess"] is None for r in queue)
     rated = [r for r in queue if r["tier"]]
     assert [r["match"] for r in rated] == sorted((r["match"] for r in rated), reverse=True)
     assert [r["id"] for r in e.review_queue(unrated_only=True)] == ["al:3"]
@@ -963,3 +965,54 @@ def test_tier_prediction_without_the_row_itself(tmp_path, monkeypatch):
     # The check with a model that really does not have the row
     e.set_show_tier("al:2", None)
     assert e._predicted_tier([rows[2]])[0] == pytest.approx(without_row[2], abs=1e-3)
+
+
+def _guess_engine(tmp_path, monkeypatch):
+    """Shows with tag A have tier S, shows with tag B have tier C. Four shows have no tier."""
+    import anime_vec.engine as engine_module
+    monkeypatch.setattr(engine_module, "TIER_MODEL_MIN_RATED", 4)
+    from anime_vec.store import Store
+    s = Store(tmp_path / "guess.db")
+    # id, tag, owned
+    specs = [(1, "A", 1), (2, "A", 1), (3, "A", 1), (4, "B", 1), (5, "B", 1), (6, "B", 1),
+             (7, "A", 1), (8, "B", 1), (20, "A", 0), (21, "B", 0)]
+    for n, (rid, tag, owned) in enumerate(specs):
+        s.upsert_rows([{"id": f"al:{rid}", "source": "anilist", "title": f"T{rid}", "title_native": "", "year": 2020,
+                        "format": "tv", "genres": [], "tags": [tag], "tag_ranks": [80], "studios": [],
+                        "overview": "O", "score": 7.0, "owned": owned, "tmdbid": None, "anilist_id": rid, "poster": None}])
+        vec = np.zeros(12, dtype=np.float32)
+        vec[n] = 1.0
+        s.save_embedding(f"al:{rid}", vec.tobytes())
+    e = Engine(s)
+    for rid, tier in ((1, "S"), (2, "S"), (3, "S"), (4, "C"), (5, "C"), (6, "C")):
+        e.set_show_tier(f"al:{rid}", tier)
+    return e
+
+
+def test_tier_guess_of_the_shows_without_a_tier(tmp_path, monkeypatch):
+    e = _guess_engine(tmp_path, monkeypatch)
+    guess = e.tier_guess()
+    # A show with the tag of the S-tier shows gets a higher guess than a show with the tag of the C-tier shows
+    assert guess[e.pos["al:7"]] > guess[e.pos["al:8"]]
+    assert guess[e.pos["al:20"]] > guess[e.pos["al:21"]]
+    by_id = {r["id"]: r for r in e.with_match([e.public_row(e.pos[f"al:{i}"]) for i in (1, 7, 8, 20, 21)])}
+    assert by_id["al:7"]["tier_guess"] in ("S", "A") and by_id["al:8"]["tier_guess"] in ("B", "C")
+    assert by_id["al:20"]["tier_guess"] in ("S", "A") and by_id["al:21"]["tier_guess"] in ("B", "C")
+    # A rated show has its tier, thus it has no guess
+    assert by_id["al:1"]["tier_guess"] is None
+    # The engine keeps the result until a tier changes
+    assert e.tier_guess() is guess
+    e.set_show_tier("al:7", "S")
+    assert e.tier_guess() is not guess
+
+
+def test_shows_without_a_tier_are_in_the_order_of_the_guess_and_the_match(tmp_path, monkeypatch):
+    e = _guess_engine(tmp_path, monkeypatch)
+    rows = [e.pos["al:8"], e.pos["al:7"]]
+    # The two shows have about the same match, thus the tier guess decides
+    assert [e.ids[i] for i in e.watch_next_order(rows)] == ["al:7", "al:8"]
+    queue = e.review_queue()
+    assert [r["id"] for r in queue[:2]] == ["al:7", "al:8"]
+    assert all(r["tier"] for r in queue[2:])
+    assert [r["id"] for r in e.review_queue(unrated_only=True)] == ["al:7", "al:8"]
+    assert e.watch_next_order([]) == [] and e.watch_next_order([rows[0]]) == [rows[0]]

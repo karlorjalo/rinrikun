@@ -45,6 +45,12 @@ TIER_MARGIN = 0.5
 TIER_PENALTY = 1.0
 # A show that the user removed from the recommendations counts as a C-tier show in the tier model
 DISMISSED_TIER = TIER_VALUES["C"]
+# The tier guess of a show without a tier: the letter for a predicted value, from the highest limit down.
+# The guess is weak. In a test on 221 rated shows, with each franchise hidden from the model, the
+# rank correlation between the prediction and the tier was 0.20: of the shows in the highest
+# quarter of the predictions 64% were S or A, and of the shows in the lowest quarter 36%.
+# Newer models (TabPFN v2, TabICLv2, boosted trees) were not better than this ridge regression.
+TIER_GUESS_LIMITS = (("S", 3.5), ("A", 2.5), ("B", 1.5), ("C", 0.5))
 # The "usual kinds" formula gives a higher score to the kinds of shows that the library has many of.
 # The kind of a show is its year, its format and its number of episodes. The crowd score counts
 # only as a lower limit.
@@ -113,6 +119,15 @@ def _knn_score(cand: np.ndarray, liked: np.ndarray, weights: np.ndarray, k: int 
     score = np.take_along_axis(weighted, top, axis=1).mean(axis=1)
     shown = np.take_along_axis(sims, top, axis=1).mean(axis=1)
     return score, shown, weighted.argmax(axis=1)
+
+
+def _ranks(x: np.ndarray) -> np.ndarray:
+    """Return the rank of each value (0 = lowest). Equal values get the mean of their ranks."""
+    order = np.argsort(x, kind="stable")
+    ranks = np.empty(len(x), dtype=np.float64)
+    ranks[order] = np.arange(len(x), dtype=np.float64)
+    _, inverse, counts = np.unique(x, return_inverse=True, return_counts=True)
+    return np.bincount(inverse, weights=ranks)[inverse] / counts[inverse]
 
 
 def _scale_like(reference: np.ndarray, x: np.ndarray) -> np.ndarray:
@@ -598,12 +613,57 @@ class Engine:
         self._match_cache[kinds] = (key, out)
         return out
 
+    def tier_guess(self) -> np.ndarray:
+        """Return the tier that the tier model predicts for each row, as a number (4 = S, 0 = D).
+
+        The value is NaN if the user has too few ratings for the model. A row that the model
+        learned from gets the prediction of a model without this row.
+        """
+        key = self._state_key()
+        cached = self._match_cache.get("tier guess")
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        out = np.full(len(self.rows), np.nan, dtype=np.float32)
+        rated = [self.rows[i]["tier"] for i in self.owned_idx if self.rows[i].get("tier") in TIER_VALUES]
+        if len(rated) >= TIER_MODEL_MIN_RATED and len(set(rated)) > 1:
+            unique = [j for j, r in enumerate(self.rows) if r["id"] not in self.duplicate_of]
+            out[unique] = self._predicted_tier(unique, leave_out=True)
+            for dup_id, lib_id in self.duplicate_of.items():
+                out[self.pos[dup_id]] = out[self.pos[lib_id]]
+        self._match_cache["tier guess"] = (key, out)
+        return out
+
+    def watch_next_order(self, rows: list[int], kinds: str = "all") -> list[int]:
+        """Order shows without a tier: the shows that the user will probably rate highest are first.
+
+        The order uses two signals with the same weight: the match, and the tier guess. In a test
+        on the rated shows (each franchise hidden from the tier model) the two together were as
+        good as or better than each alone: the first quarter of the order had 27% S-tier shows,
+        the last quarter 9%. Of all rated shows 17% are S-tier shows.
+        """
+        rows = list(rows)
+        if len(rows) < 2:
+            return rows
+        score = _zscore(_ranks(np.nan_to_num(self.match_percent(kinds)[rows], nan=0.0)))
+        guess = self.tier_guess()[rows]
+        if not np.isnan(guess).any():
+            score = score + _zscore(guess.astype(np.float64))
+        return [rows[k] for k in np.argsort(-score, kind="stable")]
+
     def with_match(self, results: list[dict], kinds: str = "all") -> list[dict]:
-        """Add the match (see match_percent) to each result. The value is None for a show without a match."""
+        """Add the match (see match_percent) to each result. The value is None for a show without a match.
+
+        A show without a tier also gets `tier_guess`: the letter of the tier that the tier model
+        predicts for it, or None.
+        """
         match = self.match_percent(kinds)
+        guess = self.tier_guess()
         for r in results:
-            value = match[self.pos[r["id"]]]
-            r["match"] = None if np.isnan(value) else round(float(value), 1)
+            j = self.pos[r["id"]]
+            r["match"] = None if np.isnan(match[j]) else round(float(match[j]), 1)
+            r["tier_guess"] = None
+            if r.get("tier") is None and not np.isnan(guess[j]):
+                r["tier_guess"] = next((letter for letter, limit in TIER_GUESS_LIMITS if guess[j] >= limit), "D")
         return results
 
     def _predicted_tier(self, indices: list[int], leave_out: bool = False) -> np.ndarray:
@@ -973,15 +1033,17 @@ class Engine:
         return {"id": show_id, "tier": primary["tier"], "weight": primary["weight"], "ids": changed}
 
     def review_queue(self, unrated_only: bool = False, kinds: str = "all") -> list[dict]:
-        """Return the shows of the user: the shows without a tier first, then by their match.
+        """Return the shows of the user: the shows without a tier first, then the rated shows by their match.
 
-        A show without a tier is frequently a show that the user did not watch yet. Thus the
-        start of the list is also the answer to "which show of mine do I watch next?".
+        A show without a tier is frequently a show that the user did not watch yet. These shows
+        have the order of watch_next_order, thus the start of the list is also the answer to
+        "which show of mine do I watch next?".
         """
         match = np.nan_to_num(self.match_percent(kinds), nan=-1.0)
-        order = sorted(self.owned_idx, key=lambda i: (self.rows[i].get("tier") is not None, -float(match[i])))
-        if unrated_only:
-            order = [i for i in order if self.rows[i].get("tier") is None]
+        order = self.watch_next_order([i for i in self.owned_idx if self.rows[i].get("tier") is None], kinds)
+        if not unrated_only:
+            order += sorted((i for i in self.owned_idx if self.rows[i].get("tier") is not None),
+                            key=lambda i: -float(match[i]))
         return self.with_match([self._result(i) for i in order], kinds)
 
     def rated_shows(self, kinds: str = "all") -> list[dict]:

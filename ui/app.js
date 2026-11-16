@@ -33,6 +33,7 @@ function card(r, why) {
 
   const statParts = [];
   if (matchHtml(r)) statParts.push(matchHtml(r));
+  if (guessHtml(r)) statParts.push(guessHtml(r));
   if (similarHtml(r)) statParts.push(similarHtml(r));
   if (scoreVal) statParts.push(`<span class="score">★ ${scoreVal}</span>`);
 
@@ -132,6 +133,15 @@ function matchHtml(r) {
   return `<span class="affinity" title="${title}">${text}% match</span>`;
 }
 
+// The tier guess of a show without a tier: the tier that a small model predicts from the tags of
+// the rated shows. The guess is weak, and the tooltip says so.
+function guessHtml(r) {
+  if (!r.tier_guess || r.tier) return "";
+  const title = "A guess of the tier that you will give, from the tags of the shows that you rated. " +
+    "The guess is weak: in a test, 64% of the shows with the highest guesses were S or A, and 36% of the shows with the lowest guesses.";
+  return `<span class="tier-guess" title="${title}">guess ${r.tier_guess}</span>`;
+}
+
 // A list with a seed also has the similarity of each show to the seed
 function similarHtml(r) {
   return r.similarity != null ? `<span title="The similarity to the seed show">${Math.round(r.similarity)}% similar</span>` : "";
@@ -142,6 +152,7 @@ async function refreshMatch(r) {
   try {
     const full = await (await fetch(withFormula(`/api/show/${encodeURIComponent(r.id)}`))).json();
     r.match = full.match;
+    r.tier_guess = full.tier_guess;
   } catch (e) {}
 }
 
@@ -185,6 +196,7 @@ async function openModal(r) {
   const statItems = [];
   if (scoreVal) statItems.push(`<span class="score">★ ${scoreVal}</span>`);
   if (matchHtml(r)) statItems.push(matchHtml(r));
+  if (guessHtml(r)) statItems.push(guessHtml(r));
   if (similarHtml(r)) statItems.push(similarHtml(r));
 
   const tags = (r.tags || []).map((t, idx) => {
@@ -2147,6 +2159,7 @@ function renderDeckCard() {
   if (show.studios && show.studios.length) metaItems.push(`Studio: <b>${esc(show.studios.slice(0, 2).join(", "))}</b>`);
   if (scoreVal) metaItems.push(`★ ${scoreVal}`);
   if (matchHtml(show)) metaItems.push(matchHtml(show));
+  if (guessHtml(show)) metaItems.push(guessHtml(show));
 
   const tagsHtml = (show.tags || []).slice(0, 5).map(t => `<span class="chip">${esc(t)}</span>`).join("");
 
