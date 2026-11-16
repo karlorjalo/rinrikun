@@ -528,8 +528,26 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   let pinchStartDist = 0;
   let pinchStartScale = 1.0;
   let animFrame = null;
+  let destroyed = false;
+
+  // The largest zoom. At this zoom the shows of a dense group are separate.
+  const MAX_SCALE = 40.0;
+
+  // A dot grows with the zoom, so that it stays a target for the pointer
+  function dotRadius(owned) {
+    return owned
+      ? Math.max(2.4, Math.min(10, 2.6 * Math.pow(scale, 0.6)))
+      : Math.max(1.3, Math.min(7, 1.5 * Math.pow(scale, 0.6)));
+  }
+
+  // The radius of a highlighted show in the Dots view
+  function highlightDotRadius() {
+    return Math.max(4.2, dotRadius(true) + 1);
+  }
 
   function scheduleDraw() {
+    // A poster that loads late must not draw a map that is replaced
+    if (destroyed) return;
     if (!animFrame) {
       animFrame = requestAnimationFrame(() => {
         animFrame = null;
@@ -574,7 +592,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     const w = rect.width;
     const h = rect.height;
     if (w === 0 || h === 0) return;
-    const newScale = Math.max(0.65, Math.min(12.0, scale * factor));
+    const newScale = Math.max(0.65, Math.min(MAX_SCALE, scale * factor));
     if (Math.abs(newScale - scale) < 0.001) return;
     panX = mx - w / 2 - ((mx - panX - w / 2) / scale) * newScale;
     panY = my - h / 2 - ((my - panY - h / 2) / scale) * newScale;
@@ -666,7 +684,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     // 1. Draw Catalog points
     ctx.fillStyle = catalogColor;
     ctx.beginPath();
-    const catR = Math.max(1.3, Math.min(3.2, 1.6 * Math.sqrt(scale)));
+    const catR = dotRadius(false);
     for (let i = 0; i < points.length; i++) {
       const pt = points[i];
       if (pt.owned || highlightSet.has(pt.id)) continue;
@@ -678,7 +696,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     ctx.fill();
 
     // 2. Draw Library points. A rated show has the color of its tier. The S tier is drawn last, on top.
-    const libR = Math.max(2.4, Math.min(5.0, 2.8 * Math.sqrt(scale)));
+    const libR = dotRadius(true);
     const rootStyle = getComputedStyle(document.documentElement);
     for (const tier of [null, "D", "C", "B", "A", "S"]) {
       const tierColor = tier ? rootStyle.getPropertyValue(`--tier-${tier.toLowerCase()}`).trim() : "";
@@ -788,6 +806,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       }
     } else {
       // Dots view mode
+      const hiR = highlightDotRadius();
       for (let i = 0; i < points.length; i++) {
         const pt = points[i];
         if (!highlightSet.has(pt.id)) continue;
@@ -797,13 +816,13 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
         ctx.fillStyle = accentColor;
         ctx.globalAlpha = 0.25;
         ctx.beginPath();
-        ctx.arc(px, py, 8.5, 0, Math.PI * 2);
+        ctx.arc(px, py, hiR * 2, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.globalAlpha = 1.0;
         ctx.fillStyle = accentColor;
         ctx.beginPath();
-        ctx.arc(px, py, 4.2, 0, Math.PI * 2);
+        ctx.arc(px, py, hiR, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.strokeStyle = isDark ? "#262624" : "#ffffff";
@@ -819,7 +838,8 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
         ctx.strokeStyle = accentColor;
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(px, py, 11, 0, Math.PI * 2);
+        const ringR = highlightSet.has(hoveredPoint.id) ? highlightDotRadius() * 2 + 2 : dotRadius(hoveredPoint.owned) + 6;
+        ctx.arc(px, py, Math.max(9, ringR), 0, Math.PI * 2);
         ctx.stroke();
       }
     }
@@ -852,15 +872,15 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
         }
       } else {
         const dSq = (px - mx) ** 2 + (py - my) ** 2;
-        if (dSq <= 8 * 8) {
+        if (dSq <= (highlightDotRadius() + 4) ** 2) {
           return pt;
         }
       }
     }
 
-    // 2. Check owned library points (compact radius)
+    // 2. Check owned library points. The target is larger than the dot, and it grows with the dot.
     let bestOwned = null;
-    let bestOwnedDist = 6.5 * 6.5;
+    let bestOwnedDist = Math.max(7, dotRadius(true) + 4) ** 2;
     for (let i = 0; i < points.length; i++) {
       const pt = points[i];
       if (!pt.owned) continue;
@@ -877,7 +897,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     // 3. Check catalog points (in dots mode, or when zoomed in scale >= 1.8)
     if (viewMode === "dots" || scale >= 1.8) {
       let bestCat = null;
-      let bestCatDist = 5.5 * 5.5;
+      let bestCatDist = Math.max(6, dotRadius(false) + 4) ** 2;
       for (let i = 0; i < points.length; i++) {
         const pt = points[i];
         const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
@@ -1083,6 +1103,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       scheduleDraw();
     },
     destroy: () => {
+      destroyed = true;
       if (animFrame) cancelAnimationFrame(animFrame);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("mousedown", onMouseDown);
