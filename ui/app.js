@@ -542,7 +542,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   let destroyed = false;
 
   // The largest zoom. At this zoom the shows of a dense group are separate.
-  const MAX_SCALE = 40.0;
+  const MAX_SCALE = 80.0;
 
   // A dot grows with the zoom, so that it stays a target for the pointer
   function dotRadius(owned) {
@@ -551,9 +551,15 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       : Math.max(1.3, Math.min(7, 1.5 * Math.pow(scale, 0.6)));
   }
 
-  // From this zoom, the shows in view get their posters
-  const LOD_SCALE = 3.0;
-  const LOD_MAX_POSTERS = 220;
+  // A poster is an object on the map: its width is POSTER_PER_ZOOM pixels for each unit of zoom.
+  // Thus a poster grows and moves away from its neighbors when the user zooms in, as a dot does.
+  // The posters appear when their width is POSTER_MIN. At the width POSTER_MAX they stop growing,
+  // and a larger zoom only moves them apart, which makes room for the posters of a dense group.
+  const POSTER_PER_ZOOM = 2.4;
+  const POSTER_MIN = 18;
+  const POSTER_MAX = 76;
+  const LOD_SCALE = POSTER_MIN / POSTER_PER_ZOOM;
+  const LOD_MAX_POSTERS = 300;
   // The order in which the shows get a poster when the posters cannot all fit: the shows of the
   // user first (by tier), then the catalog by score. The order does not change with the view,
   // so a poster does not come and go while the user moves the map.
@@ -571,7 +577,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   let lodPosters = [];
 
   function lodPosterSize() {
-    const pw = Math.round(Math.max(22, Math.min(56, 22 * Math.pow(scale / LOD_SCALE, 0.4))));
+    const pw = Math.round(Math.min(POSTER_MAX, POSTER_PER_ZOOM * scale));
     return { pw, ph: Math.round(pw * 1.45) };
   }
 
@@ -808,7 +814,8 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     }
 
     // 3b. From a zoom of LOD_SCALE, the shows in view get their posters. A poster that would cover
-    // a poster with a higher priority is not drawn: its show stays a dot until the zoom is larger.
+    // a poster with a higher priority is not drawn: its show stays a dot. The posters and the
+    // distances grow at the same rate, so this does not change until the posters stop growing.
     lodPosters = [];
     if (viewMode === "posters" && scale >= LOD_SCALE) {
       const { pw, ph } = lodPosterSize();
