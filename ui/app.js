@@ -158,16 +158,9 @@ async function openModal(r) {
          ${r.manual_watched ? '✓ Watched · Remove' : '+ Add to Watched'}
        </button>`;
 
-  const tierOptions = [
-    { t: "S", w: "2.0×" },
-    { t: "A", w: "1.5×" },
-    { t: "B", w: "1.0×" },
-    { t: "C", w: "0.3×" },
-    { t: "D", w: "0.0×" },
-  ];
-  const tierPills = tierOptions.map(({ t, w }) => {
+  const tierPills = ["S", "A", "B", "C", "D"].map((t) => {
     const active = r.tier === t ? "active" : "";
-    return `<button class="btn-modal-tier tier-${t.toLowerCase()} ${active}" data-tier="${t}">${t} ${w}</button>`;
+    return `<button class="btn-modal-tier tier-${t.toLowerCase()} ${active}" data-tier="${t}">${t}</button>`;
   }).join("");
 
   const clearTierBtn = r.tier
@@ -373,8 +366,7 @@ function renderProfile() {
       </div>
       <div class="tier-summary-box">
         <div class="tier-summary-title">
-          <span>Preference distribution</span>
-          <span style="font-weight:400;color:var(--muted);font-size:12px;">S 2.0× · A 1.5× · B 1.0× · C 0.3× · D 0.0×</span>
+          <span>Your ratings</span>
         </div>
         <div class="tier-summary-row">${["S", "A", "B", "C", "D"].map(tierItem).join("")}
           <div class="tier-summary-item" style="color:var(--muted);"><span style="font-size:11.5px;">Unrated:</span> <span class="tier-summary-count">${tiers.unrated || 0}</span></div>
