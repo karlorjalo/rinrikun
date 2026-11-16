@@ -514,3 +514,50 @@ def test_manually_watched_pool_row_is_one_show_with_its_library_row(tmp_path):
     assert [r["id"] for r in e.rated_shows()] == ["jf:1"]
     assert [r["id"] for r in e.manual_shows()] == ["al:30"]
     assert [p["id"] for p in e.get_vector_map()["points"] if p["owned"]] == ["al:30", "jf:1"]
+
+
+def _status_engine(tmp_path, specs):
+    """Build an engine from (id, source, format, year, status, owned, relations, library_id) tuples."""
+    from anime_vec.store import Store
+    s = Store(tmp_path / "status_entry.db")
+    for n, (rid, source, fmt, year, status, owned, relations, library_id) in enumerate(specs):
+        s.upsert_rows([{"id": rid, "source": source, "title": rid, "title_native": "", "year": year,
+                        "format": fmt, "genres": [], "tags": [], "tag_ranks": [], "studios": [],
+                        "overview": "O", "score": 7.0, "owned": owned, "tmdbid": None,
+                        "anilist_id": int(rid.split(":")[1]) if source == "anilist" else None,
+                        "poster": None, "relations": relations, "status": status, "library_id": library_id}])
+        vec = np.zeros(8, dtype=np.float32)
+        vec[n % 8] = 1.0
+        vec[(n + 3) % 8] = 0.1 * n
+        s.save_embedding(rid, vec.tobytes())
+    return Engine(s)
+
+
+def test_unreleased_tv_sequel_is_not_the_entry_point(tmp_path):
+    # The franchise of al:10 has a released movie and an announced TV series
+    e = _status_engine(tmp_path, [
+        ("al:1", "anilist", "tv", 2020, "FINISHED", 1, [], None),
+        ("al:10", "anilist", "tv", None, "NOT_YET_RELEASED", 0, [11], None),
+        ("al:11", "anilist", "movie", 2021, "FINISHED", 0, [10], None),
+        ("al:20", "anilist", "tv", 2019, "FINISHED", 0, [], None),
+    ])
+    assert e.ids[e.entry_row[e.franchise["al:10"]]] == "al:11"
+    ids = {r["id"] for r in e.recommend(k=10)}
+    assert "al:11" in ids and "al:10" not in ids
+
+
+def test_hidden_library_series_with_an_announced_sequel_is_found(tmp_path):
+    from anime_vec.evaluation import rank_of_hidden
+    # The library has the first season. AniList also has an announced second season.
+    e = _status_engine(tmp_path, [
+        ("jf:1", "library", "series", 2022, None, 1, [], None),
+        ("al:10", "anilist", "tv", 2022, "FINISHED", 1, [11], "jf:1"),
+        ("al:11", "anilist", "tv", None, "NOT_YET_RELEASED", 0, [10], None),
+        ("al:2", "anilist", "tv", 2020, "FINISHED", 1, [], None),
+        ("al:20", "anilist", "tv", 2019, "FINISHED", 0, [], None),
+        ("al:21", "anilist", "tv", 2018, "FINISHED", 0, [], None),
+    ])
+    assert e.franchise["jf:1"] == e.franchise["al:11"]
+    assert e.ids[e.entry_row[e.franchise["jf:1"]]] == "jf:1"
+    rank, length = rank_of_hidden(e, "jf:1")
+    assert rank < length

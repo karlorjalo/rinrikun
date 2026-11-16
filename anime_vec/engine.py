@@ -29,9 +29,14 @@ DISLIKED_K = 3
 
 
 def _entry_key(r: dict) -> tuple:
-    """Sort key that puts the entry point of a franchise first: a TV series, then the earliest year."""
-    format_rank = {"tv": 0, "tv_short": 1, "ona": 1}
-    return (format_rank.get(r.get("format"), 2), r.get("year") or 9999, r["id"])
+    """Sort key that puts the entry point of a franchise first.
+
+    The entry point is a released show, then a TV series before the other formats, then the
+    earliest year. An unreleased sequel must not be the entry point, because the recommendations
+    do not show it. A library row has the format "series" for a TV series.
+    """
+    format_rank = {"tv": 0, "series": 0, "tv_short": 1, "ona": 1}
+    return (not _released(r), format_rank.get(r.get("format"), 2), r.get("year") or 9999, r["id"])
 
 
 def _released(r: dict) -> bool:
