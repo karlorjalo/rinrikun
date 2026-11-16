@@ -109,3 +109,79 @@ def test_regions_are_named_after_their_typical_tags(tmp_path, monkeypatch):
 def test_small_index_has_no_regions(tmp_path):
     e = Engine(_store_with_rows(tmp_path, 12))
     assert e.get_vector_map()["regions"] == []
+
+
+def test_grid_layout_gives_each_point_its_own_cell():
+    rng = np.random.default_rng(0)
+    # 300 points in three dense groups: many points are at almost the same position
+    P = np.concatenate([rng.normal(loc=c, scale=0.01, size=(100, 2)) for c in ((0.2, 0.2), (0.8, 0.3), (0.5, 0.8))])
+    G, dx, dy = layout.grid_layout(P)
+    assert dy == pytest.approx(dx * layout.CELL_ASPECT)
+    assert dx * dy * len(P) == pytest.approx(layout.GRID_FILL)
+    cells = {(round(float(x) / dx), round(float(y) / dy)) for x, y in G}
+    assert len(cells) == len(P)
+    # Each point stays near its group: the movement is some cells, not the width of the map
+    move = np.sqrt(((G - P) ** 2).sum(axis=1))
+    assert move.max() < 12 * dy
+    # The groups stay separate
+    assert G[:100, 0].max() < G[100:200, 0].min()
+
+
+def test_grid_layout_keeps_separate_points_in_their_nearest_cell():
+    P = np.array([[0.1, 0.1], [0.5, 0.5], [0.9, 0.2], [0.3, 0.8]])
+    G, dx, dy = layout.grid_layout(P)
+    assert (np.abs(G[:, 0] - P[:, 0]) <= dx / 2 + 1e-6).all()
+    assert (np.abs(G[:, 1] - P[:, 1]) <= dy / 2 + 1e-6).all()
+
+
+def test_grid_layout_order_gives_the_first_point_the_nearest_cell():
+    P = np.array([[0.5, 0.5]] * 5 + [[0.0, 0.0], [1.0, 1.0]])
+    G, dx, dy = layout.grid_layout(P, order=[3, 0, 1, 2, 4, 5, 6], passes=0)
+    move = np.sqrt(((G - P) ** 2).sum(axis=1))
+    assert move[3] == move[:5].min()
+    assert len({(round(float(x) / dx), round(float(y) / dy)) for x, y in G}) == 7
+
+
+def test_grid_layout_of_no_points():
+    G, dx, dy = layout.grid_layout(np.zeros((0, 2)))
+    assert G.shape == (0, 2)
+
+
+def test_engine_gives_the_grid_in_the_map_data(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_tsne(X):
+        calls.append(len(X))
+        return layout.pca_layout(X)
+
+    monkeypatch.setattr(layout, "can_use_tsne", lambda n: True)
+    monkeypatch.setattr(layout, "tsne_layout", fake_tsne)
+    s = _store_with_rows(tmp_path, 12)
+    e = Engine(s)
+    vm = e.get_vector_map()
+    assert vm["cell"]["h"] == pytest.approx(vm["cell"]["w"] * layout.CELL_ASPECT)
+    cells = {(round(p["gx"] / vm["cell"]["w"]), round(p["gy"] / vm["cell"]["h"])) for p in vm["points"]}
+    assert len(cells) == 12
+    # The second engine reads the map and the grid from the database
+    again = Engine(s)
+    assert calls == [12]
+    assert np.allclose(again.grid_2d, e.grid_2d) and again.cell == pytest.approx(e.cell)
+
+
+def test_owned_shows_select_their_grid_cell_first(tmp_path, monkeypatch):
+    seen = {}
+    real = layout.grid_layout
+
+    def spy(P, order=None, passes=6):
+        seen["order"] = list(order)
+        return real(P, order, passes)
+
+    monkeypatch.setattr(layout, "grid_layout", spy)
+    s = _store_with_rows(tmp_path, 12)
+    s.set_weight("al:2", "S")
+    s.set_weight("al:0", "B")
+    e = Engine(s)
+    first = [e.ids[i] for i in seen["order"][:3]]
+    # The owned shows are al:0, al:1 and al:2: the S tier, then the B tier, then the show without a tier
+    assert first == ["al:2", "al:0", "al:1"]
+    assert sorted(seen["order"]) == list(range(12))

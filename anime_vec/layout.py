@@ -2,7 +2,7 @@
 import numpy as np
 
 # Change this value when the layout method changes. The cached layouts then become stale.
-VERSION = "tsne-v2"
+VERSION = "tsne-v3-grid"
 # t-SNE needs more rows than its perplexity. Smaller indexes use PCA.
 TSNE_MIN_ROWS = 100
 TSNE_PERPLEXITY = 30
@@ -11,6 +11,12 @@ REGION_MIN_ROWS = 200
 REGION_COUNT = 14
 # A region with less than this number of rows gets no label
 REGION_MIN_SIZE = 15
+# The grid of the close view: each show has its own cell, so that its poster never covers
+# another poster. A cell is higher than wide, as a poster is.
+CELL_ASPECT = 1.4
+# The part of the map area that the cells of all shows fill. A smaller value keeps more room
+# between the groups of the map, but then the largest zoom must be larger.
+GRID_FILL = 0.5
 
 
 def can_use_tsne(n_rows: int) -> bool:
@@ -90,3 +96,78 @@ def kmeans(P: np.ndarray, k: int, iterations: int = 50, seed: int = 0) -> tuple[
             if len(members):
                 centers[c] = members.mean(axis=0)
     return labels, centers
+
+
+def _cell_offsets(radius: int, dx: float, dy: float) -> list[tuple[int, int]]:
+    """Return the cells around a cell, nearest first."""
+    offsets = [(ox, oy) for ox in range(-radius, radius + 1) for oy in range(-radius, radius + 1)]
+    offsets.sort(key=lambda o: (o[0] * dx) ** 2 + (o[1] * dy) ** 2)
+    return offsets
+
+
+def grid_layout(P: np.ndarray, order=None, passes: int = 6) -> tuple[np.ndarray, float, float]:
+    """Give each point its own cell of a grid, near its position on the map.
+
+    Return the centers of the cells, and the width and the height of a cell.
+
+    The map puts similar shows near each other, and in a dense group the points are on top of
+    each other. A poster for each point is then not possible. On the grid each show has its own
+    place, so the close view of the map can show all posters. The interface uses the map
+    positions for the far view and moves to the grid positions when the user zooms in.
+
+    `order` gives the points that select their cell first. A point that selects late in a dense
+    group gets a cell that is farther from its position.
+    """
+    P = np.asarray(P, dtype=np.float64)
+    n = len(P)
+    if n == 0:
+        return P.astype(np.float32), 1.0, CELL_ASPECT
+    dx = float(np.sqrt(GRID_FILL / (CELL_ASPECT * n)))
+    dy = dx * CELL_ASPECT
+    U = np.column_stack([P[:, 0] / dx, P[:, 1] / dy])  # the positions, in cells
+    taken: dict[tuple[int, int], int] = {}
+    where = np.zeros((n, 2), dtype=np.int64)
+    radius = 16
+    offsets = _cell_offsets(radius, dx, dy)
+    for i in (range(n) if order is None else order):
+        cx, cy = int(round(U[i, 0])), int(round(U[i, 1]))
+        while True:
+            key = next(((cx + ox, cy + oy) for ox, oy in offsets if (cx + ox, cy + oy) not in taken), None)
+            if key is not None:
+                break
+            # All cells in the search area are taken: search a larger area
+            radius *= 2
+            offsets = _cell_offsets(radius, dx, dy)
+        taken[key] = i
+        where[i] = key
+
+    def cost(i: int, c: tuple[int, int]) -> float:
+        return ((U[i, 0] - c[0]) * dx) ** 2 + ((U[i, 1] - c[1]) * dy) ** 2
+
+    # A point changes its cell with a point in an adjacent cell, or moves to an adjacent free
+    # cell, if that makes the sum of the movements smaller
+    adjacent = [(ox, oy) for ox in (-1, 0, 1) for oy in (-1, 0, 1) if (ox, oy) != (0, 0)]
+    for _ in range(passes):
+        changed = False
+        for i in range(n):
+            a = (int(where[i, 0]), int(where[i, 1]))
+            for ox, oy in adjacent:
+                b = (a[0] + ox, a[1] + oy)
+                j = taken.get(b)
+                if j is None:
+                    if cost(i, b) < cost(i, a) - 1e-12:
+                        del taken[a]
+                        taken[b] = i
+                        where[i] = b
+                        a = b
+                        changed = True
+                elif cost(i, b) + cost(j, a) < cost(i, a) + cost(j, b) - 1e-12:
+                    taken[a], taken[b] = j, i
+                    where[i] = b
+                    where[j] = a
+                    a = b
+                    changed = True
+        if not changed:
+            break
+    G = np.column_stack([where[:, 0] * dx, where[:, 1] * dy])
+    return G.astype(np.float32), dx, dy

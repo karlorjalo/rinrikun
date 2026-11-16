@@ -154,7 +154,7 @@ class Engine:
         self._build_links()
         self.entry_row = self._build_entry_rows()
 
-        self.coords_2d = self._build_layout(unique)
+        self.coords_2d, self.grid_2d, self.cell = self._build_layout(unique)
         self.regions = self._build_regions(unique)
 
     def _build_regions(self, unique: list[int]) -> list[dict]:
@@ -183,30 +183,53 @@ class Engine:
                             "label": " · ".join(self.tag_names[j] for j in top), "count": int(len(members))})
         return regions
 
-    def _build_layout(self, unique: list[int]) -> np.ndarray:
-        """Return the 2D map position of each row, in the square from 0 to 1."""
+    def _build_layout(self, unique: list[int]) -> tuple[np.ndarray, np.ndarray, tuple[float, float]]:
+        """Return the map position of each row, the grid cell of each row, and the size of a cell.
+
+        The positions are in the square from 0 to 1. The grid is for the close view of the map,
+        where each show has its own cell.
+        """
         coords = np.full((len(self.rows), 2), 0.5, dtype=np.float32)
+        grid = np.full((len(self.rows), 2), 0.5, dtype=np.float32)
+        cell = (1.0, layout.CELL_ASPECT)
         if len(unique) >= 2:
             X = self.eff_M[unique]
+            ids = [self.ids[i] for i in unique]
+            # The shows of the user select their cell first (by tier), then the catalog by score.
+            # Thus the shows that the user knows are nearest to their map position.
+            tier_rank = {"S": 0, "A": 1, "B": 2, "C": 3, "D": 4}
+            order = sorted(range(len(unique)), key=lambda k: (
+                0 if self.rows[unique[k]]["owned"] else 1,
+                tier_rank.get(self.rows[unique[k]].get("tier"), 5),
+                -(self._tag_source(unique[k]).get("score") or 0.0),
+                k,
+            ))
             if layout.can_use_tsne(len(unique)):
                 # t-SNE is slow, thus keep the result in the database until the embeddings change
-                ids = [self.ids[i] for i in unique]
                 signature = hashlib.sha1(
                     layout.VERSION.encode() + "\n".join(ids).encode() + np.ascontiguousarray(X).tobytes()
                 ).hexdigest()
                 cached = self.store.get_layout(signature)
-                if cached is not None and all(i in cached for i in ids):
-                    points = np.array([cached[i] for i in ids], dtype=np.float32)
+                if cached is not None and all(i in cached["coords"] and i in cached["grid"] for i in ids):
+                    points = np.array([cached["coords"][i] for i in ids], dtype=np.float32)
+                    cells = np.array([cached["grid"][i] for i in ids], dtype=np.float32)
+                    cell = cached["cell"]
                 else:
                     points = layout.fit_unit_square(layout.tsne_layout(X))
-                    self.store.save_layout(signature, dict(zip(ids, points.tolist())))
+                    cells, width, height = layout.grid_layout(points, order)
+                    cell = (width, height)
+                    self.store.save_layout(signature, dict(zip(ids, points.tolist())), dict(zip(ids, cells.tolist())), cell)
             else:
                 points = layout.fit_unit_square(layout.pca_layout(X))
+                cells, width, height = layout.grid_layout(points, order)
+                cell = (width, height)
             coords[unique] = points
+            grid[unique] = cells
         # A duplicate pool row is at the position of its library row
         for dup_id, lib_id in self.duplicate_of.items():
             coords[self.pos[dup_id]] = coords[self.pos[lib_id]]
-        return coords
+            grid[self.pos[dup_id]] = grid[self.pos[lib_id]]
+        return coords, grid, cell
 
     def taste_center(self) -> np.ndarray:
         if not self.owned_idx:
@@ -707,6 +730,9 @@ class Engine:
                 "id": r["id"],
                 "x": round(float(self.coords_2d[i, 0]), 4),
                 "y": round(float(self.coords_2d[i, 1]), 4),
+                # The cell of the show in the close view of the map
+                "gx": round(float(self.grid_2d[i, 0]), 5),
+                "gy": round(float(self.grid_2d[i, 1]), 5),
                 "title": r.get("title", ""),
                 "title_native": r.get("title_native", ""),
                 "year": r.get("year"),
@@ -721,4 +747,5 @@ class Engine:
             "center": {"x": round(c_proj[0], 4), "y": round(c_proj[1], 4)} if c_proj else None,
             "points": points,
             "regions": self.regions,
+            "cell": {"w": float(self.cell[0]), "h": float(self.cell[1])},
         }

@@ -28,6 +28,11 @@ CREATE TABLE IF NOT EXISTS layout (
   x REAL NOT NULL,
   y REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS layout_grid (
+  id TEXT PRIMARY KEY,
+  x REAL NOT NULL,
+  y REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT
@@ -138,20 +143,36 @@ class Store:
         self.con.commit()
         return len(gone)
 
-    def get_layout(self, signature: str) -> dict[str, tuple[float, float]] | None:
-        """Return the cached map layout, or None if the cache is for other embeddings."""
-        t = self.con.execute("SELECT value FROM meta WHERE key='layout_signature'").fetchone()
-        if not t or t[0] != signature:
-            return None
-        return {r[0]: (r[1], r[2]) for r in self.con.execute("SELECT id, x, y FROM layout")}
+    def get_layout(self, signature: str) -> dict | None:
+        """Return the cached map layout, or None if the cache is for other embeddings.
 
-    def save_layout(self, signature: str, coords: dict[str, tuple[float, float]]):
+        The result has "coords" (the map position of each show), "grid" (the cell of each show in
+        the close view) and "cell" (the width and the height of a cell).
+        """
+        try:
+            meta = dict(self.con.execute("SELECT key, value FROM meta WHERE key IN ('layout_signature', 'layout_cell')"))
+            if meta.get("layout_signature") != signature or not meta.get("layout_cell"):
+                return None
+            coords = {r[0]: (r[1], r[2]) for r in self.con.execute("SELECT id, x, y FROM layout")}
+            grid = {r[0]: (r[1], r[2]) for r in self.con.execute("SELECT id, x, y FROM layout_grid")}
+        except sqlite3.OperationalError:
+            # A read-only database from an older version does not have the grid table
+            return None
+        width, height = (float(v) for v in meta["layout_cell"].split(","))
+        return {"coords": coords, "grid": grid, "cell": (width, height)}
+
+    def save_layout(self, signature: str, coords: dict, grid: dict, cell: tuple[float, float]):
         if self.read_only:
             return
         self.con.execute("DELETE FROM layout")
+        self.con.execute("DELETE FROM layout_grid")
         self.con.executemany("INSERT INTO layout (id, x, y) VALUES (?, ?, ?)",
                              [(k, float(v[0]), float(v[1])) for k, v in coords.items()])
+        self.con.executemany("INSERT INTO layout_grid (id, x, y) VALUES (?, ?, ?)",
+                             [(k, float(v[0]), float(v[1])) for k, v in grid.items()])
         self.con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('layout_signature', ?)", (signature,))
+        self.con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('layout_cell', ?)",
+                         (f"{float(cell[0])!r},{float(cell[1])!r}",))
         self.con.commit()
 
     def upsert_rows(self, rows: list[dict]):

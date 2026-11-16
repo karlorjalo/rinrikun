@@ -191,3 +191,18 @@ def test_read_only_store_without_the_dismissed_table(tmp_path):
     con.commit()
     con.close()
     assert Store(path, read_only=True).get_dismissed_ids() == set()
+
+
+def test_layout_cache_keeps_the_map_and_the_grid(tmp_path):
+    s = Store(tmp_path / "layout.db")
+    assert s.get_layout("sig") is None
+    s.save_layout("sig", {"al:1": (0.1, 0.2)}, {"al:1": (0.11, 0.21)}, (0.01, 0.014))
+    cached = s.get_layout("sig")
+    assert cached["coords"] == {"al:1": (0.1, 0.2)} and cached["grid"] == {"al:1": (0.11, 0.21)}
+    assert cached["cell"] == (0.01, 0.014)
+    # A different signature is a different set of embeddings
+    assert s.get_layout("other") is None
+    # A read-only store does not write
+    ro = Store(tmp_path / "layout.db", read_only=True)
+    ro.save_layout("other", {}, {}, (1.0, 1.4))
+    assert s.get_layout("sig") is not None
