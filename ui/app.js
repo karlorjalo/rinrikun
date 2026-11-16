@@ -380,7 +380,13 @@ function renderProfile() {
   if (!$("#profile-vector-canvas")) buildProfile(el);
 
   const tiers = p.tier_summary || {};
-  $("#profile-counts").textContent = `${p.owned_count} watched · ${p.total_count.toLocaleString()} in the catalog`;
+  // A show in the library is not always a show that the user watched. Thus the text does not say "watched" for it.
+  const inLibrary = p.library_count ?? p.owned_count;
+  const marked = p.owned_count - inLibrary;
+  const counts = [`${inLibrary} in your library`];
+  if (marked > 0) counts.push(`${marked} marked as watched`);
+  counts.push(`${p.total_count.toLocaleString()} in the catalog`);
+  $("#profile-counts").textContent = counts.join(" · ");
   el.querySelectorAll("[data-tier-count]").forEach((node) => {
     node.textContent = tiers[node.dataset.tierCount] || 0;
   });
@@ -418,8 +424,8 @@ function buildProfile(el) {
             <button class="pill" data-view="dots">Dots</button>
           </div>
           <span class="legend-item"><i class="legend-dot dot-catalog"></i> Catalog</span>
-          <span class="legend-item"><i class="legend-dot dot-library"></i> Watched</span>
-          <span class="legend-item legend-tiers" title="A watched show has the color of its tier"><i class="legend-dot dot-tier-s"></i>S <i class="legend-dot dot-tier-a"></i>A <i class="legend-dot dot-tier-b"></i>B <i class="legend-dot dot-tier-c"></i>C <i class="legend-dot dot-tier-d"></i>D</span>
+          <span class="legend-item"><i class="legend-dot dot-library"></i> Your shows</span>
+          <span class="legend-item legend-tiers" title="A show of yours with a tier has the color of its tier"><i class="legend-dot dot-tier-s"></i>S <i class="legend-dot dot-tier-a"></i>A <i class="legend-dot dot-tier-b"></i>B <i class="legend-dot dot-tier-c"></i>C <i class="legend-dot dot-tier-d"></i>D</span>
         </div>
       </div>
       <div class="vector-canvas-box">
@@ -813,7 +819,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   }
 
   // The frame and the badge of a poster tell what the show is for the user:
-  // a recommendation, a show with a tier, a watched show without a tier, or a show of the catalog.
+  // a recommendation, a show with a tier, a show of the user without a tier, or a show of the catalog.
   function pointLook(pt, colors) {
     if (highlightSet.has(pt.id) && highlightKind === "recommended") {
       return { stroke: colors.accent, strong: true, glow: true, badge: "✦", badgeColor: colors.accent };
@@ -1272,7 +1278,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       } else if (pt.tier) {
         badgeHtml = `<span class="tt-badge tt-badge-highlight" style="color:var(--tier-${pt.tier.toLowerCase()});border-color:currentColor;">Tier ${pt.tier}</span>`;
       } else if (pt.owned) {
-        badgeHtml = `<span class="tt-badge tt-badge-library">Watched</span>`;
+        badgeHtml = `<span class="tt-badge tt-badge-library">Yours</span>`;
       } else {
         badgeHtml = `<span class="tt-badge tt-badge-catalog">Catalog</span>`;
       }
@@ -1996,10 +2002,10 @@ function renderDeckCard() {
           <div style="font-size:36px;margin-bottom:12px;">🎉</div>
           <h3 style="font-family:var(--serif);font-size:20px;margin:0 0 8px;">All caught up</h3>
           <p style="color:var(--muted);font-size:14px;margin:0 0 20px;">
-            ${reviewFilter === "unrated" ? "You have reviewed all unrated watched shows." : "You have reached the end of the review queue."}
+            ${reviewFilter === "unrated" ? "All your shows have a tier." : "You have reached the end of the review queue."}
           </p>
           <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
-            ${reviewFilter === "unrated" ? '<button class="btn-action" id="deck-review-all-btn">Review all watched</button>' : ''}
+            ${reviewFilter === "unrated" ? '<button class="btn-action" id="deck-review-all-btn">Review all your shows</button>' : ''}
             <button class="btn-action primary" id="deck-view-profile-btn">View taste profile</button>
           </div>
         </div>

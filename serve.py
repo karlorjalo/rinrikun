@@ -27,6 +27,9 @@ def profile():
     return {
         "tier_summary": engine.tier_summary(),
         "owned_count": len(engine.owned_idx),
+        # The shows of the user that are in the Jellyfin library. The other shows of the user are
+        # the shows that the user marked as watched by hand.
+        "library_count": sum(1 for i in engine.owned_idx if engine.rows[i]["source"] == "library"),
         "manual_count": len(store.get_manual_watched_ids()),
         "total_count": len(engine.rows),
     }

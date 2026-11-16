@@ -57,7 +57,9 @@ def test_api_weights_endpoints(tmp_path):
         # 4. Check profile tier summary
         prof_res = client.get("/api/profile")
         assert prof_res.status_code == 200
-        assert set(prof_res.json()) == {"tier_summary", "owned_count", "manual_count", "total_count"}
+        assert set(prof_res.json()) == {"tier_summary", "owned_count", "library_count", "manual_count", "total_count"}
+        # The two owned shows are AniList rows: the user marked them by hand
+        assert prof_res.json()["owned_count"] == 2 and prof_res.json()["library_count"] == 0
         summary = prof_res.json()["tier_summary"]
         assert summary["S"] == 1
         assert summary["unrated"] == 1
