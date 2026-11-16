@@ -409,7 +409,6 @@ function renderProfile() {
           <span class="legend-item"><i class="legend-dot dot-catalog"></i> Catalog</span>
           <span class="legend-item"><i class="legend-dot dot-library"></i> Watched</span>
           <span class="legend-item legend-tiers" title="A watched show has the color of its tier"><i class="legend-dot dot-tier-s"></i>S <i class="legend-dot dot-tier-a"></i>A <i class="legend-dot dot-tier-b"></i>B <i class="legend-dot dot-tier-c"></i>C <i class="legend-dot dot-tier-d"></i>D</span>
-          <span class="legend-item"><i class="legend-dot dot-highlight"></i> S-tier shows</span>
         </div>
       </div>
       <div class="vector-canvas-box">
@@ -429,7 +428,7 @@ function renderProfile() {
   // The map shows the S-tier shows as posters
   getVectorMap().then((data) => {
     const sTier = ((data && data.points) || []).filter((pt) => pt.owned && pt.tier === "S").map((pt) => pt.id);
-    initVectorMap("profile-vector-canvas", "profile-vector-tooltip", sTier, "S tier");
+    initVectorMap("profile-vector-canvas", "profile-vector-tooltip", sTier, "S tier", "tier");
   });
 }
 
@@ -453,9 +452,9 @@ async function getVectorMap() {
 
 const posterImgCache = new Map();
 const posterListeners = new Map();
-// The cache keeps this number of posters. A zoomed map asks for the posters of all shows in view,
-// and the catalog has thousands of shows.
-const POSTER_CACHE_MAX = 700;
+// The cache keeps this number of posters. The close view of the map asks for the posters of all
+// shows in view (about 700 when the posters appear), and the catalog has thousands of shows.
+const POSTER_CACHE_MAX = 1600;
 
 function getPosterImage(url, onLoaded) {
   if (!url) return null;
@@ -507,7 +506,7 @@ function getPosterImage(url, onLoaded) {
 
 const activeVectorMaps = new Map();
 
-async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLabel = "Highlighted") {
+async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLabel = "Highlighted", highlightKind = "recommended") {
   const canvas = document.getElementById(canvasId);
   const tooltip = document.getElementById(tooltipId);
   if (!canvas || !tooltip) return;
@@ -515,14 +514,19 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   const data = await getVectorMap();
   if (!data || !data.points) return;
 
+  // The highlighted shows are posters also in the far view. On the Recommendations map they are
+  // the recommendations (kind "recommended"). On the Profile map they are the S-tier shows
+  // (kind "tier"), and they have the look of their tier.
   const highlightSet = new Set(highlightIds);
   const points = data.points;
-  const center = data.center;
   const regions = data.regions || [];
+  const n = points.length;
+  // In the close view each show has its own cell of a grid, so that no poster covers another
+  // poster. `cell` is the size of one cell in map units.
+  const cell = data.cell && data.cell.w > 0 ? data.cell : null;
 
   if (activeVectorMaps.has(canvasId)) {
-    const prev = activeVectorMaps.get(canvasId);
-    prev.destroy();
+    activeVectorMaps.get(canvasId).destroy();
   }
 
   const box = canvas.parentElement;
@@ -541,8 +545,95 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   let animFrame = null;
   let destroyed = false;
 
-  // The largest zoom. At this zoom the shows of a dense group are separate.
-  const MAX_SCALE = 80.0;
+  const PAD = 24;
+  // The width of a cell in pixels at the largest zoom. The zoom stops there: each show in view
+  // has a large poster with its title, and a larger zoom shows nothing more.
+  const CELL_MAX = 112;
+  // The posters appear when their width is CARD_MIN pixels
+  const CARD_MIN = 18;
+  // The width of a poster as a part of the width of its cell
+  const CARD_FILL = 0.9;
+  const POSTER_ASPECT = 1.45;
+  // A poster shows its title from this width
+  const TITLE_MIN = 72;
+
+  // The map positions and the grid positions of the shows, and their screen positions in the last draw
+  const mapX = new Float32Array(n);
+  const mapY = new Float32Array(n);
+  const gridX = new Float32Array(n);
+  const gridY = new Float32Array(n);
+  const sx = new Float32Array(n);
+  const sy = new Float32Array(n);
+  const indexOf = new Map();
+  for (let i = 0; i < n; i++) {
+    const pt = points[i];
+    mapX[i] = pt.x;
+    mapY[i] = pt.y;
+    gridX[i] = pt.gx ?? pt.x;
+    gridY[i] = pt.gy ?? pt.y;
+    indexOf.set(pt.id, i);
+  }
+  const fontFamily = getComputedStyle(document.body).fontFamily;
+
+  function viewMode() {
+    return canvas.dataset.view || "posters";
+  }
+
+  function viewSize() {
+    const rect = box.getBoundingClientRect();
+    return { w: rect.width, h: rect.height, side: Math.max(1, Math.min(rect.width, rect.height) - 2 * PAD) };
+  }
+
+  // The width of one cell in pixels at a zoom of 1
+  function cellBase(side) {
+    return cell ? cell.w * side : 0;
+  }
+
+  // The zoom at which the posters appear
+  function cardScale(side) {
+    return cell ? CARD_MIN / CARD_FILL / cellBase(side) : Infinity;
+  }
+
+  function maxScale(side) {
+    return cell ? Math.max(4, CELL_MAX / cellBase(side)) : 12;
+  }
+
+  // The close view: each show in view is a poster in its cell
+  function cardsOn(side) {
+    return viewMode() === "posters" && scale >= cardScale(side);
+  }
+
+  // 0 = the map positions, 1 = the grid positions. In the last part of the zoom before the
+  // posters appear, the shows move from their map positions to their cells.
+  function gridBlend(side) {
+    if (!cell || viewMode() !== "posters") return 0;
+    const end = cardScale(side);
+    const start = end * 0.55;
+    const t = Math.max(0, Math.min(1, (scale - start) / (end - start)));
+    return t * t * (3 - 2 * t);
+  }
+
+  // Compute the screen position of each show. One scale is used for the two axes: a stretched
+  // map gives false distances.
+  function project(w, h, side) {
+    const t = gridBlend(side);
+    const k = side * scale;
+    const bx = ((w - side) / 2 - w / 2) * scale + w / 2 + panX;
+    const by = ((h - side) / 2 - h / 2) * scale + h / 2 + panY;
+    for (let i = 0; i < n; i++) {
+      const x = mapX[i] + (gridX[i] - mapX[i]) * t;
+      const y = mapY[i] + (gridY[i] - mapY[i]) * t;
+      sx[i] = x * k + bx;
+      sy[i] = (1 - y) * k + by;
+    }
+  }
+
+  function toScreen(x, y, w, h, side) {
+    return {
+      x: ((w - side) / 2 + x * side - w / 2) * scale + w / 2 + panX,
+      y: ((h - side) / 2 + (1 - y) * side - h / 2) * scale + h / 2 + panY,
+    };
+  }
 
   // A dot grows with the zoom, so that it stays a target for the pointer
   function dotRadius(owned) {
@@ -551,82 +642,19 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       : Math.max(1.3, Math.min(7, 1.5 * Math.pow(scale, 0.6)));
   }
 
-  // A poster is an object on the map: its width is POSTER_PER_ZOOM pixels for each unit of zoom.
-  // Thus a poster grows and moves away from its neighbors when the user zooms in, as a dot does.
-  // The posters appear when their width is POSTER_MIN. At the width POSTER_MAX they stop growing,
-  // and a larger zoom only moves them apart, which makes room for the posters of a dense group.
-  const POSTER_PER_ZOOM = 2.4;
-  const POSTER_MIN = 18;
-  const POSTER_MAX = 76;
-  const LOD_SCALE = POSTER_MIN / POSTER_PER_ZOOM;
-  const LOD_MAX_POSTERS = 300;
-  // The order in which the shows get a poster when the posters cannot all fit: the shows of the
-  // user first (by tier), then the catalog by score. The order does not change with the view,
-  // so a poster does not come and go while the user moves the map.
-  const tierRank = { S: 0, A: 1, B: 2, C: 3, D: 4 };
-  const lodOrder = points.map((_, i) => i).sort((a, b) => {
-    const pa = points[a];
-    const pb = points[b];
-    const oa = pa.owned ? 1 : 0;
-    const ob = pb.owned ? 1 : 0;
-    if (oa !== ob) return ob - oa;
-    if (oa) return ((tierRank[pa.tier] ?? 5) - (tierRank[pb.tier] ?? 5)) || (a - b);
-    return ((pb.score ?? 0) - (pa.score ?? 0)) || (a - b);
-  });
-  // The posters of the last draw, for the pointer: { pt, x0, y0, pw, ph }
-  let lodPosters = [];
-
-  function lodPosterSize() {
-    const pw = Math.round(Math.min(POSTER_MAX, POSTER_PER_ZOOM * scale));
-    return { pw, ph: Math.round(pw * 1.45) };
-  }
-
-  // The size of the poster of a highlighted show. It is never smaller than the other posters.
-  function highlightPosterSize(isHovered) {
-    const boost = Math.max(1.0, Math.min(1.8, Math.sqrt(scale)));
-    let pw = isHovered ? 40 * Math.min(1.3, boost) : 24 * boost;
-    if (scale >= LOD_SCALE) pw = Math.max(pw, lodPosterSize().pw + (isHovered ? 10 : 4));
-    return { pw: Math.round(pw), ph: Math.round(pw * 1.45) };
-  }
-
-  function drawPoster(ctx, pt, x0, y0, pw, ph, look) {
-    ctx.save();
-    if (look.glow) {
-      ctx.shadowColor = look.stroke;
-      ctx.shadowBlur = look.glow;
-    }
-    ctx.strokeStyle = look.stroke;
-    ctx.lineWidth = look.lineWidth;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(x0, y0, pw, ph, 4);
-    else ctx.rect(x0, y0, pw, ph);
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.save();
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(x0, y0, pw, ph, 4);
-    else ctx.rect(x0, y0, pw, ph);
-    ctx.clip();
-    const img = pt.poster ? getPosterImage(pt.poster, scheduleDraw) : null;
-    if (img) {
-      ctx.drawImage(img, x0, y0, pw, ph);
-    } else {
-      // The poster is not loaded: show the first character of the title
-      ctx.fillStyle = look.isDark ? "#3a3833" : "#f1efe8";
-      ctx.fillRect(x0, y0, pw, ph);
-      ctx.fillStyle = look.textColor;
-      ctx.font = `bold ${Math.max(10, Math.round(pw * 0.42))}px sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText((pt.title_native || pt.title || "?").trim()[0], x0 + pw / 2, y0 + ph / 2);
-    }
-    ctx.restore();
-  }
-
   // The radius of a highlighted show in the Dots view
   function highlightDotRadius() {
     return Math.max(4.2, dotRadius(true) + 1);
+  }
+
+  // The width of the poster of a highlighted show in the far view. It gets the size of the other
+  // posters at the zoom where these appear, so that it does not change its size suddenly.
+  function markerWidth(side) {
+    const base = 24 * Math.max(1.0, Math.min(1.8, Math.sqrt(scale)));
+    const end = cardScale(side);
+    if (!isFinite(end) || end <= 3.24 || scale <= 3.24) return base;
+    const t = Math.min(1, (scale - 3.24) / (end - 3.24));
+    return base + (CARD_MIN - base) * t;
   }
 
   function scheduleDraw() {
@@ -672,11 +700,9 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   setTimeout(dismissHint, 3500);
 
   function applyZoom(factor, mx, my) {
-    const rect = box.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
+    const { w, h, side } = viewSize();
     if (w === 0 || h === 0) return;
-    const newScale = Math.max(0.65, Math.min(MAX_SCALE, scale * factor));
+    const newScale = Math.max(0.65, Math.min(maxScale(side), scale * factor));
     if (Math.abs(newScale - scale) < 0.001) return;
     panX = mx - w / 2 - ((mx - panX - w / 2) / scale) * newScale;
     panY = my - h / 2 - ((my - panY - h / 2) / scale) * newScale;
@@ -688,12 +714,12 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   btnZoomIn.onclick = (e) => {
     e.stopPropagation();
     const rect = box.getBoundingClientRect();
-    applyZoom(1.35, rect.width / 2, rect.height / 2);
+    applyZoom(1.5, rect.width / 2, rect.height / 2);
   };
   btnZoomOut.onclick = (e) => {
     e.stopPropagation();
     const rect = box.getBoundingClientRect();
-    applyZoom(1 / 1.35, rect.width / 2, rect.height / 2);
+    applyZoom(1 / 1.5, rect.width / 2, rect.height / 2);
   };
   btnZoomReset.onclick = (e) => {
     e.stopPropagation();
@@ -720,22 +746,178 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     return raw || "#b35c72";
   }
 
-  function toScreen(x, y, w, h, pad, plotW, plotH) {
-    // One scale for the two axes: a stretched map gives false distances
-    const side = Math.min(plotW, plotH);
-    const baseX = (w - side) / 2 + x * side;
-    const baseY = (h - side) / 2 + (1.0 - y) * side;
-    return {
-      x: (baseX - w / 2) * scale + w / 2 + panX,
-      y: (baseY - h / 2) * scale + h / 2 + panY,
-    };
+  function roundedRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
+    else ctx.rect(x, y, w, h);
+  }
+
+  // The frame and the badge of a poster tell what the show is for the user:
+  // a recommendation, a show with a tier, a watched show without a tier, or a show of the catalog.
+  function pointLook(pt, colors) {
+    if (highlightSet.has(pt.id) && highlightKind === "recommended") {
+      return { stroke: colors.accent, strong: true, glow: true, badge: "✦", badgeColor: colors.accent };
+    }
+    if (pt.owned && pt.tier) {
+      const color = colors.tier[pt.tier] || colors.library;
+      return { stroke: color, strong: true, glow: false, badge: pt.tier, badgeColor: color };
+    }
+    if (pt.owned) {
+      return { stroke: colors.library, strong: true, glow: false, badge: null };
+    }
+    return { stroke: colors.neutral, strong: false, glow: false, badge: null };
+  }
+
+  // A large poster uses the larger image file. The small file is 100 pixels wide.
+  function posterImage(pt, pw) {
+    if (!pt.poster) return null;
+    const dpr = window.devicePixelRatio || 1;
+    if (pw * dpr > 110 && pt.poster.includes("/cover/small/")) {
+      const large = getPosterImage(pt.poster.replace("/cover/small/", "/cover/medium/"), scheduleDraw);
+      if (large) return large;
+    }
+    return getPosterImage(pt.poster, scheduleDraw);
+  }
+
+  // Divide a title into lines of the given width. A title that is too long ends with "…".
+  function wrapTitle(ctx, text, maxWidth, maxLines) {
+    const chars = Array.from(text || "");
+    const lines = [];
+    let line = "";
+    let i = 0;
+    for (; i < chars.length; i++) {
+      const next = line + chars[i];
+      if (line && ctx.measureText(next).width > maxWidth) {
+        if (lines.length === maxLines - 1) break;
+        lines.push(line);
+        line = chars[i] === " " ? "" : chars[i];
+      } else {
+        line = next;
+      }
+    }
+    if (i < chars.length) {
+      const cut = Array.from(line);
+      while (cut.length && ctx.measureText(cut.join("") + "…").width > maxWidth) cut.pop();
+      line = cut.join("") + "…";
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  const titleLines = new Map();
+
+  function drawTitle(ctx, pt, x, y, pw, ph) {
+    const fontSize = Math.max(10, Math.min(13, pw * 0.118));
+    ctx.font = `600 ${fontSize}px ${fontFamily}`;
+    const key = `${pt.id}|${Math.round(pw)}`;
+    let lines = titleLines.get(key);
+    if (!lines) {
+      lines = wrapTitle(ctx, displayTitles(pt).main, pw - 8, 2);
+      if (titleLines.size > 4000) titleLines.clear();
+      titleLines.set(key, lines);
+    }
+    if (!lines.length) return;
+    const lineHeight = fontSize * 1.25;
+    const band = lines.length * lineHeight + 22;
+    // A dark band behind the title, so that the text is readable on each poster
+    const shade = ctx.createLinearGradient(0, y + ph - band, 0, y + ph);
+    shade.addColorStop(0, "rgba(0, 0, 0, 0)");
+    shade.addColorStop(0.5, "rgba(0, 0, 0, 0.66)");
+    shade.addColorStop(1, "rgba(0, 0, 0, 0.88)");
+    ctx.fillStyle = shade;
+    ctx.fillRect(x, y + ph - band, pw, band);
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    for (let k = 0; k < lines.length; k++) {
+      ctx.fillText(lines[k], x + 4, y + ph - 6 - (lines.length - 1 - k) * lineHeight);
+    }
+  }
+
+  function drawBadge(ctx, look, x, y, pw, colors) {
+    const size = Math.max(8, Math.min(30, pw * 0.3));
+    if (pw < 30) {
+      // A small poster has a dot in the color of the badge
+      ctx.beginPath();
+      ctx.arc(x + size * 0.2, y + size * 0.2, size * 0.5, 0, Math.PI * 2);
+      ctx.fillStyle = look.badgeColor;
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = colors.paper;
+      ctx.stroke();
+      return;
+    }
+    const bx = x - size * 0.2;
+    const by = y - size * 0.2;
+    roundedRect(ctx, bx, by, size, size, size * 0.25);
+    ctx.fillStyle = look.badgeColor;
+    ctx.fill();
+    ctx.lineWidth = Math.max(1, size * 0.08);
+    ctx.strokeStyle = colors.paper;
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `700 ${Math.round(size * 0.62)}px ${fontFamily}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(look.badge, bx + size / 2, by + size / 2 + size * 0.04);
+  }
+
+  // Draw the poster of a show with its center at (cx, cy)
+  function drawCard(ctx, pt, cx, cy, pw, colors, isHovered) {
+    const ph = pw * POSTER_ASPECT;
+    const x = cx - pw / 2;
+    const y = cy - ph / 2;
+    const radius = Math.max(2, pw * 0.06);
+    const look = pointLook(pt, colors);
+    // The frame grows with the poster, so that the color of the tier stays visible
+    const frame = look.strong ? Math.max(1.5, pw * 0.05) : 1;
+
+    if (look.glow || isHovered) {
+      ctx.save();
+      ctx.shadowColor = isHovered ? colors.shadow : look.stroke;
+      ctx.shadowBlur = isHovered ? Math.max(12, pw * 0.22) : Math.max(6, pw * 0.14);
+      ctx.fillStyle = colors.paper;
+      roundedRect(ctx, x, y, pw, ph, radius);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.save();
+    roundedRect(ctx, x, y, pw, ph, radius);
+    ctx.clip();
+    const img = posterImage(pt, pw);
+    if (img) {
+      // Fill the poster area, and cut the part of the image that does not fit
+      const k = Math.max(pw / img.naturalWidth, ph / img.naturalHeight);
+      const sw = pw / k;
+      const sh = ph / k;
+      ctx.drawImage(img, (img.naturalWidth - sw) / 2, (img.naturalHeight - sh) / 2, sw, sh, x, y, pw, ph);
+    } else {
+      // The image is not loaded: show the first character of the title
+      ctx.fillStyle = colors.empty;
+      ctx.fillRect(x, y, pw, ph);
+      if (pw >= 28) {
+        ctx.fillStyle = look.strong ? look.stroke : colors.muted;
+        ctx.font = `700 ${Math.round(pw * 0.42)}px ${fontFamily}`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText((pt.title_native || pt.title || "?").trim()[0] || "?", cx, cy);
+      }
+    }
+    if (pw >= TITLE_MIN) drawTitle(ctx, pt, x, y, pw, ph);
+    ctx.restore();
+
+    ctx.strokeStyle = isHovered ? colors.ink : look.stroke;
+    ctx.lineWidth = isHovered ? Math.max(2.5, frame) : frame;
+    roundedRect(ctx, x, y, pw, ph, radius);
+    ctx.stroke();
+
+    if (look.badge) drawBadge(ctx, look, x, y, pw, colors);
   }
 
   function draw() {
     if (!canvas.isConnected) return;
-    const rect = box.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
+    const { w, h, side } = viewSize();
     if (w === 0 || h === 0) return;
 
     if (zoomLevelEl) {
@@ -753,127 +935,144 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, w, h);
 
-    const pad = 24;
-    const plotW = w - 2 * pad;
-    const plotH = h - 2 * pad;
+    project(w, h, side);
 
     const isDark = document.documentElement.dataset.theme === "dark" ||
       (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
-
-    const catalogColor = isDark ? "rgba(168, 162, 158, 0.28)" : "rgba(120, 113, 108, 0.24)";
-    const libraryColor = isDark ? "rgba(235, 230, 220, 0.65)" : "rgba(40, 36, 33, 0.55)";
-    const accentColor = getThemeAccent();
-    const viewMode = canvas.dataset.view || "posters";
-
-    // 1. Draw Catalog points
-    ctx.fillStyle = catalogColor;
-    ctx.beginPath();
-    const catR = dotRadius(false);
-    for (let i = 0; i < points.length; i++) {
-      const pt = points[i];
-      if (pt.owned || highlightSet.has(pt.id)) continue;
-      const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
-      if (px < -20 || px > w + 20 || py < -20 || py > h + 20) continue;
-      ctx.moveTo(px + catR, py);
-      ctx.arc(px, py, catR, 0, Math.PI * 2);
-    }
-    ctx.fill();
-
-    // 2. Draw Library points. A rated show has the color of its tier. The S tier is drawn last, on top.
-    const libR = dotRadius(true);
     const rootStyle = getComputedStyle(document.documentElement);
-    for (const tier of [null, "D", "C", "B", "A", "S"]) {
-      const tierColor = tier ? rootStyle.getPropertyValue(`--tier-${tier.toLowerCase()}`).trim() : "";
-      ctx.fillStyle = tierColor || libraryColor;
-      ctx.beginPath();
-      for (let i = 0; i < points.length; i++) {
+    const colors = {
+      accent: getThemeAccent(),
+      catalog: isDark ? "rgba(168, 162, 158, 0.28)" : "rgba(120, 113, 108, 0.24)",
+      library: isDark ? "rgba(235, 230, 220, 0.75)" : "rgba(40, 36, 33, 0.62)",
+      neutral: isDark ? "rgba(168, 162, 158, 0.55)" : "rgba(120, 113, 108, 0.5)",
+      muted: isDark ? "#a8a29e" : "#78716c",
+      empty: isDark ? "#3a3833" : "#efede6",
+      paper: isDark ? "#262624" : "#ffffff",
+      ink: isDark ? "#f5f2ea" : "#1c1917",
+      shadow: isDark ? "rgba(0, 0, 0, 0.7)" : "rgba(28, 25, 23, 0.45)",
+      tier: {},
+    };
+    for (const t of ["S", "A", "B", "C", "D"]) {
+      colors.tier[t] = rootStyle.getPropertyValue(`--tier-${t.toLowerCase()}`).trim();
+    }
+    const view = viewMode();
+    const cards = cardsOn(side);
+    let shown = 0;
+    let cardWidth = 0;
+
+    if (cards) {
+      // The close view. Each show in view is a poster in its cell: catalog first, then the shows
+      // of the user, then the highlighted shows, and the show under the pointer last.
+      cardWidth = Math.min(CELL_MAX, cellBase(side) * scale) * CARD_FILL;
+      const cardHeight = cardWidth * POSTER_ASPECT;
+      const layers = [[], [], []];
+      for (let i = 0; i < n; i++) {
+        if (sx[i] < -cardWidth || sx[i] > w + cardWidth || sy[i] < -cardHeight || sy[i] > h + cardHeight) continue;
         const pt = points[i];
-        if (!pt.owned || highlightSet.has(pt.id) || (pt.tier || null) !== tier) continue;
-        const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
-        if (px < -20 || px > w + 20 || py < -20 || py > h + 20) continue;
-        ctx.moveTo(px + libR, py);
-        ctx.arc(px, py, libR, 0, Math.PI * 2);
+        if (hoveredPoint && pt.id === hoveredPoint.id) continue;
+        layers[highlightSet.has(pt.id) ? 2 : pt.owned ? 1 : 0].push(i);
+      }
+      for (const layer of layers) {
+        for (const i of layer) {
+          drawCard(ctx, points[i], sx[i], sy[i], cardWidth, colors, false);
+          shown++;
+        }
+      }
+      const hi = hoveredPoint ? indexOf.get(hoveredPoint.id) : undefined;
+      if (hi !== undefined) {
+        drawCard(ctx, hoveredPoint, sx[hi], sy[hi], cardWidth * 1.12, colors, true);
+        shown++;
+      }
+    } else {
+      // The far view. A highlighted show is a poster (Posters view) or a larger dot (Dots view).
+      const markers = view === "posters";
+      const special = (pt) => highlightSet.has(pt.id) && (markers || highlightKind === "recommended");
+
+      // 1. The dots of the catalog
+      ctx.fillStyle = colors.catalog;
+      ctx.beginPath();
+      const catR = dotRadius(false);
+      for (let i = 0; i < n; i++) {
+        const pt = points[i];
+        if (pt.owned || special(pt)) continue;
+        if (sx[i] < -20 || sx[i] > w + 20 || sy[i] < -20 || sy[i] > h + 20) continue;
+        ctx.moveTo(sx[i] + catR, sy[i]);
+        ctx.arc(sx[i], sy[i], catR, 0, Math.PI * 2);
       }
       ctx.fill();
-    }
 
-    // 3. Draw Taste Center marker
-    if (center) {
-      const { x: cx, y: cy } = toScreen(center.x, center.y, w, h, pad, plotW, plotH);
-      if (cx >= -20 && cx <= w + 20 && cy >= -20 && cy <= h + 20) {
-        ctx.fillStyle = isDark ? "#ffffff" : "#1c1917";
+      // 2. The dots of the shows of the user. A rated show has the color of its tier. S is last, on top.
+      const libR = dotRadius(true);
+      for (const tier of [null, "D", "C", "B", "A", "S"]) {
+        ctx.fillStyle = (tier && colors.tier[tier]) || colors.library;
         ctx.beginPath();
-        ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+        for (let i = 0; i < n; i++) {
+          const pt = points[i];
+          if (!pt.owned || special(pt) || (pt.tier || null) !== tier) continue;
+          if (sx[i] < -20 || sx[i] > w + 20 || sy[i] < -20 || sy[i] > h + 20) continue;
+          ctx.moveTo(sx[i] + libR, sy[i]);
+          ctx.arc(sx[i], sy[i], libR, 0, Math.PI * 2);
+        }
         ctx.fill();
-        ctx.strokeStyle = isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.3)";
-        ctx.lineWidth = 1;
+      }
+
+      // 3. The highlighted shows
+      if (markers) {
+        const width = markerWidth(side);
+        let hovered = -1;
+        for (let i = 0; i < n; i++) {
+          const pt = points[i];
+          if (!highlightSet.has(pt.id)) continue;
+          if (sx[i] < -60 || sx[i] > w + 60 || sy[i] < -90 || sy[i] > h + 90) continue;
+          if (hoveredPoint && hoveredPoint.id === pt.id) {
+            hovered = i;
+            continue;
+          }
+          drawCard(ctx, pt, sx[i], sy[i], width, colors, false);
+          shown++;
+        }
+        if (hovered >= 0) {
+          drawCard(ctx, points[hovered], sx[hovered], sy[hovered], width * 1.3, colors, true);
+          shown++;
+        }
+      } else if (highlightKind === "recommended") {
+        const hiR = highlightDotRadius();
+        for (let i = 0; i < n; i++) {
+          if (!highlightSet.has(points[i].id)) continue;
+          if (sx[i] < -20 || sx[i] > w + 20 || sy[i] < -20 || sy[i] > h + 20) continue;
+          ctx.fillStyle = colors.accent;
+          ctx.globalAlpha = 0.25;
+          ctx.beginPath();
+          ctx.arc(sx[i], sy[i], hiR * 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1.0;
+          ctx.beginPath();
+          ctx.arc(sx[i], sy[i], hiR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = colors.paper;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+      }
+
+      // 4. A ring around the dot under the pointer
+      const hi = hoveredPoint ? indexOf.get(hoveredPoint.id) : undefined;
+      if (hi !== undefined && !(markers && highlightSet.has(hoveredPoint.id))) {
+        const ringR = special(hoveredPoint) ? highlightDotRadius() * 2 + 2 : dotRadius(hoveredPoint.owned) + 6;
+        ctx.strokeStyle = colors.ink;
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+        ctx.arc(sx[hi], sy[hi], Math.max(9, ringR), 0, Math.PI * 2);
         ctx.stroke();
       }
     }
 
-    // 3b. From a zoom of LOD_SCALE, the shows in view get their posters. A poster that would cover
-    // a poster with a higher priority is not drawn: its show stays a dot. The posters and the
-    // distances grow at the same rate, so this does not change until the posters stop growing.
-    lodPosters = [];
-    if (viewMode === "posters" && scale >= LOD_SCALE) {
-      const { pw, ph } = lodPosterSize();
-      const placed = [];
-      const hi = highlightPosterSize(false);
-      for (let i = 0; i < points.length; i++) {
-        const pt = points[i];
-        if (!highlightSet.has(pt.id)) continue;
-        const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
-        if (px < -hi.pw || px > w + hi.pw || py < -hi.ph || py > h + hi.ph) continue;
-        placed.push([px - hi.pw / 2, py - hi.ph / 2, px + hi.pw / 2, py + hi.ph / 2]);
-      }
-      for (let n = 0; n < lodOrder.length && lodPosters.length < LOD_MAX_POSTERS; n++) {
-        const pt = points[lodOrder[n]];
-        if (highlightSet.has(pt.id)) continue;
-        const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
-        if (px < -pw || px > w + pw || py < -ph || py > h + ph) continue;
-        const x0 = px - pw / 2;
-        const y0 = py - ph / 2;
-        let free = true;
-        for (let k = 0; k < placed.length; k++) {
-          const r = placed[k];
-          if (x0 < r[2] + 3 && x0 + pw > r[0] - 3 && y0 < r[3] + 3 && y0 + ph > r[1] - 3) {
-            free = false;
-            break;
-          }
-        }
-        if (!free) continue;
-        placed.push([x0, y0, x0 + pw, y0 + ph]);
-        lodPosters.push({ pt, x0, y0, pw, ph });
-      }
-      const neutral = isDark ? "rgba(168, 162, 158, 0.6)" : "rgba(120, 113, 108, 0.55)";
-      for (let i = 0; i < lodPosters.length; i++) {
-        const p = lodPosters[i];
-        const isHovered = hoveredPoint && hoveredPoint.id === p.pt.id;
-        // The frame of a show of the user has the color of its tier
-        let stroke = neutral;
-        let lineWidth = 1;
-        if (p.pt.owned) {
-          stroke = (p.pt.tier && rootStyle.getPropertyValue(`--tier-${p.pt.tier.toLowerCase()}`).trim()) || libraryColor;
-          lineWidth = 2;
-        }
-        if (isHovered) {
-          stroke = accentColor;
-          lineWidth = 2.5;
-        }
-        drawPoster(ctx, p.pt, p.x0, p.y0, p.pw, p.ph, { stroke, lineWidth, glow: isHovered ? 10 : 0, isDark, textColor: isDark ? "#a8a29e" : "#78716c" });
-      }
-    }
-    // The number of these posters, for the tests of the interface
-    canvas.dataset.posters = String(lodPosters.length);
-
-    // 3c. Draw the region labels: the main tags of each part of the map.
-    // The labels are above the posters of the shows in view, so that they stay readable.
-    if (regions.length) {
+    // The region labels: the main tags of each part of the map. They are above the posters,
+    // and they go away when the posters are large enough to read.
+    if (regions.length && cardWidth < 50) {
       ctx.save();
       const fontSize = Math.max(10.5, Math.min(15, 10.5 * Math.sqrt(scale)));
-      ctx.font = `600 ${fontSize}px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.font = `600 ${fontSize}px ${fontFamily}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.lineJoin = "round";
@@ -881,7 +1080,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       ctx.strokeStyle = isDark ? "rgba(38, 38, 36, 0.9)" : "rgba(252, 251, 249, 0.9)";
       ctx.fillStyle = isDark ? "rgba(235, 230, 220, 0.82)" : "rgba(40, 36, 33, 0.78)";
       for (const region of regions) {
-        const { x: px, y: py } = toScreen(region.x, region.y, w, h, pad, plotW, plotH);
+        const { x: px, y: py } = toScreen(region.x, region.y, w, h, side);
         if (px < -80 || px > w + 80 || py < -20 || py > h + 20) continue;
         ctx.strokeText(region.label, px, py);
         ctx.fillText(region.label, px, py);
@@ -889,136 +1088,75 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       ctx.restore();
     }
 
-    // 4. Draw Highlighted points (Posters or Pink Dots)
-    if (viewMode === "posters") {
-      const highlightedPoints = points.filter((pt) => highlightSet.has(pt.id));
-      highlightedPoints.sort((a, b) => {
-        if (hoveredPoint && a.id === hoveredPoint.id) return 1;
-        if (hoveredPoint && b.id === hoveredPoint.id) return -1;
-        return 0;
-      });
-
-      for (let i = 0; i < highlightedPoints.length; i++) {
-        const pt = highlightedPoints[i];
-        const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
-        if (px < -60 || px > w + 60 || py < -60 || py > h + 60) continue;
-
-        const isHovered = hoveredPoint && hoveredPoint.id === pt.id;
-        const { pw, ph } = highlightPosterSize(isHovered);
-        drawPoster(ctx, pt, px - pw / 2, py - ph / 2, pw, ph, {
-          stroke: accentColor, lineWidth: isHovered ? 2.5 : 2, glow: isHovered ? 14 : 7, isDark, textColor: accentColor,
-        });
-      }
-    } else {
-      // Dots view mode
-      const hiR = highlightDotRadius();
-      for (let i = 0; i < points.length; i++) {
-        const pt = points[i];
-        if (!highlightSet.has(pt.id)) continue;
-        const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
-        if (px < -20 || px > w + 20 || py < -20 || py > h + 20) continue;
-
-        ctx.fillStyle = accentColor;
-        ctx.globalAlpha = 0.25;
-        ctx.beginPath();
-        ctx.arc(px, py, hiR * 2, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.globalAlpha = 1.0;
-        ctx.fillStyle = accentColor;
-        ctx.beginPath();
-        ctx.arc(px, py, hiR, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.strokeStyle = isDark ? "#262624" : "#ffffff";
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-      }
-    }
-
-    // 5. Draw Hover Crosshair / Ring (for non-posters or dots)
-    const hoverHasPoster = hoveredPoint && viewMode === "posters" &&
-      (highlightSet.has(hoveredPoint.id) || lodPosters.some((p) => p.pt.id === hoveredPoint.id));
-    if (hoveredPoint && !hoverHasPoster) {
-      const { x: px, y: py } = toScreen(hoveredPoint.x, hoveredPoint.y, w, h, pad, plotW, plotH);
-      if (px >= -20 && px <= w + 20 && py >= -20 && py <= h + 20) {
-        ctx.strokeStyle = accentColor;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        const ringR = highlightSet.has(hoveredPoint.id) ? highlightDotRadius() * 2 + 2 : dotRadius(hoveredPoint.owned) + 6;
-        ctx.arc(px, py, Math.max(9, ringR), 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    }
-
+    // The number of posters in the last draw, for the tests of the interface
+    canvas.dataset.posters = String(shown);
+    canvas.dataset.cards = cards ? "1" : "0";
     ctx.restore();
   }
 
+  // Return the show under the pointer. It uses the screen positions of the last draw.
   function findNearest(mx, my) {
-    const rect = box.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
-    const pad = 24;
-    const plotW = w - 2 * pad;
-    const plotH = h - 2 * pad;
-    const viewMode = canvas.dataset.view || "posters";
+    const { w, h, side } = viewSize();
+    const view = viewMode();
 
-    // 1. Check highlighted points
-    for (let i = 0; i < points.length; i++) {
-      const pt = points[i];
-      if (!highlightSet.has(pt.id)) continue;
-      const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
-      if (px < -60 || px > w + 60 || py < -60 || py > h + 60) continue;
-
-      if (viewMode === "posters") {
-        const { pw, ph } = highlightPosterSize(false);
-        if (Math.abs(px - mx) <= pw / 2 + 1 && Math.abs(py - my) <= ph / 2 + 1) {
-          return pt;
+    if (cardsOn(side)) {
+      // The close view: the show whose cell is under the pointer
+      const cellWidth = Math.min(CELL_MAX, cellBase(side) * scale);
+      const cellHeight = cellWidth * (cell.h / cell.w);
+      let best = null;
+      let bestDist = Infinity;
+      for (let i = 0; i < n; i++) {
+        const dx = Math.abs(sx[i] - mx);
+        const dy = Math.abs(sy[i] - my);
+        if (dx > cellWidth / 2 || dy > cellHeight / 2) continue;
+        const d = dx * dx + dy * dy;
+        if (d < bestDist) {
+          bestDist = d;
+          best = points[i];
         }
-      } else {
-        const dSq = (px - mx) ** 2 + (py - my) ** 2;
-        if (dSq <= (highlightDotRadius() + 4) ** 2) {
-          return pt;
+      }
+      return best;
+    }
+
+    // 1. The highlighted shows
+    const markers = view === "posters";
+    if (markers || highlightKind === "recommended") {
+      const pw = markerWidth(side);
+      const ph = pw * POSTER_ASPECT;
+      const hitR = (highlightDotRadius() + 4) ** 2;
+      for (let i = n - 1; i >= 0; i--) {
+        if (!highlightSet.has(points[i].id)) continue;
+        if (sx[i] < -60 || sx[i] > w + 60 || sy[i] < -90 || sy[i] > h + 90) continue;
+        if (markers) {
+          if (Math.abs(sx[i] - mx) <= pw / 2 + 1 && Math.abs(sy[i] - my) <= ph / 2 + 1) return points[i];
+        } else if ((sx[i] - mx) ** 2 + (sy[i] - my) ** 2 <= hitR) {
+          return points[i];
         }
       }
     }
 
-    // 1b. Check the posters of the shows in view
-    for (let i = lodPosters.length - 1; i >= 0; i--) {
-      const p = lodPosters[i];
-      if (mx >= p.x0 - 1 && mx <= p.x0 + p.pw + 1 && my >= p.y0 - 1 && my <= p.y0 + p.ph + 1) {
-        return p.pt;
-      }
-    }
-
-    // 2. Check owned library points. The target is larger than the dot, and it grows with the dot.
+    // 2. The dots of the shows of the user. The target is larger than the dot, and it grows with the dot.
     let bestOwned = null;
     let bestOwnedDist = Math.max(7, dotRadius(true) + 4) ** 2;
-    for (let i = 0; i < points.length; i++) {
-      const pt = points[i];
-      if (!pt.owned) continue;
-      const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
-      if (px < -30 || px > w + 30 || py < -30 || py > h + 30) continue;
-      const dSq = (px - mx) ** 2 + (py - my) ** 2;
-      if (dSq <= bestOwnedDist) {
-        bestOwnedDist = dSq;
-        bestOwned = pt;
+    for (let i = 0; i < n; i++) {
+      if (!points[i].owned) continue;
+      const d = (sx[i] - mx) ** 2 + (sy[i] - my) ** 2;
+      if (d <= bestOwnedDist) {
+        bestOwnedDist = d;
+        bestOwned = points[i];
       }
     }
     if (bestOwned) return bestOwned;
 
-    // 3. Check catalog points (in dots mode, or when zoomed in scale >= 1.8)
-    if (viewMode === "dots" || scale >= 1.8) {
+    // 3. The dots of the catalog (in the Dots view, or from a zoom of 180%)
+    if (view === "dots" || scale >= 1.8) {
       let bestCat = null;
       let bestCatDist = Math.max(6, dotRadius(false) + 4) ** 2;
-      for (let i = 0; i < points.length; i++) {
-        const pt = points[i];
-        const { x: px, y: py } = toScreen(pt.x, pt.y, w, h, pad, plotW, plotH);
-        if (px < -30 || px > w + 30 || py < -30 || py > h + 30) continue;
-        const dSq = (px - mx) ** 2 + (py - my) ** 2;
-        if (dSq <= bestCatDist) {
-          bestCatDist = dSq;
-          bestCat = pt;
+      for (let i = 0; i < n; i++) {
+        const d = (sx[i] - mx) ** 2 + (sy[i] - my) ** 2;
+        if (d <= bestCatDist) {
+          bestCatDist = d;
+          bestCat = points[i];
         }
       }
       return bestCat;
@@ -1069,7 +1207,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       canvas.style.cursor = "pointer";
       const titles = displayTitles(pt);
       let badgeHtml = "";
-      if (highlightSet.has(pt.id)) {
+      if (highlightSet.has(pt.id) && highlightKind === "recommended") {
         badgeHtml = `<span class="tt-badge tt-badge-highlight">${esc(highlightLabel)}</span>`;
       } else if (pt.tier) {
         badgeHtml = `<span class="tt-badge tt-badge-highlight" style="color:var(--tier-${pt.tier.toLowerCase()});border-color:currentColor;">Tier ${pt.tier}</span>`;
@@ -1135,7 +1273,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
-    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
     applyZoom(factor, mx, my);
   }
 
