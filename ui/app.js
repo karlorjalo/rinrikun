@@ -158,6 +158,14 @@ async function openModal(r) {
          ${r.manual_watched ? '✓ Watched · Remove' : '+ Add to Watched'}
        </button>`;
 
+  // A show that the user does not own can go out of the recommendations
+  const dismissBtn = r.owned
+    ? ""
+    : `<button class="btn-action btn-dismiss ${r.dismissed ? 'active' : ''}" id="modal-toggle-dismiss"
+         title="${r.dismissed ? 'Put this show back in the recommendations' : 'Remove this show from the recommendations. Shows like it get a lower score.'}">
+         ${r.dismissed ? '✕ Not interested · Undo' : '✕ Not interested'}
+       </button>`;
+
   const tierPills = ["S", "A", "B", "C", "D"].map((t) => {
     const active = r.tier === t ? "active" : "";
     return `<button class="btn-modal-tier tier-${t.toLowerCase()} ${active}" data-tier="${t}">${t}</button>`;
@@ -191,6 +199,7 @@ async function openModal(r) {
             <button class="btn-action primary" id="modal-find-sim">Find Similar</button>
             <button class="btn-action" id="modal-seed-rec">Recommend Like This</button>
             ${watchedBtn}
+            ${dismissBtn}
             ${anilistLink}
           </div>
           ${tierSection}
@@ -221,6 +230,18 @@ async function openModal(r) {
     $("#modal-toggle-watched").onclick = async () => {
       const next = !r.manual_watched;
       await toggleWatched(r, next);
+      openModal(r);
+    };
+  }
+
+  if ($("#modal-toggle-dismiss")) {
+    $("#modal-toggle-dismiss").onclick = async () => {
+      if (r.dismissed) {
+        await restoreRecommendation(r);
+      } else {
+        await dismissRecommendation(r);
+      }
+      if (!$("#tab-ratings").hidden) loadRatings();
       openModal(r);
     };
   }
@@ -1056,6 +1077,11 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   activeVectorMaps.set(canvasId, {
     draw,
     scheduleDraw,
+    setHighlight: (ids) => {
+      highlightSet.clear();
+      ids.forEach((id) => highlightSet.add(id));
+      scheduleDraw();
+    },
     destroy: () => {
       if (animFrame) cancelAnimationFrame(animFrame);
       canvas.removeEventListener("wheel", onWheel);
@@ -1392,6 +1418,71 @@ function initRecsFilters() {
   }
 }
 
+// The last show that the user removed from the recommendations, for the undo bar
+let lastDismissed = null;
+
+async function setDismissed(r, dismissed) {
+  const res = await fetch("/api/dismissed", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: r.id, dismissed })
+  });
+  if (!res.ok) throw new Error(`dismiss failed: ${res.status}`);
+  r.dismissed = dismissed ? 1 : 0;
+}
+
+function refreshRecsAfterDismiss() {
+  renderRecsGrid();
+  renderRecsUndoBar();
+  const map = activeVectorMaps.get("recs-vector-canvas");
+  if (map && map.setHighlight) map.setHighlight(rawRecs.map((x) => x.id));
+}
+
+async function dismissRecommendation(r) {
+  try {
+    await setDismissed(r, true);
+    // The other cards stay in their positions: a new order after each click is hard to read
+    const index = rawRecs.findIndex((x) => x.id === r.id);
+    if (index >= 0) rawRecs.splice(index, 1);
+    lastDismissed = { show: r, index };
+    refreshRecsAfterDismiss();
+  } catch (e) {
+    console.error("Failed to remove the recommendation", e);
+  }
+}
+
+async function restoreRecommendation(r) {
+  try {
+    await setDismissed(r, false);
+    if (lastDismissed && lastDismissed.show.id === r.id) {
+      const index = lastDismissed.index;
+      if (index >= 0 && !rawRecs.some((x) => x.id === r.id)) {
+        rawRecs.splice(Math.min(index, rawRecs.length), 0, lastDismissed.show);
+      }
+      lastDismissed = null;
+    }
+    refreshRecsAfterDismiss();
+  } catch (e) {
+    console.error("Failed to put the recommendation back", e);
+  }
+}
+
+function renderRecsUndoBar() {
+  const bar = $("#recs-undo-bar");
+  if (!bar) return;
+  if (!lastDismissed) {
+    bar.innerHTML = "";
+    return;
+  }
+  const { main } = displayTitles(lastDismissed.show);
+  bar.innerHTML = `
+    <div class="recs-undo-card">
+      <span>Removed from your recommendations: <b>${esc(main)}</b>. Shows like it get a lower score.</span>
+      <button id="recs-undo-btn" class="btn-action">Undo</button>
+    </div>`;
+  $("#recs-undo-btn").onclick = () => restoreRecommendation(lastDismissed.show);
+}
+
 function renderRecsGrid() {
   const box = $("#rresults");
   if (!box) return;
@@ -1415,10 +1506,25 @@ function renderRecsGrid() {
     return;
   }
 
-  filtered.forEach((r) => box.appendChild(card(r)));
+  filtered.forEach((r) => {
+    const el = card(r);
+    const dismiss = document.createElement("button");
+    dismiss.className = "card-dismiss";
+    dismiss.title = "Not interested: remove from the recommendations";
+    dismiss.setAttribute("aria-label", "Not interested");
+    dismiss.textContent = "✕";
+    dismiss.onclick = (e) => {
+      e.stopPropagation();
+      dismissRecommendation(r);
+    };
+    el.appendChild(dismiss);
+    box.appendChild(el);
+  });
 }
 
 async function recs() {
+  lastDismissed = null;
+  renderRecsUndoBar();
   renderRecsSeedBar();
   const base = seed
     ? `/api/recommend?k=40&seed=${encodeURIComponent(seed.id)}`
@@ -1684,20 +1790,25 @@ function initReviewDeck() {
 let ratedShows = [];
 // The shows that the user marked as watched and that are not in the library
 let manualShows = [];
+// The shows that the user removed from the recommendations
+let dismissedShows = [];
 let ratingsSource = "rated";
 let ratingsTierFilter = "all";
 let ratingsSort = "tier";
 
 async function loadRatings() {
   try {
-    const [res, manual] = await Promise.all([
+    const [res, manual, dismissed] = await Promise.all([
       fetch("/api/ratings").then((r) => r.json()),
       fetch("/api/watched").then((r) => r.json()),
+      fetch("/api/dismissed").then((r) => r.json()),
     ]);
     if (!Array.isArray(res)) return;
     ratedShows = res;
     manualShows = Array.isArray(manual) ? manual : [];
+    dismissedShows = Array.isArray(dismissed) ? dismissed : [];
     if ($("#count-manual")) $("#count-manual").textContent = manualShows.length;
+    if ($("#count-dismissed")) $("#count-dismissed").textContent = dismissedShows.length;
 
     const counts = { S: 0, A: 0, B: 0, C: 0, D: 0 };
     ratedShows.forEach((s) => {
@@ -1728,7 +1839,8 @@ function renderRatingsGrid() {
   if (!box) return;
   box.innerHTML = "";
 
-  const source = ratingsSource === "manual" ? manualShows : ratedShows;
+  const source = ratingsSource === "manual" ? manualShows
+    : ratingsSource === "dismissed" ? dismissedShows : ratedShows;
   let filtered = source.filter((r) => {
     if (ratingsTierFilter === "all") return true;
     return r.tier === ratingsTierFilter;
@@ -1753,7 +1865,9 @@ function renderRatingsGrid() {
   });
 
   if (!filtered.length) {
-    if (ratingsSource === "manual" && ratingsTierFilter === "all") {
+    if (ratingsSource === "dismissed" && ratingsTierFilter === "all") {
+      box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:48px 20px;">No removed recommendations. In the Recommendations tab, click ✕ on a show that you do not want.</p>`;
+    } else if (ratingsSource === "manual" && ratingsTierFilter === "all") {
       box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:48px 20px;">No manually added shows yet. When you watch a show outside your local library, find it and click "+ Add to Watched".</p>`;
     } else if (!ratedShows.length) {
       box.innerHTML = `

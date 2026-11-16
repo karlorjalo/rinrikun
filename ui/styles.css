@@ -58,6 +58,18 @@ h2 { font-family: var(--serif); font-weight: 600; font-size: 22px; margin: 26px 
   color: var(--accent); z-index: 2; }
 .card:hover .card-quick-seed { opacity: 1; }
 .card-quick-seed:hover { border-color: var(--accent); transform: scale(1.15); background: var(--hover); }
+.card-dismiss { position: absolute; top: 8px; right: 40px; background: var(--card); border: 1px solid var(--border);
+  border-radius: 999px; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; cursor: pointer; opacity: 0; transition: opacity .15s ease, transform .15s ease, border-color .15s ease;
+  color: var(--muted); z-index: 2; }
+.card:hover .card-dismiss, .card-dismiss:focus-visible { opacity: 1; }
+.card-dismiss:hover { border-color: var(--tier-d); color: var(--tier-d); transform: scale(1.15); background: var(--hover); }
+@media (hover: none) { .card-dismiss, .card-quick-seed { opacity: 1; } }
+.recs-undo-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  background: var(--hover); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; margin-bottom: 14px;
+  font-size: 13px; color: var(--muted); }
+.recs-undo-card b { color: var(--text); font-family: var(--serif); }
+.btn-action.btn-dismiss.active { color: var(--tier-d); border-color: var(--tier-d); }
 .poster-box { width: 72px; height: 104px; border-radius: 7px; overflow: hidden; position: relative; flex: none;
   background: var(--hover); border: 1px solid var(--border); }
 .poster-box img { width: 100%; height: 100%; object-fit: cover; display: block; }
