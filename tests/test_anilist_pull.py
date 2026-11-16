@@ -135,7 +135,8 @@ def test_cache_from_an_older_query_refetches(tmp_path, monkeypatch):
 
 
 def _media(i, **kw):
-    return dict(MEDIA, id=i, relations={"edges": []}, recommendations={"nodes": []}, status="FINISHED", **kw)
+    return dict(MEDIA, id=i, relations={"edges": []}, recommendations={"nodes": []}, status="FINISHED",
+                startDate={"year": 2025}, **kw)
 
 
 def test_related_ids():
@@ -193,3 +194,93 @@ def test_fetch_by_ids_in_batches_of_50(tmp_path, monkeypatch):
     monkeypatch.setattr(anilist_pull, "_graphql_ids", fake)
     assert len(anilist_pull.fetch_by_ids(range(1, 121))) == 120
     assert sizes == [50, 50, 20]
+
+
+def _make_old(path, days):
+    import os
+    import time as real_time
+    stamp = real_time.time() - days * 86400
+    os.utime(path, (stamp, stamp))
+
+
+def test_old_page_cache_refetches(tmp_path, monkeypatch):
+    monkeypatch.setattr(anilist_pull, "CACHE_DIR", tmp_path)
+    _fake_time(monkeypatch)
+    page = lambda media: {"data": {"Page": {"pageInfo": {"lastPage": 1}, "media": [media]}}}
+    cache = tmp_path / "page_1.json"
+    cache.write_text(json.dumps(page(_media(1, episodes=1))), encoding="utf-8")
+    calls = []
+
+    def fake(page_no, timeout=60):
+        calls.append(page_no)
+        return page(_media(1, episodes=2))
+
+    monkeypatch.setattr(anilist_pull, "_graphql", fake)
+    assert anilist_pull.fetch_pool()[0]["episodes"] == 1
+    assert calls == []
+    _make_old(cache, anilist_pull.PAGE_MAX_AGE_DAYS + 1)
+    assert anilist_pull.fetch_pool()[0]["episodes"] == 2
+    assert calls == [1]
+
+
+def test_old_cache_of_an_unfinished_anime_refetches(tmp_path, monkeypatch):
+    monkeypatch.setattr(anilist_pull, "CACHE_DIR", tmp_path)
+    _fake_time(monkeypatch)
+    (tmp_path / "media").mkdir()
+    old = anilist_pull.MEDIA_MAX_AGE_DAYS + 1
+    for i, status in ((1, "NOT_YET_RELEASED"), (2, "FINISHED"), (3, "RELEASING")):
+        f = tmp_path / "media" / f"{i}.json"
+        f.write_text(json.dumps(dict(_media(i), status=status)), encoding="utf-8")
+        _make_old(f, old if i != 3 else 1)
+    calls = []
+
+    def fake(ids, timeout=60):
+        calls.append(list(ids))
+        return {"data": {"Page": {"media": [dict(_media(i), status="FINISHED") for i in ids]}}}
+
+    monkeypatch.setattr(anilist_pull, "_graphql_ids", fake)
+    rows = anilist_pull.fetch_by_ids([1, 2, 3])
+    # Only the old cache of the anime that was not released is asked again
+    assert calls == [[1]]
+    assert [r["status"] for r in rows] == ["FINISHED", "FINISHED", "RELEASING"]
+
+
+def test_fetch_extras_follows_the_new_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr(anilist_pull, "CACHE_DIR", tmp_path)
+    _fake_time(monkeypatch)
+    # 5 points to 6, 6 points to 7, 7 points to 8, 8 points to 9
+    relation = lambda other: {"edges": [{"relationType": "SEQUEL", "node": {"id": other, "type": "ANIME"}}]}
+    calls = []
+
+    def fake(ids, timeout=60):
+        calls.append(sorted(ids))
+        return {"data": {"Page": {"media": [dict(_media(i), relations=relation(i + 1)) for i in ids]}}}
+
+    monkeypatch.setattr(anilist_pull, "_graphql_ids", fake)
+    pool = [{"anilist_id": 1, "recommendations": [[5, 10]], "relations": []}]
+    rows = anilist_pull.fetch_extras(pool, {20}, rounds=3)
+    # Round 1: the given id and the id that the pool points to. Rounds 2 and 3: one step more each.
+    assert calls == [[5, 20], [6, 21], [7, 22]]
+    assert [r["id"] for r in rows] == ["al:5", "al:20", "al:6", "al:21", "al:7", "al:22"]
+    # A second call uses the cache: it gives the rows and makes no request
+    assert [r["id"] for r in anilist_pull.fetch_extras(pool, set(), rounds=1)] == ["al:5"]
+    assert len(calls) == 3
+
+
+def test_row_from_media_uses_the_start_year_when_there_is_no_season():
+    assert row_from_media(dict(MEDIA, seasonYear=None, startDate={"year": 1998}))["year"] == 1998
+    assert row_from_media(dict(MEDIA, seasonYear=2025, startDate={"year": 2024}))["year"] == 2025
+    assert row_from_media(dict(MEDIA, seasonYear=None, startDate={"year": None}))["year"] is None
+    assert row_from_media(dict(MEDIA, seasonYear=None))["year"] is None
+
+
+def test_cache_without_the_start_date_refetches(tmp_path, monkeypatch):
+    monkeypatch.setattr(anilist_pull, "CACHE_DIR", tmp_path)
+    _fake_time(monkeypatch)
+    (tmp_path / "media").mkdir()
+    old = dict(_media(1), seasonYear=None)
+    del old["startDate"]
+    (tmp_path / "media" / "1.json").write_text(json.dumps(old), encoding="utf-8")
+    monkeypatch.setattr(anilist_pull, "_graphql_ids", lambda ids, timeout=60: {"data": {"Page": {"media": [
+        dict(_media(i), seasonYear=None, startDate={"year": 1998}) for i in ids]}}})
+    assert anilist_pull.fetch_by_ids([1])[0]["year"] == 1998

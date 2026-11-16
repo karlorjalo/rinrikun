@@ -57,10 +57,13 @@ class IdMap:
         self.tvdb: dict[str, list] = {}
         self.imdb: dict[str, list] = {}
         self.mal_of: dict[int, int] = {}
+        # All AniList ids of the id map: the anime that the other anime databases know
+        self.all_ids: set[int] = set()
         for e in entries:
             anilist_id = e.get("anilist_id")
             if anilist_id is None:
                 continue
+            self.all_ids.add(anilist_id)
             if e.get("mal_id") is not None:
                 self.mal_of[anilist_id] = e["mal_id"]
             kind = (e.get("type") or "").upper()

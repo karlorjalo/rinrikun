@@ -87,6 +87,11 @@ def test_mal_ids():
     assert IdMap(ENTRIES).mal_of == {1: 101, 2: 102}
 
 
+def test_all_ids_are_the_anilist_ids_of_the_map():
+    # The last entry of ENTRIES has no AniList id
+    assert IdMap(ENTRIES).all_ids == {1, 2, 3, 4}
+
+
 def test_load_entries_uses_the_cache(tmp_path, monkeypatch):
     cache = tmp_path / "idmap" / "list.json"
     monkeypatch.setattr(idmap_module, "CACHE", cache)

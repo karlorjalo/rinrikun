@@ -1,5 +1,6 @@
 import json
 import time
+from datetime import datetime
 import urllib.request
 from pathlib import Path
 
@@ -7,7 +8,7 @@ CACHE_DIR = Path(__file__).resolve().parent.parent / "anilist_cache"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 # The fields of one anime. The page query and the id query use the same fields.
-MEDIA_FIELDS = """id title { romaji english native } format seasonYear status episodes genres
+MEDIA_FIELDS = """id title { romaji english native } format seasonYear startDate { year } status episodes genres
 tags { name rank } studios(isMain: true) { nodes { name } }
 description(asHtml: false) averageScore coverImage { medium }
 relations { edges { relationType node { id type } } }
@@ -17,10 +18,17 @@ QUERY = ("query ($page: Int) { Page(page: $page, perPage: 50) { pageInfo { lastP
 ID_QUERY = ("query ($ids: [Int]) { Page(perPage: 50) { "
             "media(id_in: $ids, type: ANIME, isAdult: false) { " + MEDIA_FIELDS + " } } }")
 # A cached answer without these keys is from an older query
-REQUIRED_KEYS = ("relations", "recommendations", "status")
+REQUIRED_KEYS = ("relations", "recommendations", "status", "startDate")
 # Seconds between two requests. AniList permits 30 requests in one minute.
 PAUSE = 2.1
-MAX_PAGES = 80  # ~4000 anime
+# AniList gives a maximum of 5000 results (100 pages) for one sorted query
+MAX_PAGES = 100
+# The cache of a page is good for this number of days. The popularity order changes slowly.
+PAGE_MAX_AGE_DAYS = 30
+# The cache of an anime that is not finished is good for this number of days. Without this limit
+# an announced anime stays "not released" in the cache, and the recommendations never show it.
+MEDIA_MAX_AGE_DAYS = 7
+UNFINISHED = {"NOT_YET_RELEASED", "RELEASING", "HIATUS"}
 # Relation types that connect two entries of the same franchise
 FRANCHISE_RELATIONS = {"SEQUEL", "PREQUEL", "PARENT", "SIDE_STORY", "SUMMARY", "ALTERNATIVE"}
 
@@ -55,7 +63,8 @@ def row_from_media(m: dict) -> dict:
         "source": "anilist",
         "title": t.get("romaji") or t.get("english") or t.get("native") or "",
         "title_native": t.get("native") or "",
-        "year": m.get("seasonYear"),
+        # A movie, an OVA or a special frequently has no season: use the year of its start date
+        "year": m.get("seasonYear") or (m.get("startDate") or {}).get("year"),
         "format": (m.get("format") or "").lower() or None,
         "genres": m.get("genres") or [],
         "tags": [tg["name"] for tg in (m.get("tags") or [])],
@@ -96,14 +105,20 @@ def _fetch_and_cache(page: int, cache: Path) -> None:
     time.sleep(PAUSE)
 
 
+def _age_days(path: Path) -> float:
+    return (datetime.now().timestamp() - path.stat().st_mtime) / 86400.0
+
+
 def _read_cache(cache: Path) -> dict | None:
-    """Return the cached page. Return None if the file is corrupt or older than the current query."""
+    """Return the cached page. Return None if the file is corrupt, too old, or from an older query."""
     try:
         page_data = json.loads(cache.read_text(encoding="utf-8"))["data"]["Page"]
         media = page_data["media"]
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
     if media and any(key not in media[0] for key in REQUIRED_KEYS):
+        return None
+    if _age_days(cache) > PAGE_MAX_AGE_DAYS:
         return None
     return page_data
 
@@ -147,6 +162,8 @@ def _read_media(cache: Path) -> dict | None:
     except (OSError, json.JSONDecodeError):
         return None
     if not isinstance(media, dict) or any(key not in media for key in REQUIRED_KEYS):
+        return None
+    if media.get("status") in UNFINISHED and _age_days(cache) > MEDIA_MAX_AGE_DAYS:
         return None
     return media
 
@@ -201,6 +218,24 @@ def fetch_by_ids(ids, force: bool = False) -> list[dict]:
         absent_file.write_text(json.dumps(sorted(absent)), encoding="utf-8")
         time.sleep(PAUSE)
     return [row_from_media(found[i]) for i in sorted(found)]
+
+
+def fetch_extras(pool_rows: list[dict], ids, force: bool = False, rounds: int = 3) -> list[dict]:
+    """Return the rows of the anime with these ids, and of the anime that the catalog points to.
+
+    The catalog points to an anime with a user recommendation or with a franchise relation.
+    A new row can point to more anime, thus the function asks again, for `rounds` times at most.
+    """
+    wanted = set(ids)
+    extra: list[dict] = []
+    for _ in range(rounds):
+        have = {r["anilist_id"] for r in pool_rows + extra}
+        wanted |= related_ids(pool_rows + extra)
+        new_rows = fetch_by_ids(wanted - have, force=force)
+        if not new_rows:
+            break
+        extra += new_rows
+    return extra
 
 
 def _post(query: str, variables: dict, timeout: int) -> dict:

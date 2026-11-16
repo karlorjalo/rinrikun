@@ -37,7 +37,7 @@ Without these packages the build uses the CPU. A full build is then much slower,
 ```
 python build.py                # pull Jellyfin + AniList pool, embed, persist to anime_vec.db
 python build.py --refresh-anilist   # force re-pull of the AniList pool
-python build.py --pool-only    # only the 4000 most popular anime (quicker first build)
+python build.py --pool-only    # only the 5000 most popular anime (quicker first build)
 python serve.py                # serves http://localhost:8765 and opens it
 python serve.py --host 0.0.0.0 --port 8771   # also accepts connections from other computers
 python evaluate.py --tiers     # offline test of the recommendations (read-only)
@@ -48,7 +48,7 @@ Rebuilds are incremental: unchanged rows keep their cached embeddings. A change 
 ## Notes
 
 - The build connects each library show to its AniList entries with the public id map of the Fribb/anime-lists project (TMDB, TVDB and IMDb ids, with season numbers). The file stays in `idmap_cache/` for 7 days. A title match finds the shows that the id map does not have.
-- The catalog is the 4000 most popular AniList anime, plus the shows that these point to: the shows that users recommend, the other members of the franchises, and the AniList entries of your library. This about doubles the catalog. A show that is not released is in the catalog but not in the recommendations.
+- The catalog is all anime that the build can find: the 5000 most popular anime on AniList (the maximum for one query), all anime of the public id map, and the anime that these point to with a user recommendation or a franchise relation. That is about 21 000 anime. A show that is not released and a music video are in the catalog but not in the recommendations. The first build asks AniList for about 450 pages, which takes about 20 minutes. Later builds use the cache. The cache of a page is good for 30 days, and the cache of an anime that is not finished for 7 days.
 - Two Jellyfin items with the same type and the same TMDB id are one show (for example two files of one movie). A show that Jellyfin does not have now goes out of the index at the next build. Its tier stays in the database.
 - AniList pages are cached in `anilist_cache/` (corrupt files are refetched automatically; requires a browser User-Agent, which is handled for you).
 - Index + cache + secrets are gitignored. The default host is 127.0.0.1 and the API has no auth. With `--host 0.0.0.0`, each computer that can connect to the port can read and change the ratings, so use it only on a network that you trust (for example behind a firewall rule for your VPN).
