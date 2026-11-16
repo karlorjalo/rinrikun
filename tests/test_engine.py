@@ -1064,3 +1064,39 @@ def test_map_match_is_none_without_shows_of_the_user(tmp_path):
                         "anilist_id": i, "poster": None}])
         s.save_embedding(f"al:{i}", np.array(vec, dtype=np.float32).tobytes())
     assert Engine(s).map_match() == [None, None, None]
+
+
+def test_other_titles_of_a_library_show_come_from_its_anilist_entries(tmp_path):
+    from anime_vec.store import Store
+    s = Store(tmp_path / "titles.db")
+    base = {"genres": [], "tags": [], "tag_ranks": [], "studios": [], "overview": "O", "score": 7.0,
+            "tmdbid": None, "poster": None, "year": 2015}
+    rows = [
+        dict(base, id="jf:1", source="library", title="冴えない彼女の育てかた", title_native="冴えない彼女の育てかた",
+             format="series", owned=1, anilist_id=None),
+        dict(base, id="al:10", source="anilist", title="Saenai Heroine no Sodatekata", title_native="冴えない彼女の育てかた",
+             title_english="Saekano: How to Raise a Boring Girlfriend", format="tv", owned=1, anilist_id=10,
+             library_id="jf:1"),
+        dict(base, id="al:11", source="anilist", title="Saenai Heroine no Sodatekata Flat", title_native="冴えない彼女の育てかた♭",
+             title_english="Saekano: How to Raise a Boring Girlfriend .flat", format="tv", year=2017, owned=1,
+             anilist_id=11, library_id="jf:1"),
+        dict(base, id="al:20", source="anilist", title="Romaji", title_native="日本語", title_english="Romaji",
+             format="tv", owned=0, anilist_id=20),
+        dict(base, id="al:30", source="anilist", title="No English", title_native="", format="tv", owned=0, anilist_id=30),
+    ]
+    for n, r in enumerate(rows):
+        s.upsert_rows([r])
+        s.save_embedding(r["id"], np.eye(5, dtype=np.float32)[n].tobytes())
+    e = Engine(s)
+    # The library row has the titles of its two entries. It does not have its own title a second time.
+    assert e.other_titles(e.pos["jf:1"]) == [
+        "Saenai Heroine no Sodatekata", "Saekano: How to Raise a Boring Girlfriend",
+        "Saenai Heroine no Sodatekata Flat", "Saekano: How to Raise a Boring Girlfriend .flat", "冴えない彼女の育てかた♭"]
+    # An AniList row has its English title, if that is not the same as its romaji title
+    assert e.other_titles(e.pos["al:10"]) == ["Saekano: How to Raise a Boring Girlfriend"]
+    assert e.other_titles(e.pos["al:20"]) == []
+    assert e.other_titles(e.pos["al:30"]) == []
+    # The map has the titles only for the points that have other titles
+    points = {p["id"]: p for p in e.get_vector_map()["points"]}
+    assert points["jf:1"]["aka"][0] == "Saenai Heroine no Sodatekata"
+    assert "aka" not in points["al:20"]

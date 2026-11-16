@@ -160,7 +160,9 @@ def shows():
     return [{"id": r["id"], "title": r["title"], "title_native": r["title_native"],
              "year": r["year"], "poster": engine.poster_of(i), "owned": r["owned"],
              "manual_watched": r.get("manual_watched", 0),
-             "tier": r.get("tier"), "weight": r.get("weight", 1.0)} for i, r in enumerate(engine.rows)]
+             "tier": r.get("tier"), "weight": r.get("weight", 1.0),
+             # The other titles of the show, for the search
+             "aka": engine.other_titles(i)} for i, r in enumerate(engine.rows)]
 
 
 @app.get("/api/poster/{id:path}")

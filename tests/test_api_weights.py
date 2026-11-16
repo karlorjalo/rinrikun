@@ -108,6 +108,9 @@ def test_api_weights_endpoints(tmp_path):
             assert mm_res.status_code == 200
             assert len(mm_res.json()) == 3
         assert client.get("/api/vector-map/match?kinds=other").status_code == 422
+
+        # 10. The list of the shows has the other titles of each show, for the search
+        assert all(x["aka"] == [] for x in client.get("/api/shows").json())
     finally:
         serve.store = orig_store
         serve.engine = orig_engine

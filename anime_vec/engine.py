@@ -1142,6 +1142,28 @@ class Engine:
             return entry["poster"]
         return f"/api/poster/{r['id']}" if r.get("poster") else None
 
+    def other_titles(self, j: int) -> list[str]:
+        """Return the titles of row j that are not its two main titles, for the search of the interface.
+
+        An AniList row has its English title. A library row has only its title from Jellyfin,
+        which is in one language. Thus a library row also gets the romaji title, the English title
+        and the Japanese title of each of its AniList entries.
+        """
+        r = self.rows[j]
+        names = [r.get("title_english")]
+        if r.get("source") == "library":
+            for other_id in self.counterparts.get(r["id"], []):
+                other = self.by_id.get(other_id) or {}
+                names += [other.get("title"), other.get("title_english"), other.get("title_native")]
+        seen = {(r.get("title") or "").strip().lower(), (r.get("title_native") or "").strip().lower()}
+        out = []
+        for name in names:
+            name = (name or "").strip()
+            if name and name.lower() not in seen:
+                seen.add(name.lower())
+                out.append(name)
+        return out
+
     def public_row(self, j: int) -> dict:
         """Return a copy of row j for the interface.
 
@@ -1214,6 +1236,10 @@ class Engine:
                 # The map uses the score to select which posters it shows first
                 "score": self._tag_source(i).get("score"),
             })
+            # The other titles of the show, for the search of the map
+            aka = self.other_titles(i)
+            if aka:
+                points[-1]["aka"] = aka
         return {
             "center": {"x": round(c_proj[0], 4), "y": round(c_proj[1], 4)} if c_proj else None,
             "points": points,
