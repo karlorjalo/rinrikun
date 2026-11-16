@@ -75,3 +75,80 @@ def test_link_library_removes_an_old_link():
     pool = [dict(_pool(5), library_id="jf:gone")]
     link_library([_lib(1)], pool, None)
     assert pool[0]["library_id"] is None
+
+
+def test_link_library_gives_a_shared_entry_to_the_nearest_title():
+    from anime_vec.idmap import IdMap
+    from anime_vec.match import link_library
+    # The id map has the two movies of the library on one AniList entry
+    idmap = IdMap([{"type": "MOVIE", "anilist_id": 1, "themoviedb_id": {"movie": [10, 11]}}])
+    lib = [
+        dict(_lib(1, fmt="movie", tmdb="11"), title="大室家 dear friends", title_native="大室家 dear friends"),
+        dict(_lib(2, fmt="movie", tmdb="10"), title="大室家 dear sisters", title_native="大室家 dear sisters"),
+    ]
+    pool = [_pool(1, "Oomuro-ke: dear sisters", "大室家 dear sisters"),
+            _pool(2, "Oomuro-ke: dear friends", "大室家 dear friends")]
+    stats = link_library(lib, pool, idmap)
+    assert pool[0]["library_id"] == "jf:2"
+    # The other movie has no id link, thus the title match connects it to its own entry
+    assert pool[1]["library_id"] == "jf:1"
+    assert stats["by_id"] == 1 and stats["by_title"] == 1 and stats["unlinked_library_rows"] == []
+
+
+def test_link_library_does_not_add_seasons_by_title_to_a_row_with_ids():
+    from anime_vec.idmap import IdMap
+    from anime_vec.match import link_library
+    idmap = IdMap([
+        {"type": "TV", "anilist_id": 1, "tvdb_id": 900, "season": {"tvdb": 1}},
+        {"type": "TV", "anilist_id": 2, "tvdb_id": 900, "season": {"tvdb": 2}},
+    ])
+    # The library has only season 1. The two AniList entries have the same title after normalization.
+    lib = [dict(_lib(1, seasons=[1], tvdb="900"), title="けいおん!", title_native="けいおん!")]
+    pool = [_pool(1, "K-ON!", "けいおん!"), _pool(2, "K-ON!!", "けいおん!!")]
+    link_library(lib, pool, idmap)
+    assert pool[0]["library_id"] == "jf:1" and pool[0]["owned"] == 1
+    assert pool[1]["library_id"] is None and pool[1]["owned"] == 0
+
+
+def test_link_library_does_not_give_a_movie_to_the_series_row():
+    from anime_vec.idmap import IdMap
+    from anime_vec.match import link_library
+    # The id map lists the movie as season 0 of the series, and the library has a Specials folder
+    idmap = IdMap([
+        {"type": "TV", "anilist_id": 1, "tvdb_id": 900, "season": {"tvdb": 1}},
+        {"type": "MOVIE", "anilist_id": 2, "tvdb_id": 900, "themoviedb_id": {"movie": [70]}, "season": {"tvdb": 0}},
+    ])
+    lib = [_lib(1, seasons=[0, 1], tvdb="900"), _lib(2, fmt="movie", tmdb="70")]
+    pool = [_pool(1), _pool(2)]
+    link_library(lib, pool, idmap)
+    assert pool[0]["library_id"] == "jf:1"
+    assert pool[1]["library_id"] == "jf:2"
+
+
+def test_title_match_keeps_the_same_title_and_drops_the_near_titles():
+    from anime_vec.match import link_library
+    lib = [dict(_lib(1, fmt="movie"), title="センコロール", title_native="センコロール")]
+    pool = [_pool(1, "Cencoroll", "センコロール"), _pool(2, "Cencoroll 3", "センコロール3")]
+    stats = link_library(lib, pool, None)
+    assert pool[0]["library_id"] == "jf:1"
+    assert pool[1]["library_id"] is None and pool[1]["owned"] == 0
+    assert stats["by_title"] == 1
+
+
+def test_title_match_uses_only_the_nearest_title_when_none_is_the_same():
+    from anime_vec.match import link_library
+    title = "ガールズアンドパンツァー 最終章 第3話 特別版"
+    lib = [dict(_lib(1), title=title, title_native=title)]
+    pool = [_pool(3, "GuP 3", "ガールズアンドパンツァー 最終章 第3話 特別編"),
+            _pool(4, "GuP 4", "ガールズアンドパンツァー 最終章 第4話 特別編")]
+    link_library(lib, pool, None)
+    assert pool[0]["library_id"] == "jf:1"
+    assert pool[1]["library_id"] is None
+
+
+def test_matcher_best_gives_the_ratio():
+    m = OwnershipMatcher([("jf:1", "ぼくたちのリメイク", "Bokutachi no Remake")])
+    assert m.best("Bokutachi no Remake") == ("jf:1", 1.0)
+    hit, ratio = m.best("Bokutachi no Remakee")
+    assert hit == "jf:1" and 0.92 <= ratio < 1.0
+    assert m.best("Other") == (None, 0.0)

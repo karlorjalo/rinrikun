@@ -36,9 +36,22 @@ def _as_list(value) -> list:
     return list(value) if isinstance(value, (list, tuple)) else [value]
 
 
+def _season_number(season: dict, kind: str) -> int:
+    """Return the season number of an entry of the id map. Season 0 is a special, an OVA or a movie.
+
+    The id map can have one number from TVDB and one from TMDB. TMDB frequently has season 1 for
+    all seasons of a series, and the season folders of a library use the TVDB numbers. Thus the
+    TVDB number is the first choice. An entry without a number is season 1 if it is a TV series.
+    """
+    for source in ("tvdb", "tmdb"):
+        if season.get(source) is not None:
+            return season[source]
+    return 1 if kind == "TV" else 0
+
+
 class IdMap:
     def __init__(self, entries: list[dict]):
-        # Each index gives a list of (anilist id, season number or None)
+        # Each index gives a list of (anilist id, season number)
         self.tmdb_tv: dict[str, list] = {}
         self.tmdb_movie: dict[str, list] = {}
         self.tvdb: dict[str, list] = {}
@@ -50,33 +63,45 @@ class IdMap:
                 continue
             if e.get("mal_id") is not None:
                 self.mal_of[anilist_id] = e["mal_id"]
-            season = e.get("season") or {}
+            kind = (e.get("type") or "").upper()
+            item = (anilist_id, _season_number(e.get("season") or {}, kind))
             tmdb = e.get("themoviedb_id")
             if isinstance(tmdb, dict):
                 for key in _as_list(tmdb.get("tv")):
-                    self.tmdb_tv.setdefault(str(key), []).append((anilist_id, season.get("tmdb")))
+                    self.tmdb_tv.setdefault(str(key), []).append(item)
                 for key in _as_list(tmdb.get("movie")):
-                    self.tmdb_movie.setdefault(str(key), []).append((anilist_id, None))
+                    self.tmdb_movie.setdefault(str(key), []).append(item)
             elif tmdb is not None:
-                index = self.tmdb_movie if (e.get("type") or "").upper() == "MOVIE" else self.tmdb_tv
+                index = self.tmdb_movie if kind == "MOVIE" else self.tmdb_tv
                 for key in _as_list(tmdb):
-                    index.setdefault(str(key), []).append((anilist_id, season.get("tmdb")))
+                    index.setdefault(str(key), []).append(item)
             for key in _as_list(e.get("tvdb_id")):
-                self.tvdb.setdefault(str(key), []).append((anilist_id, season.get("tvdb")))
+                self.tvdb.setdefault(str(key), []).append(item)
             for key in _as_list(e.get("imdb_id")):
-                self.imdb.setdefault(str(key), []).append((anilist_id, None))
+                self.imdb.setdefault(str(key), []).append(item)
 
     def anilist_ids(self, provider_ids: dict, is_movie: bool, seasons: list[int] | None = None) -> set[int]:
         """Return the AniList ids of a library item.
 
-        For a series, an AniList entry is in the result only if its season is in `seasons`
-        (the seasons that the library has). If `seasons` is empty, all seasons are in the result.
+        For a series, `seasons` are the seasons that the library has. An AniList entry is in the
+        result if its season is not later than the last of these seasons: a library that has only
+        season 3 also gives seasons 1 and 2, because the user watched them before season 3.
+        If `seasons` is empty, all seasons are in the result.
+
+        A series never gives the specials, OVAs and movies that the id map lists as season 0.
+        A Specials folder in the library does not say which of them it holds, and a movie has its
+        own library item.
         """
         ids = provider_ids or {}
         if is_movie:
             found = self.tmdb_movie.get(str(ids.get("tmdb")), []) + self.imdb.get(str(ids.get("imdb")), [])
             return {anilist_id for anilist_id, _ in found}
+
+        regular = {s for s in (seasons or []) if s != 0}
+        if seasons and not regular:
+            # The library has only a Specials folder
+            return set()
+        last = max(regular) if regular else None
         found = self.tmdb_tv.get(str(ids.get("tmdb")), []) + self.tvdb.get(str(ids.get("tvdb")), [])
-        if not seasons:
-            return {anilist_id for anilist_id, _ in found}
-        return {anilist_id for anilist_id, season in found if season in seasons}
+        return {anilist_id for anilist_id, season in found
+                if season != 0 and (last is None or season <= last)}

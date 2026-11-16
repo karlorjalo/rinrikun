@@ -19,12 +19,53 @@ def test_series_gives_only_the_seasons_of_the_library():
     ids = {"tmdb": "500", "tvdb": "900"}
     assert m.anilist_ids(ids, False, [1]) == {1}
     assert m.anilist_ids(ids, False, [1, 2]) == {1, 2}
-    assert m.anilist_ids(ids, False, [0, 2]) == {2, 3}
+    # A library that has only season 2 also gives season 1: the user watched it before
+    assert m.anilist_ids(ids, False, [2]) == {1, 2}
+    # Season 0 is the Specials folder: it does not say which specials the library has
+    assert m.anilist_ids(ids, False, [0, 1]) == {1}
+    assert m.anilist_ids(ids, False, [0]) == set()
 
 
-def test_series_without_season_numbers_gives_all_seasons():
+def test_series_without_season_numbers_gives_all_regular_seasons():
     m = IdMap(ENTRIES)
-    assert m.anilist_ids({"tvdb": "900"}, False, []) == {1, 2, 3}
+    assert m.anilist_ids({"tvdb": "900"}, False, []) == {1, 2}
+
+
+def test_entry_without_a_season_number():
+    m = IdMap([
+        {"type": "TV", "anilist_id": 1, "tvdb_id": 900},
+        {"type": "OVA", "anilist_id": 2, "tvdb_id": 900},
+        {"type": "MOVIE", "anilist_id": 3, "tvdb_id": 900, "season": {"tvdb": 0}},
+    ])
+    # A TV series without a season number is season 1. An OVA without a season number is a special.
+    assert m.anilist_ids({"tvdb": "900"}, False, [1]) == {1}
+    assert m.anilist_ids({"tvdb": "900"}, False, [2]) == {1}
+    assert m.anilist_ids({"tvdb": "900"}, False, []) == {1}
+
+
+def test_tvdb_season_number_is_used_before_the_tmdb_number():
+    # TMDB has season 1 for all seasons of this series. TVDB has the real season numbers.
+    m = IdMap([
+        {"type": "TV", "anilist_id": 1, "themoviedb_id": {"tv": 500}, "tvdb_id": 900, "season": {"tvdb": 1, "tmdb": 1}},
+        {"type": "TV", "anilist_id": 2, "themoviedb_id": {"tv": 500}, "tvdb_id": 900, "season": {"tvdb": 2, "tmdb": 1}},
+        {"type": "TV", "anilist_id": 3, "themoviedb_id": {"tv": 500}, "tvdb_id": 900, "season": {"tvdb": 3, "tmdb": 1}},
+    ])
+    assert m.anilist_ids({"tmdb": "500", "tvdb": "900"}, False, [1]) == {1}
+    assert m.anilist_ids({"tmdb": "500", "tvdb": "900"}, False, [2]) == {1, 2}
+    # The library item has only the TMDB id: the entries still have their TVDB season numbers
+    assert m.anilist_ids({"tmdb": "500"}, False, [2]) == {1, 2}
+
+
+def test_tmdb_season_number_is_used_when_the_entry_has_no_tvdb_number():
+    m = IdMap([{"type": "TV", "anilist_id": 7, "themoviedb_id": {"tv": 500}, "season": {"tmdb": 2}}])
+    assert m.anilist_ids({"tmdb": "500"}, False, [1]) == set()
+    assert m.anilist_ids({"tmdb": "500"}, False, [2]) == {7}
+
+
+def test_a_later_season_than_the_library_has_is_not_in_the_result():
+    m = IdMap([{"type": "TV", "anilist_id": n, "tvdb_id": 900, "season": {"tvdb": n}} for n in (1, 2, 3, 4, 5)])
+    assert m.anilist_ids({"tvdb": "900"}, False, [1, 2, 3]) == {1, 2, 3}
+    assert m.anilist_ids({"tvdb": "900"}, False, [3]) == {1, 2, 3}
 
 
 def test_movie_uses_the_movie_id_and_the_imdb_id():
