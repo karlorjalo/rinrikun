@@ -153,6 +153,12 @@ def recommend(
     return engine.with_match(results, kinds, links)
 
 
+@app.get("/api/recommend/steps")
+def recommend_steps(k: int = Query(40, le=100, ge=1), new_only: bool = True, kinds: str = KINDS, links: bool = LINKS):
+    """Return the steps from the catalog to the list, for the animation of the Recommendations map."""
+    return engine.recommendation_steps(k=k, kinds=kinds, links=links, new_only=new_only)
+
+
 @app.get("/api/rec-log")
 def rec_log():
     """Return what the user did with the shows that the lists of recommendations gave."""

@@ -505,6 +505,10 @@ class Engine:
 
         If `links` is false, the score has no part from the crowd links.
 
+        `stages` in the result has the score of the candidates after each part of the formula:
+        "content", "links", "dislikes" and "kind". A part that the formula does not use, or that
+        changes no score, has no stage.
+
         `extra` are rows that are not candidates, for example the shows of the user. Each of them
         gets a score on the scale of the candidates: each part of its score uses the mean and the
         standard deviation that the part has for the candidates. An extra row ignores the shows of
@@ -556,6 +560,7 @@ class Engine:
             extra_taste = self._taste_scores(extra, leave_out=True)
             extra_content = 0.5 * _scale_like(nearest, extra_nearest) + 0.5 * _scale_like(taste, extra_taste)
             extra_scores = _scale_like(content, extra_content) - D_PENALTY * extra_d
+        stages = [("content", scores.copy())]
 
         # Content tells the kind of a show. The AniList user recommendations tell which shows the
         # people who like one show also like. This second signal comes from other people, and it
@@ -568,6 +573,7 @@ class Engine:
             scores = scores + LINK_WEIGHT * _zscore(cand_links)
             if extra:
                 extra_scores = extra_scores + LINK_WEIGHT * _scale_like(cand_links, link_score[extra_fr])
+            stages.append(("links", scores.copy()))
 
         # Shows that are similar to the C-tier and D-tier shows of the user, or to the shows that
         # the user removed from the recommendations, get a lower score
@@ -594,6 +600,8 @@ class Engine:
         if extra:
             extra_predicted = self._predicted_tier(extra, leave_out=True)
             extra_scores = extra_scores - TIER_PENALTY * np.maximum(0.0, -_scale_like(predicted, extra_predicted) - TIER_MARGIN)
+        if disliked or low.any():
+            stages.append(("dislikes", scores.copy()))
 
         # The "usual kinds" formula: a candidate of a kind that the library has many of moves up.
         # In the hidden franchise test this part moves the S-tier and A-tier shows up in the full
@@ -604,9 +612,54 @@ class Engine:
             scores = scores + KIND_WEIGHT * _zscore(kind)
             if extra:
                 extra_scores = extra_scores + KIND_WEIGHT * _scale_like(kind, self._kind_values(extra, tables))
+            stages.append(("kind", scores.copy()))
 
         return {"scores": scores, "extra_scores": extra_scores, "best": best, "liked": liked,
-                "link_source": link_source, "cand_fr": cand_fr}
+                "link_source": link_source, "cand_fr": cand_fr, "stages": stages}
+
+    def recommendation_steps(self, k: int = 40, kinds: str = "all", links: bool = True, new_only: bool = True) -> dict:
+        """Return the steps from the catalog to the list of recommendations, for the animation of the map.
+
+        Each step has a key, the number of shows that stay, and the map points of these shows:
+        positions in the points of get_vector_map, the best show first.
+          catalog   All shows. This step has no points.
+          new       The candidates: the shows that the list can have.
+          content, links, dislikes, kind
+                    One step for each part of the formula. The shows that stay are the best
+                    shows by the sum of the parts up to this step.
+          list      The first k shows by the full formula.
+        The numbers of shows go down in equal ratios from the candidates to the list. A show can
+        come back in a later step, because a later part can move it up.
+
+        `info` has the numbers of the data of the user that the texts of the steps use.
+        """
+        if kinds not in KINDS:
+            raise ValueError(f"unknown kinds {kinds}")
+        owned = self.owned_franchises()
+        skip = owned if new_only else set()
+        # The candidates of _recommend
+        cand = [j for j, r in enumerate(self.rows)
+                if not r["owned"] and r["id"] not in self.duplicate_of and self.franchise[r["id"]] not in skip
+                and _watchable(r) and r["id"] not in self.dismissed
+                and (self.franchise[r["id"]] in owned or self.entry_row[self.franchise[r["id"]]] == j)]
+        point_of = {j: n for n, j in enumerate(j for j, r in enumerate(self.rows) if r["id"] not in self.duplicate_of)}
+        liked, liked_w = self._liked()
+        disliked = [i for i in self.owned_idx if self.rows[i].get("tier") in ("C", "D")]
+        info = {"shows": len(self.owned_idx), "franchises": len(owned), "removed": len(self.dismissed),
+                "liked": len(liked) if self.owned_idx else 0, "disliked": len(disliked),
+                "sources": len({int(self.row_fr[i]) for i in self._link_sources(liked, liked_w)[0]}) if self.owned_idx else 0}
+        steps = [{"key": "catalog", "count": len(point_of), "points": None},
+                 {"key": "new", "count": len(cand), "points": [point_of[j] for j in cand]}]
+        if cand and self.owned_idx:
+            stages = self._hybrid(cand, kinds, owned, links=links)["stages"]
+            ratio = min(1.0, k / len(cand)) ** (1.0 / (len(stages) + 1))
+            for n, (key, scores) in enumerate(stages):
+                size = max(k, int(round(len(cand) * ratio ** (n + 1))))
+                keep = self._one_per_franchise(np.argsort(-scores, kind="stable"), size, cand)
+                steps.append({"key": key, "count": len(keep), "points": [point_of[cand[j]] for j in keep]})
+            keep = self._one_per_franchise(np.argsort(-stages[-1][1], kind="stable"), k, cand)
+            steps.append({"key": "list", "count": len(keep), "points": [point_of[cand[j]] for j in keep]})
+        return {"kinds": kinds, "links": links, "k": k, "info": info, "steps": steps}
 
     def _state_key(self) -> tuple:
         """Return a value that changes when the shows, the tiers or the removed shows of the user change."""

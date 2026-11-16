@@ -1209,3 +1209,62 @@ def test_lists_of_the_user_use_the_formula_without_the_links(tmp_path):
         assert [r["match"] for r in e.review_queue(links=links)] == [
             round(float(match[e.pos[r["id"]]]), 1) for r in e.review_queue(links=links)]
         assert e.map_match(links=links) == [round(float(v), 1) for v in match]
+
+
+def _steps_engine(tmp_path):
+    """Three liked shows, one show with a low tier, and 30 candidates. AniList users link al:1 to al:100."""
+    from anime_vec.store import Store
+    s = Store(tmp_path / "steps.db")
+    specs = [("al:1", [1, 0, 0, 0], 1, ["Band"], [[100, 50]]), ("al:2", [0.9, 0.1, 0, 0], 1, ["Band"], []),
+             ("al:3", [0.8, 0.2, 0, 0], 1, ["Band", "School"], []), ("al:4", [0, 0, 1, 0], 1, ["Mecha"], [])]
+    for n in range(30):
+        specs.append((f"al:{100 + n}", [np.cos(n / 10), np.sin(n / 10), 0.02 * n, 0.1], 0,
+                      ["Band"] if n % 3 == 0 else ["Mecha"] if n % 3 == 1 else ["School"], []))
+    for rid, vec, owned, tags, recommendations in specs:
+        s.upsert_rows([{"id": rid, "source": "anilist", "title": rid, "title_native": "",
+                        "year": 2000 + int(rid.split(":")[1]) % 20, "format": "tv", "genres": [], "tags": tags,
+                        "tag_ranks": [80] * len(tags), "studios": [], "overview": "O", "score": 7.0, "owned": owned,
+                        "tmdbid": None, "anilist_id": int(rid.split(":")[1]), "poster": None,
+                        "recommendations": recommendations}])
+        s.save_embedding(rid, np.array(vec, dtype=np.float32).tobytes())
+    e = Engine(s)
+    for tier, show_id in (("S", "al:1"), ("A", "al:2"), ("B", "al:3"), ("C", "al:4")):
+        e.set_show_tier(show_id, tier)
+    return e
+
+
+def test_steps_go_from_the_catalog_to_the_list(tmp_path):
+    e = _steps_engine(tmp_path)
+    out = e.recommendation_steps(k=3, kinds="usual")
+    steps = out["steps"]
+    assert [s["key"] for s in steps] == ["catalog", "new", "content", "links", "dislikes", "kind", "list"]
+    counts = [s["count"] for s in steps]
+    assert counts[0] == 34 and counts[1] == 30 and counts[-1] == 3
+    assert counts == sorted(counts, reverse=True) and len(set(counts)) > 4
+    assert steps[0]["points"] is None
+    assert all(len(s["points"]) == s["count"] for s in steps[1:])
+    # The points are positions in the points of the map, and the last step is the list
+    points = e.get_vector_map()["points"]
+    listed = [points[p]["id"] for p in steps[-1]["points"]]
+    assert listed == [r["id"] for r in e.recommend(k=3, kinds="usual", new_only=True)]
+    assert all(not points[p]["owned"] for s in steps[1:] for p in s["points"])
+    assert out["info"] == {"shows": 4, "franchises": 4, "removed": 0, "liked": 3, "disliked": 1, "sources": 3}
+
+
+def test_steps_have_only_the_parts_of_the_formula(tmp_path):
+    e = _steps_engine(tmp_path)
+    keys = lambda **kw: [s["key"] for s in e.recommendation_steps(k=3, **kw)["steps"]]
+    assert keys(kinds="all") == ["catalog", "new", "content", "links", "dislikes", "list"]
+    assert keys(kinds="usual", links=False) == ["catalog", "new", "content", "dislikes", "kind", "list"]
+    # Without a low tier and without a removed show, the dislikes change no score
+    e.set_show_tier("al:4", "B")
+    assert keys(kinds="all", links=False) == ["catalog", "new", "content", "list"]
+    with pytest.raises(ValueError):
+        e.recommendation_steps(kinds="other")
+
+
+def test_steps_without_shows_of_the_user(tmp_path):
+    specs = [(f"al:{n}", [1, 0.1 * n, 0, 0], 0, ["Band"], [80]) for n in range(1, 5)]
+    e = _engine_from(tmp_path, specs)
+    out = e.recommendation_steps(k=3)
+    assert [(s["key"], s["count"]) for s in out["steps"]] == [("catalog", 4), ("new", 4)]

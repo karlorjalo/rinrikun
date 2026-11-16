@@ -143,6 +143,11 @@ def test_api_recommend_new_only(tmp_path):
         # The formula without the crowd links
         no_links = client.get("/api/recommend?k=10&kinds=usual&links=false")
         assert no_links.status_code == 200 and all("linked_favorite" not in r for r in no_links.json())
+        # The steps from the catalog to the list, for the animation of the map
+        steps = client.get("/api/recommend/steps?k=1&kinds=usual&links=false").json()
+        assert [s["key"] for s in steps["steps"]][:2] == ["catalog", "new"] and steps["steps"][-1]["key"] == "list"
+        assert steps["steps"][0]["count"] == 3 and steps["links"] is False
+        assert client.get("/api/recommend/steps?kinds=other").status_code == 422
         # The Center and Peak formulas do not exist now
         assert client.get("/api/recommend?mode=center").status_code == 422
     finally:
