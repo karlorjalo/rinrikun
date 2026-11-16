@@ -473,3 +473,14 @@ def test_library_row_with_two_seasons_by_id(tmp_path):
     # A tier on the library row goes to the two seasons
     e.set_show_tier("jf:1", "S")
     assert e.by_id["al:10"]["tier"] == "S" and e.by_id["al:11"]["tier"] == "S"
+
+
+def test_unreleased_shows_are_not_recommended(tmp_path):
+    e = _franchise_engine(tmp_path)
+    ids = {r["id"] for r in e.recommend(k=10)}
+    assert "al:20" in ids
+    e.by_id["al:20"]["status"] = "NOT_YET_RELEASED"
+    assert "al:20" not in {r["id"] for r in e.recommend(k=10)}
+    assert "al:20" not in {r["id"] for r in e.recommend(k=10, seed_id="al:1")}
+    e.by_id["al:20"]["status"] = "FINISHED"
+    assert "al:20" in {r["id"] for r in e.recommend(k=10)}

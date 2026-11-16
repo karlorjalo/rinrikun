@@ -114,3 +114,21 @@ def test_cache_without_recommendations_refetches(tmp_path, monkeypatch):
     monkeypatch.setattr(anilist_pull, "_graphql", lambda page_no, timeout=60: page(new_media))
 
     assert anilist_pull.fetch_pool()[0]["recommendations"] == [[5, 8]]
+
+
+def test_row_from_media_keeps_status_and_episodes():
+    r = row_from_media(dict(MEDIA, status="FINISHED", episodes=12))
+    assert r["status"] == "FINISHED" and r["episodes"] == 12
+    assert row_from_media(MEDIA)["status"] is None
+
+
+def test_cache_from_an_older_query_refetches(tmp_path, monkeypatch):
+    monkeypatch.setattr(anilist_pull, "CACHE_DIR", tmp_path)
+    _fake_time(monkeypatch)
+    old_media = dict(MEDIA, relations={"edges": []}, recommendations={"nodes": []})
+    new_media = dict(old_media, status="FINISHED", episodes=12)
+    page = lambda media: {"data": {"Page": {"pageInfo": {"lastPage": 1}, "media": [media]}}}
+    (tmp_path / "page_1.json").write_text(json.dumps(page(old_media)), encoding="utf-8")
+    monkeypatch.setattr(anilist_pull, "_graphql", lambda page_no, timeout=60: page(new_media))
+
+    assert anilist_pull.fetch_pool()[0]["status"] == "FINISHED"

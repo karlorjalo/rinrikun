@@ -34,6 +34,11 @@ def _entry_key(r: dict) -> tuple:
     return (format_rank.get(r.get("format"), 2), r.get("year") or 9999, r["id"])
 
 
+def _released(r: dict) -> bool:
+    """A show that is not released cannot be watched, thus it is not a recommendation."""
+    return r.get("status") != "NOT_YET_RELEASED"
+
+
 def _zscore(x: np.ndarray) -> np.ndarray:
     sd = float(x.std())
     return (x - x.mean()) / sd if sd > 1e-9 else np.zeros_like(x)
@@ -237,7 +242,7 @@ class Engine:
             exclude_ids = {seed_id} | set(self.counterparts.get(seed_id, []))
             allowed = [j for j in np.argsort(-sims)
                        if self.ids[j] not in exclude_ids and not self.rows[j]["owned"]
-                       and self.franchise[self.ids[j]] not in skip]
+                       and self.franchise[self.ids[j]] not in skip and _released(self.rows[j])]
             return [self._result(j, float(sims[j]), seed=None) for j in self._one_per_franchise(allowed, k)]
 
         # A franchise that the user does not own has one candidate: its entry point. A franchise that
@@ -245,6 +250,7 @@ class Engine:
         owned = self.owned_franchises()
         cand_indices = [j for j, r in enumerate(self.rows)
                         if not r["owned"] and r["id"] not in self.duplicate_of and self.franchise[r["id"]] not in skip
+                        and _released(r)
                         and (self.franchise[r["id"]] in owned or self.entry_row[self.franchise[r["id"]]] == j)]
         if not cand_indices:
             return []

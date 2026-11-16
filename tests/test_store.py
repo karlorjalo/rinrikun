@@ -117,3 +117,11 @@ def test_library_link_columns_roundtrip(tmp_path):
     # A later build without the link removes it
     s.upsert_rows([make_row(1)])
     assert s.load_rows()[0]["library_id"] is None
+
+
+def test_status_and_episodes_roundtrip(tmp_path):
+    s = Store(tmp_path / "status.db")
+    s.upsert_rows([make_row(1, status="RELEASING", episodes=24), make_row(2)])
+    rows = s.load_rows()
+    assert rows[0]["status"] == "RELEASING" and rows[0]["episodes"] == 24
+    assert rows[1]["status"] is None and rows[1]["episodes"] is None

@@ -6,13 +6,18 @@ from pathlib import Path
 CACHE_DIR = Path(__file__).resolve().parent.parent / "anilist_cache"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-QUERY = """query ($page: Int) { Page(page: $page, perPage: 50) { pageInfo { lastPage } 
-media(type: ANIME, sort: POPULARITY_DESC, isAdult: false) {
-id title { romaji english native } format seasonYear genres
+# The fields of one anime. The page query and the id query use the same fields.
+MEDIA_FIELDS = """id title { romaji english native } format seasonYear status episodes genres
 tags { name rank } studios(isMain: true) { nodes { name } }
 description(asHtml: false) averageScore coverImage { medium }
 relations { edges { relationType node { id type } } }
-recommendations(sort: RATING_DESC, perPage: 25) { nodes { rating mediaRecommendation { id type } } } } } }"""
+recommendations(sort: RATING_DESC, perPage: 25) { nodes { rating mediaRecommendation { id type } } }"""
+QUERY = ("query ($page: Int) { Page(page: $page, perPage: 50) { pageInfo { lastPage } "
+         "media(type: ANIME, sort: POPULARITY_DESC, isAdult: false) { " + MEDIA_FIELDS + " } } }")
+# A cached answer without these keys is from an older query
+REQUIRED_KEYS = ("relations", "recommendations", "status")
+# Seconds between two requests. AniList permits 30 requests in one minute.
+PAUSE = 2.1
 MAX_PAGES = 80  # ~4000 anime
 # Relation types that connect two entries of the same franchise
 FRANCHISE_RELATIONS = {"SEQUEL", "PREQUEL", "PARENT", "SIDE_STORY", "SUMMARY", "ALTERNATIVE"}
@@ -62,6 +67,9 @@ def row_from_media(m: dict) -> dict:
         "poster": (m.get("coverImage") or {}).get("medium"),
         "relations": franchise_relations(m),
         "recommendations": user_recommendations(m),
+        # FINISHED, RELEASING, NOT_YET_RELEASED, CANCELLED or HIATUS
+        "status": m.get("status"),
+        "episodes": m.get("episodes"),
     }
 
 
@@ -83,7 +91,7 @@ def _fetch_page(page: int) -> dict:
 
 def _fetch_and_cache(page: int, cache: Path) -> None:
     cache.write_text(json.dumps(_fetch_page(page)), encoding="utf-8")
-    time.sleep(1.2)
+    time.sleep(PAUSE)
 
 
 def _read_cache(cache: Path) -> dict | None:
@@ -93,7 +101,7 @@ def _read_cache(cache: Path) -> dict | None:
         media = page_data["media"]
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
-    if media and ("relations" not in media[0] or "recommendations" not in media[0]):
+    if media and any(key not in media[0] for key in REQUIRED_KEYS):
         return None
     return page_data
 
