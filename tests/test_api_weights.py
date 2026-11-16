@@ -133,3 +133,20 @@ def test_api_dismissed(tmp_path):
         assert client.post("/api/dismissed", json={"id": "al:999"}).status_code == 404
     finally:
         serve.store, serve.engine = orig_store, orig_engine
+
+
+def test_api_compresses_large_responses(tmp_path):
+    import serve
+    store = Store(tmp_path / "api_gzip.db")
+    store.upsert_rows([make_row(i, owned=0, overview="A long text. " * 40) for i in range(1, 40)])
+    for i in range(1, 40):
+        store.save_embedding(f"al:{i}", b"\x00" * 1536)
+    orig_store, orig_engine = serve.store, serve.engine
+    serve.store, serve.engine = store, Engine(store)
+    try:
+        client = TestClient(serve.app)
+        res = client.get("/api/vector-map", headers={"Accept-Encoding": "gzip"})
+        assert res.status_code == 200 and res.headers.get("content-encoding") == "gzip"
+        assert len(res.json()["points"]) == 39
+    finally:
+        serve.store, serve.engine = orig_store, orig_engine

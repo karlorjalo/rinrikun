@@ -7,6 +7,7 @@ sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -15,6 +16,8 @@ from anime_vec.store import Store
 
 ROOT = Path(__file__).resolve().parent
 app = FastAPI()
+# The map data of the full catalog is about 8 MB. It is about 5 times smaller when compressed.
+app.add_middleware(GZipMiddleware, minimum_size=2000)
 store = Store(ROOT / "anime_vec.db")
 engine = Engine(store)
 
