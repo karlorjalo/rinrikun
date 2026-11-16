@@ -649,7 +649,10 @@ class Engine:
                 self.weights.pop(sid, None)
 
         primary = self.by_id[show_id]
-        return {"id": show_id, "tier": primary["tier"], "weight": primary["weight"]}
+        # "ids" are the rows that changed: the show and its counterparts. The map has only one of
+        # these rows as a point, and the interface must know which points to change.
+        changed = [sid for sid in target_ids if sid in self.by_id]
+        return {"id": show_id, "tier": primary["tier"], "weight": primary["weight"], "ids": changed}
 
     def review_queue(self, unrated_only: bool = False) -> list[dict]:
         c = self.taste_center() if self.owned_idx else None

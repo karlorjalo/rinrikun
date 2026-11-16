@@ -375,22 +375,33 @@ function renderProfile() {
   const el = $("#tab-profile");
   if (!p) return;
 
+  // Build the tab only one time. A later call changes only the numbers. If each call built the
+  // tab again, the map would be new after each edit, and the user would lose the zoom and the position.
+  if (!$("#profile-vector-canvas")) buildProfile(el);
+
   const tiers = p.tier_summary || {};
+  $("#profile-counts").textContent = `${p.owned_count} watched · ${p.total_count.toLocaleString()} in the catalog`;
+  el.querySelectorAll("[data-tier-count]").forEach((node) => {
+    node.textContent = tiers[node.dataset.tierCount] || 0;
+  });
+}
+
+function buildProfile(el) {
   const tierItem = (t) => `
-            <div class="tier-summary-item clickable" data-filter-tier="${t}" title="View ${t} tier ratings"><span class="tier-pill tier-${t.toLowerCase()}">${t}</span> <span class="tier-summary-count">${tiers[t] || 0}</span></div>`;
+            <div class="tier-summary-item clickable" data-filter-tier="${t}" title="View ${t} tier ratings"><span class="tier-pill tier-${t.toLowerCase()}">${t}</span> <span class="tier-summary-count" data-tier-count="${t}"></span></div>`;
 
   el.innerHTML = `
     <div class="hero-dna">
       <div class="hero-dna-top">
         <h2 class="hero-dna-title">Taste profile</h2>
-        <span class="hero-dna-counts">${p.owned_count} watched · ${p.total_count.toLocaleString()} in the catalog</span>
+        <span class="hero-dna-counts" id="profile-counts"></span>
       </div>
       <div class="tier-summary-box">
         <div class="tier-summary-title">
           <span>Your ratings</span>
         </div>
         <div class="tier-summary-row">${["S", "A", "B", "C", "D"].map(tierItem).join("")}
-          <div class="tier-summary-item" style="color:var(--muted);"><span style="font-size:11.5px;">Unrated:</span> <span class="tier-summary-count">${tiers.unrated || 0}</span></div>
+          <div class="tier-summary-item" style="color:var(--muted);"><span style="font-size:11.5px;">Unrated:</span> <span class="tier-summary-count" data-tier-count="unrated"></span></div>
         </div>
       </div>
     </div>
@@ -426,28 +437,77 @@ function renderProfile() {
   });
 
   // The map shows the S-tier shows as posters
-  getVectorMap().then((data) => {
-    const sTier = ((data && data.points) || []).filter((pt) => pt.owned && pt.tier === "S").map((pt) => pt.id);
-    initVectorMap("profile-vector-canvas", "profile-vector-tooltip", sTier, "S tier", "tier");
+  getVectorMap().then(() => {
+    initVectorMap("profile-vector-canvas", "profile-vector-tooltip", sTierIds(), "S tier", "tier");
   });
 }
 
 let vectorMapData = null;
+let vectorMapLoading = null;
+// The points of the loaded map, by the id of the show
+const vectorMapPoints = new Map();
+// The changes that the user makes while the map data loads. That data can be older than these changes.
+let lateMapChanges = [];
 
-// The map shows tiers and watched state. Thus a change of these makes the cached map data stale.
-function apiWrite(url, options) {
-  vectorMapData = null;
-  return fetch(url, options);
-}
-async function getVectorMap() {
-  if (!vectorMapData) {
-    try {
-      vectorMapData = await (await fetch("/api/vector-map")).json();
-    } catch (e) {
-      console.error("Failed to load vector map data", e);
-    }
+// Download the map data one time. All maps use the same data.
+function getVectorMap() {
+  if (!vectorMapLoading) {
+    lateMapChanges = [];
+    vectorMapLoading = fetch("/api/vector-map")
+      .then((res) => res.json())
+      .then((data) => {
+        vectorMapPoints.clear();
+        (data.points || []).forEach((pt) => vectorMapPoints.set(pt.id, pt));
+        vectorMapData = data;
+        lateMapChanges.forEach(changeMapPoints);
+        lateMapChanges = [];
+        return data;
+      })
+      .catch((e) => {
+        console.error("Failed to load vector map data", e);
+        vectorMapLoading = null;
+        return null;
+      });
   }
-  return vectorMapData;
+  return vectorMapLoading;
+}
+
+// Change the points of the loaded map in their positions. `change` is the answer of the server
+// to a change of a tier or of the watched state.
+function changeMapPoints(change) {
+  (change.ids || [change.id]).forEach((id) => {
+    const pt = vectorMapPoints.get(id);
+    if (!pt) return;
+    if ("tier" in change) pt.tier = change.tier;
+    if ("owned" in change) pt.owned = change.owned;
+  });
+}
+
+function sTierIds() {
+  return ((vectorMapData && vectorMapData.points) || [])
+    .filter((pt) => pt.owned && pt.tier === "S")
+    .map((pt) => pt.id);
+}
+
+// Draw the open maps again after a change. A map keeps its zoom and its position.
+function refreshOpenMaps() {
+  const profileMap = activeVectorMaps.get("profile-vector-canvas");
+  if (profileMap) profileMap.setHighlight(sTierIds());
+  activeVectorMaps.forEach((ctrl) => ctrl.scheduleDraw());
+}
+
+// Send a change of a tier or of the watched state to the server. The map shows tiers and the
+// watched state, thus the open maps get the change immediately. The map data is not downloaded
+// again: a new download would build the maps again.
+async function apiWrite(url, options) {
+  const res = await fetch(url, options);
+  if (res.ok) {
+    const change = await res.clone().json();
+    if (vectorMapData) changeMapPoints(change);
+    else lateMapChanges.push(change);
+    refreshOpenMaps();
+  }
+  return res;
 }
 
 const posterImgCache = new Map();
@@ -1803,7 +1863,11 @@ async function recs() {
     : `/api/recommend?k=40&mode=${recsVariety ? "diverse" : "hybrid"}`;
   rawRecs = await (await fetch(`${base}&new_only=${!recsSequels}`)).json();
   renderRecsGrid();
-  initVectorMap("recs-vector-canvas", "recs-vector-tooltip", rawRecs.map((s) => s.id), "Recommended");
+  const ids = rawRecs.map((s) => s.id);
+  const map = activeVectorMaps.get("recs-vector-canvas");
+  // An open map keeps its zoom and its position: only the highlighted shows change
+  if (map) map.setHighlight(ids);
+  else initVectorMap("recs-vector-canvas", "recs-vector-tooltip", ids, "Recommended");
 }
 
 let reviewQueue = [];

@@ -39,7 +39,7 @@ def test_api_weights_endpoints(tmp_path):
         # 2. Rate al:1 as S tier
         post_res = client.post("/api/weights", json={"id": "al:1", "tier": "S"})
         assert post_res.status_code == 200
-        assert post_res.json() == {"id": "al:1", "tier": "S", "weight": 2.0}
+        assert post_res.json() == {"id": "al:1", "tier": "S", "weight": 2.0, "ids": ["al:1"]}
 
         # Check /api/ratings endpoint
         ratings_res = client.get("/api/ratings")
@@ -65,7 +65,7 @@ def test_api_weights_endpoints(tmp_path):
         # 5. Delete weight via DELETE
         del_res = client.delete("/api/weights?id=al:1")
         assert del_res.status_code == 200
-        assert del_res.json() == {"id": "al:1", "tier": None, "weight": 1.0}
+        assert del_res.json() == {"id": "al:1", "tier": None, "weight": 1.0, "ids": ["al:1"]}
 
         # 6. Both unrated now
         unrated_res2 = client.get("/api/review-queue?unrated_only=true")

@@ -182,13 +182,13 @@ def test_deduplicate_library_and_pool_counterparts(tmp_path):
     assert rq[0]["id"] == "jf:1"
 
     # 3. Rating jf:1 sets tier on both jf:1 and al:100
-    e.set_show_tier("jf:1", "S")
+    assert e.set_show_tier("jf:1", "S") == {"id": "jf:1", "tier": "S", "weight": 2.0, "ids": ["jf:1", "al:100"]}
     assert e.by_id["jf:1"]["tier"] == "S"
     assert e.by_id["al:100"]["tier"] == "S"
     assert len(e.rated_shows()) == 1
 
-    # 4. Rating al:100 updates jf:1
-    e.set_show_tier("al:100", "A")
+    # 4. Rating al:100 updates jf:1. The answer names jf:1, which is the point on the map.
+    assert e.set_show_tier("al:100", "A")["ids"] == ["al:100", "jf:1"]
     assert e.by_id["jf:1"]["tier"] == "A"
     assert e.by_id["al:100"]["tier"] == "A"
 
