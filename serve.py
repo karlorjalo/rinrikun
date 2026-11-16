@@ -1,3 +1,4 @@
+import datetime
 import sys
 import threading
 import urllib.request
@@ -130,7 +131,18 @@ def recommend(
 ):
     if seed and seed not in engine.by_id:
         raise HTTPException(404, "unknown seed")
-    return engine.with_match(engine.recommend(k=k, seed_id=seed, mode=mode, new_only=new_only, kinds=kinds), kinds)
+    results = engine.recommend(k=k, seed_id=seed, mode=mode, new_only=new_only, kinds=kinds)
+    if not seed:
+        # The log of the results: the shows of new franchises that the list gave, with their places
+        store.log_recommendations([(r["id"], place) for place, r in enumerate(results) if not r.get("franchise_owned")],
+                                  kinds, datetime.date.today().isoformat())
+    return engine.with_match(results, kinds)
+
+
+@app.get("/api/rec-log")
+def rec_log():
+    """Return what the user did with the shows that the lists of recommendations gave."""
+    return engine.recommendation_results()
 
 
 @app.get("/api/shows")

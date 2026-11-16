@@ -413,9 +413,44 @@ $("#detail-modal").onclick = (e) => {
 
 let profileData = null;
 
+// What the user did with the shows that the lists of recommendations gave
+let recResults = null;
+
 async function profile() {
-  profileData = await (await fetch("/api/profile")).json();
+  [profileData, recResults] = await Promise.all([
+    fetch("/api/profile").then((r) => r.json()),
+    fetch("/api/rec-log").then((r) => r.json()).catch(() => null),
+  ]);
   renderProfile();
+}
+
+// The results of the recommendations: the shows that the list gave, and the shows of these that
+// the user added later, with their tiers
+function renderRecResults() {
+  const box = $("#rec-results");
+  if (!box) return;
+  const res = recResults;
+  if (!res || !res.shown) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const since = new Date(res.since + "T00:00:00").toLocaleDateString("en-GB", { year: "numeric", month: "short", day: "numeric" });
+  const tiers = ["S", "A", "B", "C", "D"].filter((t) => res.tiers[t])
+    .map((t) => `<span class="tier-pill tier-${t.toLowerCase()}">${t}</span> ${res.tiers[t]}`);
+  if (res.unrated) tiers.push(`${res.unrated} without a tier`);
+  const added = res.added
+    ? `You added ${res.added} of them${tiers.length ? ": " + tiers.join(" · ") : ""}.`
+    : "You added none of them until now.";
+  const removed = res.removed ? ` You removed ${res.removed}.` : "";
+  const shows = res.shows.slice(0, 6).map((show) => {
+    const pill = show.tier ? `<span class="tier-pill tier-${show.tier.toLowerCase()}">${show.tier}</span> ` : "";
+    return `<span class="rec-results-show">${pill}${esc(displayTitles(show).main)}</span>`;
+  }).join("");
+  box.innerHTML = `
+    <div class="tier-summary-title"><span>Results of the recommendations</span></div>
+    <div class="rec-results-text">Since ${since}, the list gave you ${res.shown} new franchises. ${added}${removed}</div>
+    ${shows ? `<div class="rec-results-shows">${shows}</div>` : ""}`;
 }
 
 function renderProfile() {
@@ -438,6 +473,7 @@ function renderProfile() {
   el.querySelectorAll("[data-tier-count]").forEach((node) => {
     node.textContent = tiers[node.dataset.tierCount] || 0;
   });
+  renderRecResults();
 }
 
 function buildProfile(el) {
@@ -458,6 +494,7 @@ function buildProfile(el) {
           <div class="tier-summary-item" style="color:var(--muted);"><span style="font-size:11.5px;">Unrated:</span> <span class="tier-summary-count" data-tier-count="unrated"></span></div>
         </div>
       </div>
+      <div class="tier-summary-box rec-results" id="rec-results" hidden></div>
     </div>
 
     <div class="vector-map-wrap" id="profile-vector-map-wrap">

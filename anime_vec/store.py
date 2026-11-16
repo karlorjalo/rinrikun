@@ -37,6 +37,14 @@ CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT
 );
+CREATE TABLE IF NOT EXISTS rec_log (
+  id TEXT PRIMARY KEY,
+  first_seen TEXT NOT NULL,
+  last_seen TEXT NOT NULL,
+  best_rank INTEGER NOT NULL,
+  days INTEGER NOT NULL,
+  kinds TEXT
+);
 """
 
 # The columns of the shows table that the build writes
@@ -102,6 +110,32 @@ class Store:
         else:
             self.con.execute("DELETE FROM dismissed WHERE id=?", (show_id,))
         self.con.commit()
+
+    def log_recommendations(self, items: list[tuple[str, int]], kinds: str, today: str):
+        """Record the shows of a list of recommendations. Each item is (id, place in the list).
+
+        The log keeps for each show the first day and the last day on which a list had it, its
+        best place, the number of days, and the formula of the first list.
+        """
+        if self.read_only:
+            return
+        for show_id, rank in items:
+            self.con.execute(
+                "INSERT INTO rec_log (id, first_seen, last_seen, best_rank, days, kinds) VALUES (?, ?, ?, ?, 1, ?) "
+                "ON CONFLICT(id) DO UPDATE SET best_rank = MIN(best_rank, excluded.best_rank), "
+                "days = days + (last_seen != excluded.last_seen), last_seen = excluded.last_seen",
+                (show_id, today, today, int(rank), kinds))
+        self.con.commit()
+
+    def get_rec_log(self) -> dict[str, dict]:
+        """Return the log of the recommendations, by the id of the show."""
+        try:
+            cur = self.con.execute("SELECT id, first_seen, last_seen, best_rank, days, kinds FROM rec_log")
+        except sqlite3.OperationalError:
+            # A read-only database from an older version does not have this table
+            return {}
+        return {r[0]: {"first_seen": r[1], "last_seen": r[2], "best_rank": r[3], "days": r[4], "kinds": r[5]}
+                for r in cur.fetchall()}
 
     def get_weights(self) -> dict[str, dict]:
         cur = self.con.execute("SELECT id, tier, weight FROM show_weights")

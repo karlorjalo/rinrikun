@@ -206,3 +206,18 @@ def test_layout_cache_keeps_the_map_and_the_grid(tmp_path):
     ro = Store(tmp_path / "layout.db", read_only=True)
     ro.save_layout("other", {}, {}, (1.0, 1.4))
     assert s.get_layout("sig") is not None
+
+
+def test_log_of_recommendations(tmp_path):
+    s = Store(tmp_path / "log.db")
+    s.log_recommendations([("al:1", 0), ("al:2", 5)], "usual", "2026-11-16")
+    # The same day again: the best place stays, and the number of days does not change
+    s.log_recommendations([("al:1", 3), ("al:2", 2)], "all", "2026-11-16")
+    s.log_recommendations([("al:1", 7)], "all", "2026-11-18")
+    log = s.get_rec_log()
+    assert log["al:1"] == {"first_seen": "2026-11-16", "last_seen": "2026-11-18", "best_rank": 0, "days": 2, "kinds": "usual"}
+    assert log["al:2"] == {"first_seen": "2026-11-16", "last_seen": "2026-11-16", "best_rank": 2, "days": 1, "kinds": "usual"}
+    # A read-only database does not change
+    ro = Store(tmp_path / "log.db", read_only=True)
+    ro.log_recommendations([("al:9", 0)], "all", "2026-11-19")
+    assert "al:9" not in ro.get_rec_log() and len(ro.get_rec_log()) == 2

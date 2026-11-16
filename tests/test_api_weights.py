@@ -224,3 +224,36 @@ def test_api_passes_the_poster_of_a_library_show_on(tmp_path, monkeypatch):
         assert client.get("/api/poster/jf:2").status_code == 502
     finally:
         serve.store, serve.engine = orig_store, orig_engine
+
+
+def test_api_logs_the_recommendations_and_their_results(tmp_path):
+    import serve
+    store = Store(tmp_path / "api_log.db")
+    # al:2 is a sequel of the owned show al:1. al:3, al:4 and al:5 are new franchises.
+    store.upsert_rows([make_row(1, owned=1), make_row(2, owned=0, relations=[1]),
+                       make_row(3, owned=0), make_row(4, owned=0), make_row(5, owned=0)])
+    for i in range(1, 6):
+        store.save_embedding(f"al:{i}", b"\x00" * 1536)
+    orig_store, orig_engine = serve.store, serve.engine
+    serve.store, serve.engine = store, Engine(store)
+    try:
+        client = TestClient(serve.app)
+        assert client.get("/api/rec-log").json()["shown"] == 0
+        # A list with a seed is not in the log
+        client.get("/api/recommend?k=10&seed=al:1")
+        assert store.get_rec_log() == {}
+        # The list has the sequel al:2, but only the new franchises go into the log
+        assert len(client.get("/api/recommend?k=10").json()) == 4
+        assert set(store.get_rec_log()) == {"al:3", "al:4", "al:5"}
+        # The user adds al:3 with tier A, adds al:4 without a tier, and removes al:5
+        client.post("/api/watched", json={"id": "al:3", "watched": True})
+        client.post("/api/weights", json={"id": "al:3", "tier": "A"})
+        client.post("/api/watched", json={"id": "al:4", "watched": True})
+        client.post("/api/dismissed", json={"id": "al:5", "dismissed": True})
+        res = client.get("/api/rec-log").json()
+        assert (res["shown"], res["added"], res["unrated"], res["removed"]) == (3, 2, 1, 1)
+        assert res["tiers"] == {"S": 0, "A": 1, "B": 0, "C": 0, "D": 0}
+        assert {x["id"]: x["tier"] for x in res["shows"]} == {"al:3": "A", "al:4": None}
+        assert res["since"] is not None
+    finally:
+        serve.store, serve.engine = orig_store, orig_engine

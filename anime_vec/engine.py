@@ -990,6 +990,43 @@ class Engine:
         tier_order = {"S": 0, "A": 1, "B": 2, "C": 3, "D": 4}
         return sorted(out, key=lambda x: (tier_order.get(x.get("tier"), 99), -(x.get("match") or 0.0)))
 
+    def recommendation_results(self) -> dict:
+        """Compare the log of the recommendations with what the user did later.
+
+        The log has each show of a new franchise that a list of recommendations gave. A show
+        counts as "added" if the user now has a show of its franchise. Its tier is the best tier
+        of these shows. The result cannot tell if the user added a show because of the list.
+        """
+        log = self.store.get_rec_log()
+        mine: dict[str, list[int]] = {}
+        for i in self.owned_idx:
+            mine.setdefault(self.franchise[self.ids[i]], []).append(i)
+        order = ["S", "A", "B", "C", "D"]
+        out = {"since": None, "shown": 0, "added": 0, "unrated": 0, "removed": 0,
+               "tiers": {t: 0 for t in order}, "shows": []}
+        for show_id, entry in log.items():
+            if show_id not in self.by_id:
+                continue
+            out["shown"] += 1
+            if out["since"] is None or entry["first_seen"] < out["since"]:
+                out["since"] = entry["first_seen"]
+            rows = mine.get(self.franchise[show_id])
+            if rows:
+                out["added"] += 1
+                rated = sorted((self.rows[i]["tier"] for i in rows if self.rows[i].get("tier") in order), key=order.index)
+                tier = rated[0] if rated else None
+                if tier:
+                    out["tiers"][tier] += 1
+                else:
+                    out["unrated"] += 1
+                r = self.rows[rows[0]]
+                out["shows"].append({"id": r["id"], "title": r.get("title"), "title_native": r.get("title_native"),
+                                     "tier": tier, "first_seen": entry["first_seen"], "best_rank": entry["best_rank"]})
+            elif show_id in self.dismissed:
+                out["removed"] += 1
+        out["shows"].sort(key=lambda x: (x["first_seen"], x["id"]), reverse=True)
+        return out
+
     def tier_summary(self) -> dict[str, int]:
         counts = {"S": 0, "A": 0, "B": 0, "C": 0, "D": 0, "unrated": 0}
         for i in self.owned_idx:
