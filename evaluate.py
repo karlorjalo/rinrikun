@@ -2,6 +2,7 @@
 
     python evaluate.py              # the hidden franchise test for the two formulas
     python evaluate.py --tiers      # also the mean percentile of a hidden show for each tier
+    python evaluate.py --recent 20  # also hide the 20 franchises that you added last, all at the same time
 """
 import sys
 from pathlib import Path
@@ -9,7 +10,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 
 from anime_vec.engine import Engine
-from anime_vec.evaluation import hidden_franchise_test
+from anime_vec.evaluation import hidden_franchise_test, recent_test
 from anime_vec.store import Store
 
 DB = Path(__file__).resolve().parent / "anime_vec.db"
@@ -28,6 +29,12 @@ def main(argv: list[str]):
         s = hidden_franchise_test(engine, ("S", "A"), mode, k)
         median = str(s["median"]) if mode == "hybrid" else "-"
         print(f"{label:<28}{s['n']:>5}{s['hit20']:>10.1%}{s['hit40']:>10.1%}{s['hit100']:>11.1%}{median:>8}")
+    if "--recent" in argv:
+        count = int(argv[argv.index("--recent") + 1])
+        s = recent_test(engine, count)
+        print()
+        print(f"the {s['n']} S and A franchises that you added last, hidden at the same time:")
+        print(f"  first 20: {s['hit20']:.1%}   first 40: {s['hit40']:.1%}   first 100: {s['hit100']:.1%}   median rank: {s['median']}")
     if "--tiers" in argv:
         print()
         print("mean percentile of a hidden franchise by its tier (1.0 = top of the list):")

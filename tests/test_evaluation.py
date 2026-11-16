@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from anime_vec.engine import Engine
-from anime_vec.evaluation import hidden, hidden_franchise_test, rank_of_hidden, rated_shows, summarize
+from anime_vec.evaluation import hidden, hidden_franchise_test, rank_of_hidden, rated_shows, recent_test, summarize
 from anime_vec.store import Store
 
 
@@ -82,3 +82,16 @@ def test_read_only_store_does_not_change_the_database(tmp_path):
     with pytest.raises(Exception):
         ro.set_show_tier("al:0", "A")
     assert path.read_bytes() == before
+
+
+def test_recent_test_hides_only_the_newest_franchises(tmp_path):
+    e = _engine(tmp_path)
+    for rid, date in (("al:0", "2021-01-01"), ("al:1", "2022-01-01"), ("al:10", "2023-01-01"), ("al:11", "2024-01-01")):
+        e.by_id[rid]["added_at"] = date
+    before = list(e.owned_idx)
+    s = recent_test(e, count=2, tiers=("S",))
+    assert s["n"] == 2
+    assert list(e.owned_idx) == before
+    # A show without a date is not in the test
+    e.by_id["al:11"]["added_at"] = None
+    assert recent_test(e, count=10, tiers=("S",))["n"] == 3

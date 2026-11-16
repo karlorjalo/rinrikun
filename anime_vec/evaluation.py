@@ -88,3 +88,25 @@ def summarize(ranks: list[tuple[int, int]]) -> dict:
 def hidden_franchise_test(engine, tiers=("S", "A"), mode: str = "hybrid", k: int = 100000) -> dict:
     """Run the test for each rated franchise with a tier from `tiers` and return the summary."""
     return summarize([rank_of_hidden(engine, show_id, mode, k) for show_id in rated_shows(engine, tiers)])
+
+
+def recent_test(engine, count: int = 20, tiers=("S", "A"), mode: str = "hybrid", k: int = 100000) -> dict:
+    """Hide the `count` rated franchises that the user added last, all at the same time.
+
+    This is nearer to real use than the test of one franchise: the engine sees only the older
+    shows, and the test looks for the newer shows in one list.
+    """
+    dated = []
+    for show_id in rated_shows(engine, tiers):
+        added = engine.by_id[show_id].get("added_at")
+        if added:
+            dated.append((added, show_id))
+    newest = [show_id for _, show_id in sorted(dated)[-count:]]
+    franchises = {engine.franchise[i] for i in newest}
+    members = [m for f in franchises for m in franchise_members(engine, f)]
+    with hidden(engine, members):
+        results = engine.recommend(k=k, mode=mode, new_only=True)
+    position = {}
+    for rank, r in enumerate(results):
+        position.setdefault(engine.franchise[r["id"]], rank)
+    return summarize([(position.get(f, len(results)), len(results)) for f in franchises])
