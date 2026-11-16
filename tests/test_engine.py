@@ -447,3 +447,32 @@ def test_hybrid_moves_shows_like_the_disliked_shows_down(tmp_path):
     assert after.index("al:12") > before.index("al:12") or after[-1] == "al:12"
     assert after[-1] == "al:12"
 
+
+def test_new_franchise_appears_as_its_first_tv_season(tmp_path):
+    from anime_vec.store import Store
+    s = Store(tmp_path / "entry.db")
+    # al:10 (TV, 2019), al:11 (movie, 2018) and al:12 (TV, 2021) are one franchise.
+    # The movie and the later season are nearer to the liked show than the first season.
+    specs = [
+        ("al:1", [1, 0, 0, 0], 1, "tv", 2020, []),
+        ("al:10", [0.6, 0.8, 0, 0], 0, "tv", 2019, [11, 12]),
+        ("al:11", [1, 0.05, 0, 0], 0, "movie", 2018, [10]),
+        ("al:12", [1, 0.1, 0, 0], 0, "tv", 2021, [10]),
+        ("al:20", [0, 0, 1, 0], 0, "tv", 2020, []),
+        ("al:21", [0, 0, 0, 1], 0, "tv", 2020, []),
+    ]
+    for rid, vec, owned, fmt, year, relations in specs:
+        s.upsert_rows([{"id": rid, "source": "anilist", "title": rid, "title_native": "",
+                        "year": year, "format": fmt, "genres": [], "tags": [], "tag_ranks": [],
+                        "studios": [], "overview": "O", "score": 7.0, "owned": owned, "tmdbid": None,
+                        "anilist_id": int(rid.split(":")[1]), "poster": None, "relations": relations}])
+        s.save_embedding(rid, np.array(vec, dtype=np.float32).tobytes())
+    e = Engine(s)
+    for mode in ("hybrid", "peak", "diverse", "center"):
+        ids = [r["id"] for r in e.recommend(k=6, mode=mode)]
+        assert "al:10" in ids and "al:11" not in ids and "al:12" not in ids, mode
+
+    # After the user watches the first season, the other shows of the franchise are candidates again
+    e.set_watched("al:10", True)
+    ids = [r["id"] for r in e.recommend(k=6, mode="hybrid")]
+    assert len({"al:11", "al:12"} & set(ids)) == 1

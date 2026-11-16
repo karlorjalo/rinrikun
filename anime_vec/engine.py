@@ -104,6 +104,7 @@ class Engine:
         self.tag_M = self._build_tag_matrix()
         self.franchise = self._build_franchises()
         self._build_links()
+        self.entry_row = self._build_entry_rows()
 
         self.coords_2d = self._build_layout(unique)
         self.regions = self._build_regions(unique)
@@ -218,8 +219,12 @@ class Engine:
                        and self.franchise[self.ids[j]] not in skip]
             return [self._result(j, float(sims[j]), seed=None) for j in self._one_per_franchise(allowed, k)]
 
+        # A franchise that the user does not own has one candidate: its entry point. A franchise that
+        # the user owns keeps all its other shows as candidates, because one of them is the next to watch.
+        owned = self.owned_franchises()
         cand_indices = [j for j, r in enumerate(self.rows)
-                        if not r["owned"] and r["id"] not in self.duplicate_of and self.franchise[r["id"]] not in skip]
+                        if not r["owned"] and r["id"] not in self.duplicate_of and self.franchise[r["id"]] not in skip
+                        and (self.franchise[r["id"]] in owned or self.entry_row[self.franchise[r["id"]]] == j)]
         if not cand_indices:
             return []
 
@@ -306,6 +311,19 @@ class Engine:
                 r["linked_favorite"] = self._favorite_title(source)
             out.append(r)
         return out
+
+    def _build_entry_rows(self) -> dict[str, int]:
+        """Return the entry point of each franchise: the earliest TV series, or the earliest show if none."""
+        format_rank = {"tv": 0, "tv_short": 1, "ona": 1}
+        entry: dict[str, tuple] = {}
+        for j, r in enumerate(self.rows):
+            if r["id"] in self.duplicate_of:
+                continue
+            key = (format_rank.get(r.get("format"), 2), r.get("year") or 9999, r["id"])
+            f = self.franchise[r["id"]]
+            if f not in entry or key < entry[f][0]:
+                entry[f] = (key, j)
+        return {f: j for f, (_, j) in entry.items()}
 
     def _build_links(self):
         """Build the link matrix between franchises from the AniList user recommendations.
