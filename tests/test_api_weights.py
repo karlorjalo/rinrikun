@@ -101,6 +101,13 @@ def test_api_weights_endpoints(tmp_path):
         assert vm_res.status_code == 200
         assert "points" in vm_res.json()
         assert len(vm_res.json()["points"]) == 3
+
+        # 9. The match of the map points: one value for each point, for each formula
+        for kinds in ("all", "usual"):
+            mm_res = client.get(f"/api/vector-map/match?kinds={kinds}")
+            assert mm_res.status_code == 200
+            assert len(mm_res.json()) == 3
+        assert client.get("/api/vector-map/match?kinds=other").status_code == 422
     finally:
         serve.store = orig_store
         serve.engine = orig_engine

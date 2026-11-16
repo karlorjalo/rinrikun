@@ -682,6 +682,16 @@ class Engine:
                 r["tier_guess"] = next((letter for letter, limit in TIER_GUESS_LIMITS if guess[j] >= limit), "D")
         return results
 
+    def map_match(self, kinds: str = "all") -> list:
+        """Return the match of each point of the map, in the order of the points of get_vector_map.
+
+        A value is the match in percent with one decimal, or None for a show without a match.
+        The map uses the values for its match gradient.
+        """
+        match = self.match_percent(kinds)
+        return [None if np.isnan(match[i]) else round(float(match[i]), 1)
+                for i, r in enumerate(self.rows) if r["id"] not in self.duplicate_of]
+
     def _predicted_tier(self, indices: list[int], leave_out: bool = False) -> np.ndarray:
         """Predict the tier that the user will give to each row, as a number (4 = S, 0 = D).
 

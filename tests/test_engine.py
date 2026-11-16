@@ -1042,3 +1042,25 @@ def test_threads_compute_the_match_one_time(tmp_path):
         t.join()
     assert len(calls) == 1
     assert all(r is results[0] for r in results)
+
+
+def test_map_match_has_the_order_of_the_map_points(tmp_path):
+    e = _match_engine(tmp_path)
+    points = e.get_vector_map()["points"]
+    for kinds in ("all", "usual"):
+        match = e.match_percent(kinds)
+        values = e.map_match(kinds)
+        assert len(values) == len(points)
+        assert values == [round(float(match[e.pos[p["id"]]]), 1) for p in points]
+
+
+def test_map_match_is_none_without_shows_of_the_user(tmp_path):
+    from anime_vec.store import Store
+    s = Store(tmp_path / "no_shows.db")
+    for i, vec in ((1, [1, 0, 0, 0]), (2, [0, 1, 0, 0]), (3, [0, 0, 1, 0])):
+        s.upsert_rows([{"id": f"al:{i}", "source": "anilist", "title": f"T{i}", "title_native": "",
+                        "year": 2020, "format": "tv", "genres": [], "tags": [], "tag_ranks": [],
+                        "studios": [], "overview": "O", "score": 7.0, "owned": 0, "tmdbid": None,
+                        "anilist_id": i, "poster": None}])
+        s.save_embedding(f"al:{i}", np.array(vec, dtype=np.float32).tobytes())
+    assert Engine(s).map_match() == [None, None, None]

@@ -69,6 +69,12 @@ def delete_weights(id: str = Query(...)):
 KINDS = Query("all", pattern="^(all|usual)$")
 
 
+@app.get("/api/vector-map/match")
+def vector_map_match(kinds: str = KINDS):
+    """Return the match of each point of the map, in the order of the points of /api/vector-map."""
+    return engine.map_match(kinds)
+
+
 @app.get("/api/review-queue")
 def review_queue(unrated_only: bool = False, kinds: str = KINDS):
     return engine.review_queue(unrated_only=unrated_only, kinds=kinds)
