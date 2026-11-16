@@ -755,6 +755,25 @@ function getPosterImage(url, onLoaded) {
   return null;
 }
 
+// ---- Search on the map
+// The text of a title for a comparison: one form for each character, small letters, and no spaces
+// or punctuation. Thus "re zero" finds "Re:Zero", and full-width letters find half-width letters.
+function searchText(text) {
+  return (text || "").normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
+}
+
+// The titles of the points of the map as text for a comparison. All maps use the same list.
+let mapSearchTexts = null;
+let mapSearchPoints = null;
+
+function getMapSearchTexts(points) {
+  if (mapSearchPoints !== points) {
+    mapSearchTexts = points.map((pt) => `${searchText(pt.title)}\n${searchText(pt.title_native)}`);
+    mapSearchPoints = points;
+  }
+  return mapSearchTexts;
+}
+
 const activeVectorMaps = new Map();
 
 async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLabel = "Highlighted", highlightKind = "recommended") {
@@ -809,6 +828,25 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   const TITLE_MIN = 72;
   // The area labels have three levels. The labels of a level appear from this zoom.
   const REGION_MIN_SCALE = [0, 1.7, 4];
+  // The search starts this time after the last key, in milliseconds
+  const SEARCH_DELAY = 220;
+  // The far view shows the found shows as posters up to this number. Above it they are dots.
+  const SEARCH_POSTERS = 60;
+  // The found shows that are dots are large dots with a halo up to this number
+  const SEARCH_LARGE_DOTS = 400;
+  // During a search the other shows have this part of their opacity
+  const SEARCH_FADE = 0.25;
+  // The width of a poster in pixels after a jump to a found show. A poster of this width has its title.
+  const FOCUS_CARD = 78;
+
+  // The search: the found shows as indexes of `points` with the best show first, or null without
+  // a search. `searchPos` is the place in the list of the show that the user jumped to.
+  let searchList = null;
+  let searchSet = null;
+  let searchPos = -1;
+  let searchTimer = null;
+  // The animation of a jump to a show
+  let flight = null;
 
   // The map positions and the grid positions of the shows, and their screen positions in the last draw
   const mapX = new Float32Array(n);
@@ -953,6 +991,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   setTimeout(dismissHint, 3500);
 
   function applyZoom(factor, mx, my) {
+    stopFlight();
     const { w, h, side } = viewSize();
     if (w === 0 || h === 0) return;
     const newScale = Math.max(0.65, Math.min(maxScale(side), scale * factor));
@@ -976,12 +1015,164 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   };
   btnZoomReset.onclick = (e) => {
     e.stopPropagation();
+    stopFlight();
     scale = 1.0;
     panX = 0;
     panY = 0;
     dismissHint();
     scheduleDraw();
   };
+
+  // ---- The search box of the map
+  // The user types a part of a title. The map shows the found shows with a frame, and it makes
+  // the other shows faint. Enter moves the view to the next found show.
+  let searchBox = box.querySelector(".vector-search");
+  if (!searchBox) {
+    searchBox = document.createElement("div");
+    searchBox.className = "vector-search";
+    searchBox.innerHTML = `
+      <svg class="vector-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input class="vector-search-input" type="text" placeholder="Find a show on the map" aria-label="Find a show on the map" autocomplete="off" spellcheck="false" enterkeyhint="search">
+      <span class="vector-search-count" aria-live="polite" hidden></span>
+      <button class="vector-search-btn vector-search-prev" type="button" title="Go to the show before (Shift+Enter)" aria-label="Go to the show before" hidden>‹</button>
+      <button class="vector-search-btn vector-search-next" type="button" title="Go to the next show (Enter)" aria-label="Go to the next show" hidden>›</button>
+      <button class="vector-search-btn vector-search-clear" type="button" title="Clear the search (Esc)" aria-label="Clear the search" hidden>✕</button>
+    `;
+    box.appendChild(searchBox);
+  }
+  const searchInput = searchBox.querySelector(".vector-search-input");
+  const searchCount = searchBox.querySelector(".vector-search-count");
+  const searchPrev = searchBox.querySelector(".vector-search-prev");
+  const searchNext = searchBox.querySelector(".vector-search-next");
+  const searchClear = searchBox.querySelector(".vector-search-clear");
+
+  function paintSearch() {
+    const count = searchList ? searchList.length : 0;
+    searchClear.hidden = !searchInput.value;
+    searchCount.hidden = !searchList;
+    searchNext.hidden = count < 1;
+    searchPrev.hidden = count < 2;
+    searchBox.classList.toggle("is-empty", !!searchList && count === 0);
+    if (!searchList) return;
+    searchCount.textContent = count === 0 ? "No show found" : searchPos >= 0 ? `${searchPos + 1} / ${count}` : `${count} found`;
+  }
+
+  function runSearch() {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+    // Each word of the text must be in the title, in the romaji title or in the Japanese title
+    const words = searchInput.value.split(/\s+/).map(searchText).filter(Boolean);
+    searchPos = -1;
+    if (!words.length) {
+      searchList = null;
+      searchSet = null;
+    } else {
+      const texts = getMapSearchTexts(points);
+      const found = [];
+      for (let i = 0; i < n; i++) {
+        if (words.every((word) => texts[i].includes(word))) {
+          // The order for the jumps: a title that starts with the text is first, then the shows
+          // of the user, then the shows with the highest AniList score
+          const starts = texts[i].startsWith(words[0]) || texts[i].includes(`\n${words[0]}`);
+          found.push([i, (starts ? 0 : 2) + (points[i].owned ? 0 : 1)]);
+        }
+      }
+      found.sort((a, b) => a[1] - b[1] || (points[b[0]].score ?? -1) - (points[a[0]].score ?? -1));
+      searchList = found.map((item) => item[0]);
+      searchSet = new Set(searchList);
+    }
+    paintSearch();
+    scheduleDraw();
+  }
+
+  function stopFlight() {
+    if (flight) cancelAnimationFrame(flight);
+    flight = null;
+  }
+
+  // Set the pan so that the show `i` is at the screen position (px, py) with the zoom of now
+  function panTo(i, px, py, w, h, side) {
+    const t = gridBlend(side);
+    const x = mapX[i] + (gridX[i] - mapX[i]) * t;
+    const y = mapY[i] + (gridY[i] - mapY[i]) * t;
+    const k = side * scale;
+    panX = px - x * k - ((w - side) / 2 - w / 2) * scale - w / 2;
+    panY = py - (1 - y) * k - ((h - side) / 2 - h / 2) * scale - h / 2;
+  }
+
+  // Move the view to a show in a short animation. The zoom grows until the poster of the show is
+  // easy to see. A view that is nearer than that keeps its zoom.
+  function flyTo(i) {
+    stopFlight();
+    const { w, h, side } = viewSize();
+    if (w === 0 || h === 0) return;
+    dismissHint();
+    hoveredPoint = null;
+    tooltip.hidden = true;
+    tooltip.style.display = "none";
+    const near = cell && viewMode() === "posters" ? FOCUS_CARD / CARD_FILL / cellBase(side) : 5;
+    const startScale = scale;
+    const endScale = Math.max(scale, Math.min(maxScale(side), near));
+    project(w, h, side);
+    const startX = sx[i];
+    const startY = sy[i];
+    // No animation for a user who asked the system for less motion
+    const duration = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 480;
+    const begin = performance.now();
+    const frame = (now) => {
+      const t = duration ? Math.max(0, Math.min(1, (now - begin) / duration)) : 1;
+      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      scale = startScale * Math.pow(endScale / startScale, e);
+      panTo(i, startX + (w / 2 - startX) * e, startY + (h / 2 - startY) * e, w, h, side);
+      draw();
+      flight = t < 1 && !destroyed ? requestAnimationFrame(frame) : null;
+    };
+    flight = requestAnimationFrame(frame);
+  }
+
+  // Go to the next found show, or to the one before. After the last show the first one is next.
+  function stepSearch(step) {
+    if (!searchList || !searchList.length) return;
+    const count = searchList.length;
+    searchPos = searchPos < 0 ? (step > 0 ? 0 : count - 1) : (searchPos + step + count) % count;
+    paintSearch();
+    flyTo(searchList[searchPos]);
+  }
+
+  function clearSearch() {
+    searchInput.value = "";
+    runSearch();
+  }
+
+  searchInput.oninput = () => {
+    searchClear.hidden = !searchInput.value;
+    // Wait until the user stops typing: a search for each key would draw the map too frequently
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runSearch, SEARCH_DELAY);
+  };
+  searchInput.onkeydown = (e) => {
+    // The other parts of the page must not get the keys of the search
+    e.stopPropagation();
+    // A key that completes Japanese text in the input method is not a command
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      // The text changed a moment ago: search now, and do not wait
+      if (searchTimer) runSearch();
+      stepSearch(e.shiftKey ? -1 : 1);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      clearSearch();
+    }
+  };
+  searchPrev.onclick = () => stepSearch(-1);
+  searchNext.onclick = () => stepSearch(1);
+  searchClear.onclick = () => {
+    clearSearch();
+    searchInput.focus();
+  };
+  // A map that is made again keeps the text of its search box
+  if (searchInput.value.trim()) runSearch();
 
   // View toggle pills (Posters vs Dots)
   const viewPills = box.parentElement.querySelectorAll(`.vector-view-pills[data-canvas="${canvasId}"] button`);
@@ -1168,6 +1359,20 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     if (look.badge) drawBadge(ctx, look, x, y, pw, colors);
   }
 
+  // The frame of a found show of the search. The show that the user jumped to has a thicker frame.
+  function drawFindRing(ctx, cx, cy, pw, colors, current) {
+    const ph = pw * POSTER_ASPECT;
+    const gap = Math.max(2, pw * 0.05);
+    ctx.save();
+    ctx.strokeStyle = colors.find;
+    ctx.shadowColor = colors.find;
+    ctx.shadowBlur = current ? Math.max(10, pw * 0.3) : Math.max(5, pw * 0.14);
+    ctx.lineWidth = (current ? 1.8 : 1) * Math.max(2, pw * 0.055);
+    roundedRect(ctx, cx - pw / 2 - gap, cy - ph / 2 - gap, pw + 2 * gap, ph + 2 * gap, Math.max(3, pw * 0.08));
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function draw() {
     if (!canvas.isConnected) return;
     const { w, h, side } = viewSize();
@@ -1203,6 +1408,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       paper: isDark ? "#262624" : "#ffffff",
       ink: isDark ? "#f5f2ea" : "#1c1917",
       shadow: isDark ? "rgba(0, 0, 0, 0.7)" : "rgba(28, 25, 23, 0.45)",
+      find: rootStyle.getPropertyValue("--find").trim() || "#0e8177",
       tier: {},
     };
     for (const t of ["S", "A", "B", "C", "D"]) {
@@ -1212,34 +1418,50 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     const cards = cardsOn(side);
     let shown = 0;
     let cardWidth = 0;
+    // The search: see "The search box of the map"
+    const searching = searchList !== null;
+    const isFound = (i) => searching && searchSet.has(i);
+    const currentFound = searching && searchPos >= 0 ? searchList[searchPos] : -1;
 
     if (cards) {
       // The close view. Each show in view is a poster in its cell: catalog first, then the shows
-      // of the user, then the highlighted shows, and the show under the pointer last.
+      // of the user, then the highlighted shows, then the found shows of the search, and the show
+      // under the pointer last.
       cardWidth = Math.min(CELL_MAX, cellBase(side) * scale) * CARD_FILL;
       const cardHeight = cardWidth * POSTER_ASPECT;
-      const layers = [[], [], []];
+      const layers = [[], [], [], []];
       for (let i = 0; i < n; i++) {
         if (sx[i] < -cardWidth || sx[i] > w + cardWidth || sy[i] < -cardHeight || sy[i] > h + cardHeight) continue;
         const pt = points[i];
         if (hoveredPoint && pt.id === hoveredPoint.id) continue;
-        layers[highlightSet.has(pt.id) ? 2 : pt.owned ? 1 : 0].push(i);
+        layers[isFound(i) ? 3 : highlightSet.has(pt.id) ? 2 : pt.owned ? 1 : 0].push(i);
       }
-      for (const layer of layers) {
-        for (const i of layer) {
+      for (let k = 0; k < layers.length; k++) {
+        // A search makes the other shows faint, so that the found shows are easy to see
+        ctx.globalAlpha = searching && k < 3 ? SEARCH_FADE : 1;
+        for (const i of layers[k]) {
           drawCard(ctx, points[i], sx[i], sy[i], cardWidth, colors, false);
+          if (k === 3) drawFindRing(ctx, sx[i], sy[i], cardWidth, colors, i === currentFound);
           shown++;
         }
       }
+      ctx.globalAlpha = 1;
       const hi = hoveredPoint ? indexOf.get(hoveredPoint.id) : undefined;
       if (hi !== undefined) {
         drawCard(ctx, hoveredPoint, sx[hi], sy[hi], cardWidth * 1.12, colors, true);
+        if (isFound(hi)) drawFindRing(ctx, sx[hi], sy[hi], cardWidth * 1.12, colors, hi === currentFound);
         shown++;
       }
     } else {
       // The far view. A highlighted show is a poster (Posters view) or a larger dot (Dots view).
+      // A found show of the search is a poster. It is a dot in the Dots view, and also when the
+      // search found too many shows for posters.
       const markers = view === "posters";
-      const special = (pt) => highlightSet.has(pt.id) && (markers || highlightKind === "recommended");
+      const foundCards = searching && markers && searchList.length <= SEARCH_POSTERS;
+      const special = (i) => isFound(i) || (highlightSet.has(points[i].id) && (markers || highlightKind === "recommended"));
+      // A search makes the other shows faint, so that the found shows are easy to see
+      const fade = searching ? SEARCH_FADE : 1;
+      ctx.globalAlpha = fade;
 
       // 1. The dots of the catalog
       ctx.fillStyle = colors.catalog;
@@ -1247,7 +1469,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       const catR = dotRadius(false);
       for (let i = 0; i < n; i++) {
         const pt = points[i];
-        if (pt.owned || special(pt)) continue;
+        if (pt.owned || special(i)) continue;
         if (sx[i] < -20 || sx[i] > w + 20 || sy[i] < -20 || sy[i] > h + 20) continue;
         ctx.moveTo(sx[i] + catR, sy[i]);
         ctx.arc(sx[i], sy[i], catR, 0, Math.PI * 2);
@@ -1261,7 +1483,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
         ctx.beginPath();
         for (let i = 0; i < n; i++) {
           const pt = points[i];
-          if (!pt.owned || special(pt) || (pt.tier || null) !== tier) continue;
+          if (!pt.owned || special(i) || (pt.tier || null) !== tier) continue;
           if (sx[i] < -20 || sx[i] > w + 20 || sy[i] < -20 || sy[i] > h + 20) continue;
           ctx.moveTo(sx[i] + libR, sy[i]);
           ctx.arc(sx[i], sy[i], libR, 0, Math.PI * 2);
@@ -1275,7 +1497,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
         let hovered = -1;
         for (let i = 0; i < n; i++) {
           const pt = points[i];
-          if (!highlightSet.has(pt.id)) continue;
+          if (!highlightSet.has(pt.id) || isFound(i)) continue;
           if (sx[i] < -60 || sx[i] > w + 60 || sy[i] < -90 || sy[i] > h + 90) continue;
           if (hoveredPoint && hoveredPoint.id === pt.id) {
             hovered = i;
@@ -1285,20 +1507,22 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
           shown++;
         }
         if (hovered >= 0) {
+          ctx.globalAlpha = 1;
           drawCard(ctx, points[hovered], sx[hovered], sy[hovered], width * 1.3, colors, true);
+          ctx.globalAlpha = fade;
           shown++;
         }
       } else if (highlightKind === "recommended") {
         const hiR = highlightDotRadius();
         for (let i = 0; i < n; i++) {
-          if (!highlightSet.has(points[i].id)) continue;
+          if (!highlightSet.has(points[i].id) || isFound(i)) continue;
           if (sx[i] < -20 || sx[i] > w + 20 || sy[i] < -20 || sy[i] > h + 20) continue;
           ctx.fillStyle = colors.accent;
-          ctx.globalAlpha = 0.25;
+          ctx.globalAlpha = 0.25 * fade;
           ctx.beginPath();
           ctx.arc(sx[i], sy[i], hiR * 2, 0, Math.PI * 2);
           ctx.fill();
-          ctx.globalAlpha = 1.0;
+          ctx.globalAlpha = fade;
           ctx.beginPath();
           ctx.arc(sx[i], sy[i], hiR, 0, Math.PI * 2);
           ctx.fill();
@@ -1307,11 +1531,66 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
           ctx.stroke();
         }
       }
+      ctx.globalAlpha = 1;
 
-      // 4. A ring around the dot under the pointer
+      // 4. The found shows of the search. The best show is drawn last, on top.
+      if (searching) {
+        const inView = [];
+        for (let k = searchList.length - 1; k >= 0; k--) {
+          const i = searchList[k];
+          if (sx[i] < -60 || sx[i] > w + 60 || sy[i] < -90 || sy[i] > h + 90) continue;
+          inView.push(i);
+        }
+        if (foundCards) {
+          const width = markerWidth(side);
+          let hovered = -1;
+          for (const i of inView) {
+            if (hoveredPoint && hoveredPoint.id === points[i].id) {
+              hovered = i;
+              continue;
+            }
+            drawCard(ctx, points[i], sx[i], sy[i], width, colors, false);
+            drawFindRing(ctx, sx[i], sy[i], width, colors, i === currentFound);
+            shown++;
+          }
+          if (hovered >= 0) {
+            drawCard(ctx, points[hovered], sx[hovered], sy[hovered], width * 1.3, colors, true);
+            drawFindRing(ctx, sx[hovered], sy[hovered], width * 1.3, colors, hovered === currentFound);
+            shown++;
+          }
+        } else {
+          // Dots. All dots are one path: one path for each dot is slow when the search found
+          // thousands of shows. Then the dots are also small and have no halo.
+          const many = searchList.length > SEARCH_LARGE_DOTS;
+          const foundR = many ? dotRadius(true) + 0.5 : highlightDotRadius() + 1;
+          const arcs = (r) => {
+            ctx.beginPath();
+            for (const i of inView) {
+              const size = i === currentFound ? Math.max(r * 1.6, 7) : r;
+              ctx.moveTo(sx[i] + size, sy[i]);
+              ctx.arc(sx[i], sy[i], size, 0, Math.PI * 2);
+            }
+          };
+          ctx.fillStyle = colors.find;
+          if (!many) {
+            ctx.globalAlpha = 0.28;
+            arcs(foundR * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+          }
+          arcs(foundR);
+          ctx.fill();
+          ctx.strokeStyle = colors.paper;
+          ctx.lineWidth = many ? 0.75 : 1.5;
+          ctx.stroke();
+        }
+      }
+
+      // 5. A ring around the dot under the pointer. A show that is a poster has no ring.
       const hi = hoveredPoint ? indexOf.get(hoveredPoint.id) : undefined;
-      if (hi !== undefined && !(markers && highlightSet.has(hoveredPoint.id))) {
-        const ringR = special(hoveredPoint) ? highlightDotRadius() * 2 + 2 : dotRadius(hoveredPoint.owned) + 6;
+      const isCard = hi !== undefined && (foundCards ? isFound(hi) || highlightSet.has(hoveredPoint.id) : !isFound(hi) && markers && highlightSet.has(hoveredPoint.id));
+      if (hi !== undefined && !isCard) {
+        const ringR = special(hi) ? highlightDotRadius() * 2 + 2 : dotRadius(hoveredPoint.owned) + 6;
         ctx.strokeStyle = colors.ink;
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -1365,6 +1644,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     canvas.dataset.posters = String(shown);
     canvas.dataset.labels = String(regionCount);
     canvas.dataset.cards = cards ? "1" : "0";
+    canvas.dataset.found = searching ? String(searchList.length) : "";
     ctx.restore();
   }
 
@@ -1392,8 +1672,23 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       return best;
     }
 
-    // 1. The highlighted shows
+    // 1. The found shows of the search. They are above the other shows.
     const markers = view === "posters";
+    if (searchList) {
+      const asCards = markers && searchList.length <= SEARCH_POSTERS;
+      const pw = markerWidth(side);
+      const ph = pw * POSTER_ASPECT;
+      const hitR = (highlightDotRadius() + 5) ** 2;
+      for (const i of searchList) {
+        if (sx[i] < -60 || sx[i] > w + 60 || sy[i] < -90 || sy[i] > h + 90) continue;
+        const hit = asCards
+          ? Math.abs(sx[i] - mx) <= pw / 2 + 3 && Math.abs(sy[i] - my) <= ph / 2 + 3
+          : (sx[i] - mx) ** 2 + (sy[i] - my) ** 2 <= hitR;
+        if (hit) return points[i];
+      }
+    }
+
+    // 2. The highlighted shows
     if (markers || highlightKind === "recommended") {
       const pw = markerWidth(side);
       const ph = pw * POSTER_ASPECT;
@@ -1409,7 +1704,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       }
     }
 
-    // 2. The dots of the shows of the user. The target is larger than the dot, and it grows with the dot.
+    // 3. The dots of the shows of the user. The target is larger than the dot, and it grows with the dot.
     let bestOwned = null;
     let bestOwnedDist = Math.max(7, dotRadius(true) + 4) ** 2;
     for (let i = 0; i < n; i++) {
@@ -1422,7 +1717,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     }
     if (bestOwned) return bestOwned;
 
-    // 3. The dots of the catalog (in the Dots view, or from a zoom of 180%)
+    // 4. The dots of the catalog (in the Dots view, or from a zoom of 180%)
     if (view === "dots" || scale >= 1.8) {
       let bestCat = null;
       let bestCatDist = Math.max(6, dotRadius(false) + 4) ** 2;
@@ -1440,6 +1735,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
 
   function onMouseDown(e) {
     if (e.button !== 0) return;
+    stopFlight();
     isDragging = true;
     hasDragged = false;
     dragStartX = e.clientX;
@@ -1552,6 +1848,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   }
 
   function onTouchStart(e) {
+    stopFlight();
     if (e.touches.length === 1) {
       isDragging = true;
       hasDragged = false;
@@ -1630,6 +1927,8 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     destroy: () => {
       destroyed = true;
       if (animFrame) cancelAnimationFrame(animFrame);
+      clearTimeout(searchTimer);
+      stopFlight();
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("mousedown", onMouseDown);
       canvas.removeEventListener("mousemove", onMouseMove);

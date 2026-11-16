@@ -3,24 +3,24 @@
   --muted: #78716c; --hover: #f1efe8; --accent: #b35c72; --accent-ink: #faf9f5;
   --serif: "Noto Serif JP", "Yu Mincho", serif;
   --sans: "Noto Sans JP", "Yu Gothic", sans-serif;
-  --tier-s: #c27803; --tier-a: #b35c72; --tier-b: #3f6285; --tier-c: #68645e; --tier-d: #8c3333;
+  --tier-s: #c27803; --tier-a: #b35c72; --tier-b: #3f6285; --tier-c: #68645e; --tier-d: #8c3333; --find: #0e8177;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #262624; --card: #2e2d2b; --border: #3a3833; --text: #f5f4ee;
     --muted: #a6a396; --hover: #3a3833; --accent: #c9758a; --accent-ink: #262624;
-    --tier-s: #e08a00; --tier-a: #c9758a; --tier-b: #5b8ab8; --tier-c: #969188; --tier-d: #a84444;
+    --tier-s: #e08a00; --tier-a: #c9758a; --tier-b: #5b8ab8; --tier-c: #969188; --tier-d: #a84444; --find: #2dd4bf;
   }
 }
 [data-theme="dark"] {
   --bg: #262624; --card: #2e2d2b; --border: #3a3833; --text: #f5f4ee;
   --muted: #a6a396; --hover: #3a3833; --accent: #c9758a; --accent-ink: #262624;
-  --tier-s: #e08a00; --tier-a: #c9758a; --tier-b: #5b8ab8; --tier-c: #969188; --tier-d: #a84444;
+  --tier-s: #e08a00; --tier-a: #c9758a; --tier-b: #5b8ab8; --tier-c: #969188; --tier-d: #a84444; --find: #2dd4bf;
 }
 [data-theme="light"] {
   --bg: #faf9f5; --card: #ffffff; --border: #e8e5dc; --text: #1c1917;
   --muted: #78716c; --hover: #f1efe8; --accent: #b35c72; --accent-ink: #faf9f5;
-  --tier-s: #c27803; --tier-a: #b35c72; --tier-b: #3f6285; --tier-c: #68645e; --tier-d: #8c3333;
+  --tier-s: #c27803; --tier-a: #b35c72; --tier-b: #3f6285; --tier-c: #68645e; --tier-d: #8c3333; --find: #0e8177;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -568,3 +568,19 @@ h2::before { content: ""; display: inline-block; width: 11px; height: 8px; margi
 .tier-help-row { display: flex; align-items: baseline; gap: 10px; }
 .tier-help-row dt { flex: none; }
 .tier-help-row dd { margin: 0; color: var(--text); line-height: 1.5; }
+/* The search box of a map: see "The search box of the map" in app.js. --find is the color of the found shows. */
+.vector-search { position: absolute; left: 12px; top: 12px; z-index: 50; display: flex; align-items: center; gap: 4px;
+  width: 310px; max-width: calc(100% - 24px); padding: 3px 5px 3px 9px; background: color-mix(in srgb, var(--card) 92%, transparent);
+  backdrop-filter: blur(4px); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  transition: border-color .15s ease, box-shadow .15s ease; }
+.vector-search:focus-within { border-color: var(--find); box-shadow: 0 0 0 3px color-mix(in srgb, var(--find) 22%, transparent); }
+.vector-search-icon { flex: none; color: var(--muted); }
+.vector-search-input { flex: 1; min-width: 0; padding: 5px 4px; font-family: var(--sans); font-size: 13px; border: 0;
+  background: transparent; color: var(--text); outline: none; }
+.vector-search-count { flex: none; font-size: 11px; font-weight: 600; color: var(--find); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vector-search.is-empty .vector-search-count { color: var(--muted); font-weight: 400; }
+.vector-search-btn { flex: none; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
+  background: transparent; border: 0; border-radius: 5px; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; }
+.vector-search-btn:hover { background: var(--hover); color: var(--text); }
+/* A phone makes the page larger when an input has small text. Text of 16 pixels prevents this. */
+@media (pointer: coarse) { .vector-search-input { font-size: 16px; } }
