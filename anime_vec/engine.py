@@ -385,45 +385,73 @@ class Engine:
         return {f: j for f, (_, j) in entry.items()}
 
     def _build_links(self):
-        """Build the link matrix between franchises from the AniList user recommendations.
+        """Build the links between franchises from the AniList user recommendations.
 
         A link between two shows gets less weight when the two shows have many links, so that
         very popular shows do not fill the list.
+
+        `self.links[f]` holds the franchises that have a link with franchise f, and the weights
+        of these links. A full matrix of all franchise pairs is too large for a catalog of all
+        anime: most pairs have no link.
         """
         names = sorted(set(self.franchise.values()))
         fr_pos = {f: k for k, f in enumerate(names)}
         self.row_fr = np.array([fr_pos[self.franchise[i]] for i in self.ids], dtype=np.int64)
-        by_anilist = {r["anilist_id"]: self.row_fr[i] for i, r in enumerate(self.rows)
+        by_anilist = {r["anilist_id"]: int(self.row_fr[i]) for i, r in enumerate(self.rows)
                       if r.get("anilist_id") is not None}
-        A = np.zeros((len(names), len(names)), dtype=np.float32)
+        directed: dict[tuple[int, int], float] = {}
         for i, r in enumerate(self.rows):
-            a = self.row_fr[i]
+            a = int(self.row_fr[i])
             for other, rating in r.get("recommendations") or []:
                 b = by_anilist.get(other)
                 if b is not None and b != a and rating > 0:
-                    A[a, b] += rating
+                    directed[(a, b)] = directed.get((a, b), 0.0) + rating
         # A recommendation connects the two shows in the two directions
-        A = np.maximum(A, A.T)
-        degree = np.maximum(A.sum(axis=1), 1.0)
-        self.link_M = A / np.sqrt(np.outer(degree, degree))
+        pairs: dict[tuple[int, int], float] = {}
+        for (a, b), rating in directed.items():
+            key = (a, b) if a < b else (b, a)
+            pairs[key] = max(pairs.get(key, 0.0), rating)
+        degree = np.zeros(len(names), dtype=np.float64)
+        for (a, b), rating in pairs.items():
+            degree[a] += rating
+            degree[b] += rating
+        degree = np.maximum(degree, 1.0)
+        neighbors: list[list[tuple[int, float]]] = [[] for _ in names]
+        for (a, b), rating in pairs.items():
+            weight = rating / float(np.sqrt(degree[a] * degree[b]))
+            neighbors[a].append((b, weight))
+            neighbors[b].append((a, weight))
+        self.links = [(np.array([j for j, _ in sorted(row)], dtype=np.int64),
+                       np.array([w for _, w in sorted(row)], dtype=np.float32)) for row in neighbors]
+
+    def link_weight(self, a: int, b: int) -> float:
+        """Return the weight of the link between two franchises (by index), or 0 if they have no link."""
+        others, weights = self.links[a]
+        hit = np.nonzero(others == b)[0]
+        return float(weights[hit[0]]) if len(hit) else 0.0
 
     def _link_scores(self, liked: list[int], liked_w: np.ndarray) -> tuple[np.ndarray, dict[int, int]]:
         """Return the link score of each franchise, and the liked show with the strongest link to it."""
-        weight = np.zeros(self.link_M.shape[0], dtype=np.float32)
+        count = len(self.links)
+        weight = np.zeros(count, dtype=np.float32)
         best_row: dict[int, int] = {}
         for i, w in zip(liked, liked_w):
             f = int(self.row_fr[i])
             if w > weight[f]:
                 weight[f] = w
                 best_row[f] = i
-        sources = np.nonzero(weight)[0]
-        if len(sources) == 0:
-            return np.zeros(self.link_M.shape[0], dtype=np.float32), {}
-        links = self.link_M[sources] * weight[sources, None]
-        strongest = links.argmax(axis=0)
-        source = {int(g): best_row[int(sources[strongest[g]])]
-                  for g in np.nonzero(links.max(axis=0) > 0)[0]}
-        return links.sum(axis=0), source
+        score = np.zeros(count, dtype=np.float32)
+        strongest = np.zeros(count, dtype=np.float32)
+        strongest_source = np.full(count, -1, dtype=np.int64)
+        for f in np.nonzero(weight)[0]:
+            others, weights = self.links[f]
+            value = weights * weight[f]
+            score[others] += value
+            better = value > strongest[others]
+            strongest[others[better]] = value[better]
+            strongest_source[others[better]] = f
+        source = {int(g): best_row[int(strongest_source[g])] for g in np.nonzero(strongest > 0)[0]}
+        return score, source
 
     def _one_per_franchise(self, order, k: int, index_map: list[int] | None = None) -> list[int]:
         """Keep the first k entries of an ordered list, with a maximum of one entry for each franchise.

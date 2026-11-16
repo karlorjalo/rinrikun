@@ -385,8 +385,8 @@ def _link_engine(tmp_path, extra=()):
 def test_link_matrix_connects_franchises_in_two_directions(tmp_path):
     e = _link_engine(tmp_path)
     a, b, c = (e.row_fr[e.pos[i]] for i in ("al:1", "al:10", "al:11"))
-    assert e.link_M[a, b] > 0 and e.link_M[a, b] == e.link_M[b, a]
-    assert e.link_M[a, c] == 0
+    assert e.link_weight(a, b) > 0 and e.link_weight(a, b) == e.link_weight(b, a)
+    assert e.link_weight(a, c) == 0
 
 
 def test_hybrid_uses_the_user_recommendations(tmp_path):
@@ -666,3 +666,24 @@ def test_dismissed_show_is_a_low_tier_example_for_the_tier_model(tmp_path, monke
     # An owned show is not a dismissed example
     e.set_dismissed("al:1", True)
     assert e._dismissed_rows() == [idol]
+
+
+def test_link_weight_is_smaller_for_shows_with_many_links(tmp_path):
+    from anime_vec.store import Store
+    s = Store(tmp_path / "degree.db")
+    # al:1 has one link of rating 10. al:2 has the same link to al:3 and nine more links.
+    specs = [("al:1", [[3, 10]]), ("al:2", [[3, 10]] + [[n, 10] for n in range(10, 19)]), ("al:3", [])]
+    specs += [(f"al:{n}", []) for n in range(10, 19)]
+    for n, (rid, recommendations) in enumerate(specs):
+        s.upsert_rows([{"id": rid, "source": "anilist", "title": rid, "title_native": "", "year": 2020,
+                        "format": "tv", "genres": [], "tags": [], "tag_ranks": [], "studios": [],
+                        "overview": "O", "score": 7.0, "owned": 0, "tmdbid": None,
+                        "anilist_id": int(rid.split(":")[1]), "poster": None, "recommendations": recommendations}])
+        vec = np.zeros(16, dtype=np.float32)
+        vec[n] = 1.0
+        s.save_embedding(rid, vec.tobytes())
+    e = Engine(s)
+    f = {rid: int(e.row_fr[e.pos[rid]]) for rid, _ in specs}
+    assert e.link_weight(f["al:1"], f["al:3"]) > e.link_weight(f["al:2"], f["al:3"]) > 0
+    # degree of al:1 is 10, of al:3 is 20: weight = 10 / sqrt(10 * 20)
+    assert e.link_weight(f["al:1"], f["al:3"]) == pytest.approx(10 / (200 ** 0.5), rel=1e-5)
