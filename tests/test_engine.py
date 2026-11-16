@@ -380,3 +380,19 @@ def test_recommend_gives_one_result_for_each_franchise(tmp_path):
         ids = [r["id"] for r in e.recommend(k=4, **kwargs)]
         assert len(ids) == 4, kwargs
         assert len(same & set(ids)) == 1, kwargs
+
+
+def test_recommend_marks_and_hides_owned_franchises(tmp_path):
+    e = _franchise_engine(tmp_path)
+    # al:1 is the only owned show. Put it in the franchise of al:10, al:11 and al:12.
+    e.franchise["al:1"] = e.franchise["al:10"]
+    for kwargs in ({"mode": "hybrid"}, {"mode": "peak"}, {"mode": "diverse"}, {"mode": "center"},
+                   {"seed_id": "al:20"}):
+        marked = {r["id"]: r["franchise_owned"] for r in e.recommend(k=10, **kwargs)}
+        assert any(marked[i] for i in marked if i in ("al:10", "al:11", "al:12")), kwargs
+        assert not marked.get("al:21", False), kwargs
+
+        ids = [r["id"] for r in e.recommend(k=10, new_only=True, **kwargs)]
+        assert ids, kwargs
+        assert not {"al:10", "al:11", "al:12"} & set(ids), kwargs
+        assert all(not r["franchise_owned"] for r in e.recommend(k=10, new_only=True, **kwargs)), kwargs

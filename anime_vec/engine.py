@@ -154,7 +154,22 @@ class Engine:
                 break
         return out
 
-    def recommend(self, k: int = 20, seed_id: str | None = None, mode: str = "hybrid") -> list[dict]:
+    def owned_franchises(self) -> set[str]:
+        return {self.franchise[self.ids[i]] for i in self.owned_idx}
+
+    def recommend(self, k: int = 20, seed_id: str | None = None, mode: str = "hybrid",
+                  new_only: bool = False) -> list[dict]:
+        """Return the recommendations. Each result says if the user owns a show of the same franchise.
+
+        If new_only is true, the list has no shows from franchises that the user owns.
+        """
+        owned = self.owned_franchises()
+        out = self._recommend(k, seed_id, mode, owned if new_only else set())
+        for r in out:
+            r["franchise_owned"] = self.franchise[r["id"]] in owned
+        return out
+
+    def _recommend(self, k: int, seed_id: str | None, mode: str, skip: set[str]) -> list[dict]:
         if k <= 0:
             return []
 
@@ -165,10 +180,12 @@ class Engine:
             sims = self.eff_M @ q
             exclude_ids = {seed_id} | set(self.counterparts.get(seed_id, []))
             allowed = [j for j in np.argsort(-sims)
-                       if self.ids[j] not in exclude_ids and not self.rows[j]["owned"]]
+                       if self.ids[j] not in exclude_ids and not self.rows[j]["owned"]
+                       and self.franchise[self.ids[j]] not in skip]
             return [self._result(j, float(sims[j]), seed=None) for j in self._one_per_franchise(allowed, k)]
 
-        cand_indices = [j for j, r in enumerate(self.rows) if not r["owned"] and r["id"] not in self.duplicate_of]
+        cand_indices = [j for j, r in enumerate(self.rows)
+                        if not r["owned"] and r["id"] not in self.duplicate_of and self.franchise[r["id"]] not in skip]
         if not cand_indices:
             return []
 

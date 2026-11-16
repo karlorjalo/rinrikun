@@ -105,10 +105,11 @@ def recommend(
     k: int = Query(20, le=100, ge=1),
     seed: str | None = None,
     mode: str = Query("hybrid", pattern="^(hybrid|peak|diverse|center)$"),
+    new_only: bool = False,
 ):
     if seed and seed not in engine.by_id:
         raise HTTPException(404, "unknown seed")
-    return engine.recommend(k=k, seed_id=seed, mode=mode)
+    return engine.recommend(k=k, seed_id=seed, mode=mode, new_only=new_only)
 
 
 @app.get("/api/shows")

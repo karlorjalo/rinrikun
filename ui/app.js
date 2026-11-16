@@ -58,6 +58,8 @@ function card(r, why) {
     badgeHtml = '<span class="badge badge-manual">watched</span>';
   } else if (r.owned) {
     badgeHtml = '<span class="badge">owned</span>';
+  } else if (r.franchise_owned) {
+    badgeHtml = '<span class="badge badge-franchise" title="You own another show of this franchise">franchise owned</span>';
   }
 
   let tierHtml = "";
@@ -1375,6 +1377,7 @@ let rawRecs = [];
 let recsFormatFilter = "all";
 let recsMinScore = 0;
 let recsMode = "hybrid";
+let recsNewOnly = false;
 
 function useSeed(r) {
   seed = r;
@@ -1415,6 +1418,18 @@ function initRecsFilters() {
         mPills.querySelectorAll(".pill").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
         recsMode = btn.dataset.mode;
+        recs();
+      };
+    });
+  }
+
+  const nPills = $("#recs-franchise-pills");
+  if (nPills) {
+    nPills.querySelectorAll(".pill").forEach((btn) => {
+      btn.onclick = () => {
+        nPills.querySelectorAll(".pill").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        recsNewOnly = btn.dataset.newOnly === "true";
         recs();
       };
     });
@@ -1473,10 +1488,10 @@ function renderRecsGrid() {
 
 async function recs() {
   renderRecsSeedBar();
-  const url = seed
+  const base = seed
     ? `/api/recommend?k=40&seed=${encodeURIComponent(seed.id)}`
     : `/api/recommend?k=40&mode=${encodeURIComponent(recsMode)}`;
-  rawRecs = await (await fetch(url)).json();
+  rawRecs = await (await fetch(`${base}&new_only=${recsNewOnly}`)).json();
   renderRecsGrid();
   initVectorMap("recs-vector-canvas", "recs-vector-tooltip", rawRecs.map((s) => s.id), "Recommended");
 }

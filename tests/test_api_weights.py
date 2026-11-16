@@ -87,3 +87,21 @@ def test_api_weights_endpoints(tmp_path):
     finally:
         serve.store = orig_store
         serve.engine = orig_engine
+
+
+def test_api_recommend_new_only(tmp_path):
+    import serve
+    store = Store(tmp_path / "api_new_only.db")
+    store.upsert_rows([make_row(1, owned=1), make_row(2, owned=0, relations=[1]), make_row(3, owned=0)])
+    for i in (1, 2, 3):
+        store.save_embedding(f"al:{i}", b"\x00" * 1536)
+    orig_store, orig_engine = serve.store, serve.engine
+    serve.store, serve.engine = store, Engine(store)
+    try:
+        client = TestClient(serve.app)
+        all_recs = client.get("/api/recommend?k=10").json()
+        assert {r["id"]: r["franchise_owned"] for r in all_recs} == {"al:2": True, "al:3": False}
+        new_recs = client.get("/api/recommend?k=10&new_only=true").json()
+        assert [r["id"] for r in new_recs] == ["al:3"]
+    finally:
+        serve.store, serve.engine = orig_store, orig_engine
