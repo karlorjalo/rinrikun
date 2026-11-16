@@ -300,8 +300,8 @@ async function openModal(r) {
   const isLibrary = r.source === "library";
   const watchedBtn = isLibrary
     ? ""
-    : `<button class="btn-action btn-watched ${r.manual_watched ? 'active' : ''}" id="modal-toggle-watched">
-         ${r.manual_watched ? 'Watched · Remove' : '+ Add to Watched'}
+    : `<button class="btn-action btn-watched ${r.manual_watched ? 'active' : ''}" id="modal-toggle-watched" aria-pressed="${r.manual_watched ? 'true' : 'false'}">
+         ${r.manual_watched ? 'Watched' : '+ Add to Watched'}
        </button>`;
 
   // A show that the user does not own can go out of the recommendations
