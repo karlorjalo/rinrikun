@@ -228,6 +228,36 @@ function largePoster(url) {
 const POSTER_ERROR = "if (!this.dataset.retry && this.dataset.small) { this.dataset.retry = '1'; this.src = this.dataset.small; } " +
   "else { this.style.display = 'none'; this.nextElementSibling.classList.add('show'); }";
 
+// The row of the detail window with the crowd score, the match, the tier guess and the similarity
+function modalStatsHtml(r) {
+  const items = [];
+  if (r.score != null) items.push(`<span class="score">★ ${Number(r.score).toFixed(1)}</span>`);
+  if (matchHtml(r)) items.push(matchHtml(r));
+  if (guessHtml(r)) items.push(guessHtml(r));
+  if (similarHtml(r)) items.push(similarHtml(r));
+  return items.join(" · ");
+}
+
+// A change of a tier in the detail window. The window shows the new tier at once: it does not
+// wait for the server. The server needs some time for the new match of the show, thus the match
+// comes later, and only its row changes then.
+async function changeTierInModal(r, tier) {
+  const previous = r.tier || null;
+  r.tier = tier;
+  openModal(r);
+  const ok = tier ? await setTier(r, tier) : await clearTier(r);
+  const shown = () => $("#detail-modal").open && currentModalShow && currentModalShow.id === r.id;
+  if (!ok) {
+    // The server did not save the change: show the tier from before
+    r.tier = previous;
+    if (shown()) openModal(r);
+    return;
+  }
+  await refreshMatch(r);
+  const row = $("#detail-modal .modal-score-row");
+  if (shown() && row) row.innerHTML = modalStatsHtml(r);
+}
+
 async function openModal(r) {
   if (r.overview === undefined && r.id) {
     try {
@@ -257,11 +287,6 @@ async function openModal(r) {
   if (r.year) metaItems.push(`<span>${r.year}</span>`);
   if (r.genres && r.genres.length) metaItems.push(`<span>${esc(r.genres.slice(0, 3).join(", "))}</span>`);
 
-  const statItems = [];
-  if (scoreVal) statItems.push(`<span class="score">★ ${scoreVal}</span>`);
-  if (matchHtml(r)) statItems.push(matchHtml(r));
-  if (guessHtml(r)) statItems.push(guessHtml(r));
-  if (similarHtml(r)) statItems.push(similarHtml(r));
 
   const tags = (r.tags || []).map((t, idx) => {
     const rank = r.tag_ranks && r.tag_ranks[idx] ? `<span class="trank">${r.tag_ranks[idx]}%</span>` : "";
@@ -315,7 +340,7 @@ async function openModal(r) {
           <h3 class="modal-title">${esc(main)}</h3>
           ${sub ? `<div class="modal-native">${esc(sub)}</div>` : ""}
           ${r.studios && r.studios.length ? `<div class="modal-studio">Studio: <b>${esc(r.studios.join(", "))}</b></div>` : ""}
-          <div class="modal-score-row">${statItems.join(" · ")}</div>
+          <div class="modal-score-row">${modalStatsHtml(r)}</div>
           <div class="modal-actions">
             <button class="btn-action primary" id="modal-find-sim">Find Similar</button>
             <button class="btn-action" id="modal-seed-rec">Recommend Like This</button>
@@ -334,19 +359,10 @@ async function openModal(r) {
     </div>`;
 
   modal.querySelectorAll(".btn-modal-tier[data-tier]").forEach((btn) => {
-    btn.onclick = async () => {
-      const tier = btn.dataset.tier;
-      await setTier(r, tier);
-      await refreshMatch(r);
-      openModal(r);
-    };
+    btn.onclick = () => changeTierInModal(r, btn.dataset.tier);
   });
   if ($("#modal-clear-tier")) {
-    $("#modal-clear-tier").onclick = async () => {
-      await clearTier(r);
-      await refreshMatch(r);
-      openModal(r);
-    };
+    $("#modal-clear-tier").onclick = () => changeTierInModal(r, null);
   }
 
   if ($("#modal-toggle-watched")) {
@@ -408,13 +424,15 @@ async function toggleWatched(r, next) {
   }
 }
 
+// Save a tier on the server. Return true if the server saved it.
 async function setTier(r, tier) {
   try {
-    await apiWrite("/api/weights", {
+    const res = await apiWrite("/api/weights", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: r.id, tier: tier })
     });
+    if (!res.ok) throw new Error(`the server answered ${res.status}`);
     r.tier = tier;
     const t = titles.find((x) => x.id === r.id);
     if (t) t.tier = tier;
@@ -444,16 +462,20 @@ async function setTier(r, tier) {
       profile();
     }
     if (!$("#tab-ratings").hidden) {
-      loadRatings();
+      updateRatingsAfterEdit(r);
     }
+    return true;
   } catch (e) {
     console.error("Failed to set tier", e);
+    return false;
   }
 }
 
+// Remove the tier of a show on the server. Return true if the server saved it.
 async function clearTier(r) {
   try {
-    await apiWrite(`/api/weights?id=${encodeURIComponent(r.id)}`, { method: "DELETE" });
+    const res = await apiWrite(`/api/weights?id=${encodeURIComponent(r.id)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`the server answered ${res.status}`);
     r.tier = null;
     const t = titles.find((x) => x.id === r.id);
     if (t) t.tier = null;
@@ -471,10 +493,12 @@ async function clearTier(r) {
       profile();
     }
     if (!$("#tab-ratings").hidden) {
-      loadRatings();
+      updateRatingsAfterEdit(r);
     }
+    return true;
   } catch (e) {
     console.error("Failed to clear tier", e);
+    return false;
   }
 }
 
@@ -2398,31 +2422,56 @@ async function loadRatings() {
     ratedShows = res;
     manualShows = Array.isArray(manual) ? manual : [];
     dismissedShows = Array.isArray(dismissed) ? dismissed : [];
-    if ($("#count-manual")) $("#count-manual").textContent = manualShows.length;
-    if ($("#count-dismissed")) $("#count-dismissed").textContent = dismissedShows.length;
-
-    const counts = { S: 0, A: 0, B: 0, C: 0, D: 0 };
-    ratedShows.forEach((s) => {
-      if (s.tier && counts[s.tier] !== undefined) counts[s.tier]++;
-    });
-
-    const badge = $("#ratings-count-badge");
-    if (badge) badge.textContent = `${ratedShows.length} ${ratedShows.length === 1 ? "show" : "shows"}`;
-
-    if ($("#count-tier-s")) $("#count-tier-s").textContent = counts.S;
-    if ($("#count-tier-a")) $("#count-tier-a").textContent = counts.A;
-    if ($("#count-tier-b")) $("#count-tier-b").textContent = counts.B;
-    if ($("#count-tier-c")) $("#count-tier-c").textContent = counts.C;
-    if ($("#count-tier-d")) $("#count-tier-d").textContent = counts.D;
-
-    document.querySelectorAll("#ratings-tier-pills .pill").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.tier === ratingsTierFilter);
-    });
-
-    renderRatingsGrid();
+    renderRatingsSummary();
   } catch (e) {
     console.error("Failed to load ratings", e);
   }
+}
+
+// Draw the numbers and the cards of the Ratings tab from the lists that the page has
+function renderRatingsSummary() {
+  if ($("#count-manual")) $("#count-manual").textContent = manualShows.length;
+  if ($("#count-dismissed")) $("#count-dismissed").textContent = dismissedShows.length;
+
+  const counts = { S: 0, A: 0, B: 0, C: 0, D: 0 };
+  ratedShows.forEach((s) => {
+    if (s.tier && counts[s.tier] !== undefined) counts[s.tier]++;
+  });
+
+  const badge = $("#ratings-count-badge");
+  if (badge) badge.textContent = `${ratedShows.length} ${ratedShows.length === 1 ? "show" : "shows"}`;
+
+  ["S", "A", "B", "C", "D"].forEach((tier) => {
+    const el = $(`#count-tier-${tier.toLowerCase()}`);
+    if (el) el.textContent = counts[tier];
+  });
+
+  document.querySelectorAll("#ratings-tier-pills .pill").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tier === ratingsTierFilter);
+  });
+
+  renderRatingsGrid();
+}
+
+// The Ratings tab after a change of a tier. The page changes its own lists and draws them again:
+// this needs no request, thus it is immediate. The matches of the other shows change a little
+// after each change of a tier, thus the page gets the lists from the server again a short time
+// after the last change.
+let ratingsReloadTimer = null;
+
+function updateRatingsAfterEdit(r) {
+  const tier = r.tier || null;
+  const index = ratedShows.findIndex((s) => s.id === r.id);
+  if (tier && index >= 0) ratedShows[index].tier = tier;
+  else if (tier) ratedShows.push(r);
+  else if (index >= 0) ratedShows.splice(index, 1);
+  [manualShows, dismissedShows].forEach((list) => {
+    const item = list.find((s) => s.id === r.id);
+    if (item) item.tier = tier;
+  });
+  renderRatingsSummary();
+  clearTimeout(ratingsReloadTimer);
+  ratingsReloadTimer = setTimeout(loadRatings, 2500);
 }
 
 function renderRatingsGrid() {
