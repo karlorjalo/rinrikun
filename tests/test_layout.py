@@ -104,6 +104,41 @@ def test_regions_are_named_after_their_typical_tags(tmp_path, monkeypatch):
     regions = e.get_vector_map()["regions"]
     assert sorted(r["label"].split(" · ")[0] for r in regions) == ["Band", "Mecha"]
     assert all(0.0 <= r["x"] <= 1.0 and 0.0 <= r["y"] <= 1.0 and r["count"] == 10 for r in regions)
+    # An area of 10 rows is too small for smaller areas
+    assert all(r["level"] == 0 and np.isfinite(r["gx"]) and np.isfinite(r["gy"]) for r in regions)
+
+
+def test_large_areas_are_divided_into_smaller_areas(tmp_path, monkeypatch):
+    monkeypatch.setattr(layout, "REGION_MIN_ROWS", 10)
+    monkeypatch.setattr(layout, "REGION_COUNT", 2)
+    monkeypatch.setattr(layout, "REGION_MIN_SIZE", 3)
+    monkeypatch.setattr(layout, "REGION_PART_SIZES", (10, 100))
+    monkeypatch.setattr(layout, "REGION_MIN_PART", 3)
+    s = Store(tmp_path / "areas.db")
+    rng = np.random.default_rng(0)
+    # Two large groups (music, robots). Each has two smaller groups.
+    groups = [(["Band", "Music"], "Idol", [1, 0, 0.4]), (["Band", "Music"], "Rock", [1, 0, -0.4]),
+              (["Mecha", "Sci-Fi"], "Space", [0, 1, 0.4]), (["Mecha", "Sci-Fi"], "War", [0, 1, -0.4])]
+    n = 0
+    for large, small, center in groups:
+        for _ in range(10):
+            vec = (np.array(center + [0]) + rng.normal(size=4) * 0.02).astype(np.float32)
+            s.upsert_rows([{"id": f"al:{n}", "source": "anilist", "title": f"T{n}", "title_native": "",
+                            "year": 2020, "format": "tv", "genres": [], "tags": large + [small, "School"],
+                            "tag_ranks": [90, 90, 80, 40], "studios": [], "overview": "O", "score": 7.0, "owned": 0,
+                            "tmdbid": None, "anilist_id": n, "poster": None}])
+            s.save_embedding(f"al:{n}", vec.tobytes())
+            n += 1
+    regions = Engine(s).get_vector_map()["regions"]
+    large = [r for r in regions if r["level"] == 0]
+    small = [r for r in regions if r["level"] == 1]
+    assert sorted(set(r["label"].split(" · ")) & {"Band", "Mecha"} == set() for r in large) == [False, False]
+    assert all(r["count"] == 20 for r in large)
+    # A smaller area has the tag that is special in its larger area, and not the tags of the larger area
+    assert sorted(r["label"] for r in small) == ["Idol", "Rock", "Space", "War"]
+    assert all(r["count"] == 10 for r in small)
+    # The large areas are first in the list
+    assert [r["level"] for r in regions] == [0, 0, 1, 1, 1, 1]
 
 
 def test_small_index_has_no_regions(tmp_path):

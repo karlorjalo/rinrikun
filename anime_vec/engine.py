@@ -198,29 +198,83 @@ class Engine:
         self.regions = self._build_regions(unique)
 
     def _build_regions(self, unique: list[int]) -> list[dict]:
-        """Divide the map into regions and name each region after its most typical tags.
+        """Divide the map into areas on three levels and name each area after its most typical tags.
 
-        The directions on a t-SNE map have no meaning. The labels tell the user what a region contains.
+        The directions on a t-SNE map have no meaning. The labels tell the user what an area contains.
+
+        Level 0 has the large areas. Each large area is divided into smaller areas (level 1), and
+        each of these is divided again (level 2). The interface shows the smaller areas when the
+        user zooms in. A large area gets the tags that are more frequent in it than in the full
+        index. A smaller area gets the tags that are more frequent in it than in its larger area,
+        without the tags of its larger areas: its label tells what is special about it.
+
+        Each area has its position on the map (x, y) and in the grid of the close view (gx, gy).
+        The list has the large areas first, and on each level the areas with the most rows first.
         """
         if len(unique) < layout.REGION_MIN_ROWS or not self.tag_names:
             return []
         P = self.coords_2d[unique]
+        G = self.grid_2d[unique]
         T = self.tag_M[unique]
-        labels, _ = layout.kmeans(P, layout.REGION_COUNT)
+        has_tag = T > 0
         corpus_mean = T.mean(axis=0)
-        regions = []
-        for c in range(int(labels.max()) + 1):
-            members = np.where(labels == c)[0]
+        regions: list[dict] = []
+
+        def typical_tags(members, base, exclude=(), support=0.0, count=2) -> list[str]:
+            """Return the tags that are more frequent in the rows `members` than in `base`."""
+            lift = T[members].mean(axis=0) - base
+            share = has_tag[members].mean(axis=0)
+            out = []
+            for j in np.argsort(-lift):
+                if lift[j] <= 0 or len(out) >= count:
+                    break
+                if share[j] >= support and self.tag_names[j] not in exclude:
+                    out.append(self.tag_names[j])
+            return out
+
+        def add(members, level: int, tags: list[str]):
+            x, y = P[members].mean(axis=0)
+            gx, gy = G[members].mean(axis=0)
+            regions.append({"x": round(float(x), 4), "y": round(float(y), 4),
+                            "gx": round(float(gx), 4), "gy": round(float(gy), 4),
+                            "label": " · ".join(tags), "count": int(len(members)), "level": level})
+
+        def divide(members, level: int, exclude: set):
+            parts = int(round(len(members) / layout.REGION_PART_SIZES[level - 1]))
+            if parts < 2:
+                return
+            labels, _ = layout.kmeans(P[members], parts)
+            base = T[members].mean(axis=0)
+            support = layout.REGION_PART_SUPPORT[level - 1]
+            for c in range(parts):
+                part = members[labels == c]
+                if len(part) < layout.REGION_MIN_PART:
+                    continue
+                tags = typical_tags(part, base, exclude, support) or typical_tags(part, corpus_mean, exclude, support)
+                if tags:
+                    add(part, level, tags)
+                if level < len(layout.REGION_PART_SIZES):
+                    divide(part, level + 1, exclude | set(tags))
+
+        labels, _ = layout.kmeans(P, layout.REGION_COUNT)
+        areas = sorted((np.where(labels == c)[0] for c in range(int(labels.max()) + 1)), key=len, reverse=True)
+        used: set = set()
+        for members in areas:
             if len(members) < layout.REGION_MIN_SIZE:
                 continue
-            # The tags that are much more frequent in this region than in the full index
-            lift = T[members].mean(axis=0) - corpus_mean
-            top = [j for j in np.argsort(-lift)[:2] if lift[j] > 0]
-            if not top:
+            tags = typical_tags(members, corpus_mean, count=6)
+            if not tags:
                 continue
-            x, y = P[members].mean(axis=0)
-            regions.append({"x": round(float(x), 4), "y": round(float(y), 4),
-                            "label": " · ".join(self.tag_names[j] for j in top), "count": int(len(members))})
+            # Two large areas must not have the same label: the second area gets its next typical tag
+            label = tags[:2]
+            for other in tags[2:]:
+                if " · ".join(label) not in used:
+                    break
+                label = [tags[0], other]
+            used.add(" · ".join(label))
+            add(members, 0, label)
+            divide(members, 1, set(label))
+        regions.sort(key=lambda r: (r["level"], -r["count"]))
         return regions
 
     def _build_layout(self, unique: list[int]) -> tuple[np.ndarray, np.ndarray, tuple[float, float]]:

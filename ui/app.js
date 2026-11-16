@@ -622,6 +622,8 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   const POSTER_ASPECT = 1.45;
   // A poster shows its title from this width
   const TITLE_MIN = 72;
+  // The area labels have three levels. The labels of a level appear from this zoom.
+  const REGION_MIN_SCALE = [0, 1.7, 4];
 
   // The map positions and the grid positions of the shows, and their screen positions in the last draw
   const mapX = new Float32Array(n);
@@ -1133,29 +1135,50 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       }
     }
 
-    // The region labels: the main tags of each part of the map. They are above the posters,
-    // and they go away when the posters are large enough to read.
+    // The area labels: the typical tags of each part of the map, on three levels. Level 0 has the
+    // large areas. The smaller areas of the levels 1 and 2 get their labels when the user zooms in.
+    // The labels are above the posters, and they go away when the posters are large enough to read.
+    // A label is not drawn if it is too near a label that is there: the large areas go first,
+    // then the areas with the most shows.
+    let regionCount = 0;
     if (regions.length && cardWidth < 50) {
       ctx.save();
-      const fontSize = Math.max(10.5, Math.min(15, 10.5 * Math.sqrt(scale)));
-      ctx.font = `600 ${fontSize}px ${fontFamily}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.lineJoin = "round";
       ctx.lineWidth = 3.5;
       ctx.strokeStyle = isDark ? "rgba(38, 38, 36, 0.9)" : "rgba(252, 251, 249, 0.9)";
-      ctx.fillStyle = isDark ? "rgba(235, 230, 220, 0.82)" : "rgba(40, 36, 33, 0.78)";
+      const ink = isDark ? "235, 230, 220" : "40, 36, 33";
+      // The look of each level: the weight, the smallest size, the largest size, the opacity
+      const looks = [[600, 10.5, 15, 0.82], [600, 10.5, 12.5, 0.7], [500, 10, 11.5, 0.62]];
+      const blend = gridBlend(side);
+      const placed = [];
       for (const region of regions) {
-        const { x: px, y: py } = toScreen(region.x, region.y, w, h, side);
+        const level = Math.min(region.level || 0, looks.length - 1);
+        if (scale < REGION_MIN_SCALE[level]) continue;
+        // The shows move from the map to the grid in the close view, and the labels move with them
+        const rx = region.x + ((region.gx ?? region.x) - region.x) * blend;
+        const ry = region.y + ((region.gy ?? region.y) - region.y) * blend;
+        const { x: px, y: py } = toScreen(rx, ry, w, h, side);
         if (px < -80 || px > w + 80 || py < -20 || py > h + 20) continue;
+        const [weight, minSize, maxSize, alpha] = looks[level];
+        const fontSize = Math.max(minSize, Math.min(maxSize, minSize * Math.sqrt(scale / Math.max(1, REGION_MIN_SCALE[level]))));
+        ctx.font = `${weight} ${fontSize}px ${fontFamily}`;
+        const halfWidth = ctx.measureText(region.label).width / 2 + 9;
+        const halfHeight = fontSize / 2 + 7;
+        if (placed.some((box) => Math.abs(box.x - px) < box.w + halfWidth && Math.abs(box.y - py) < box.h + halfHeight)) continue;
+        placed.push({ x: px, y: py, w: halfWidth, h: halfHeight });
+        ctx.fillStyle = `rgba(${ink}, ${alpha})`;
         ctx.strokeText(region.label, px, py);
         ctx.fillText(region.label, px, py);
       }
+      regionCount = placed.length;
       ctx.restore();
     }
 
     // The number of posters in the last draw, for the tests of the interface
     canvas.dataset.posters = String(shown);
+    canvas.dataset.labels = String(regionCount);
     canvas.dataset.cards = cards ? "1" : "0";
     ctx.restore();
   }

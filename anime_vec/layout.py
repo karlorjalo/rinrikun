@@ -6,11 +6,20 @@ VERSION = "tsne-v3-grid"
 # t-SNE needs more rows than its perplexity. Smaller indexes use PCA.
 TSNE_MIN_ROWS = 100
 TSNE_PERPLEXITY = 30
-# The map gets region labels only when the index has this number of rows or more
+# The map gets area labels only when the index has this number of rows or more
 REGION_MIN_ROWS = 200
-REGION_COUNT = 14
-# A region with less than this number of rows gets no label
+# The number of large areas (level 0)
+REGION_COUNT = 24
+# A large area with less than this number of rows gets no label
 REGION_MIN_SIZE = 15
+# Each large area is divided into smaller areas (level 1), and each of these is divided again
+# (level 2). These are the numbers of rows of a typical area on the levels 1 and 2.
+REGION_PART_SIZES = (230, 60)
+# A smaller area with less than this number of rows gets no label
+REGION_MIN_PART = 12
+# A tag can be in the label of a smaller area only if this part of the rows of the area has the
+# tag (levels 1 and 2). Without this limit, a rare tag of some rows gives its name to the area.
+REGION_PART_SUPPORT = (0.15, 0.2)
 # The grid of the close view: each show has its own cell, so that its poster never covers
 # another poster. A cell is higher than wide, as a poster is.
 CELL_ASPECT = 1.4
