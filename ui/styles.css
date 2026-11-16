@@ -481,3 +481,6 @@ dialog#detail-modal::backdrop { background: rgba(20, 18, 16, 0.6); backdrop-filt
   .btn-tier .tier-label { display: none; }
   .btn-tier .tier-mult { font-size: 10.5px; }
 }
+.recs-formula-note { font-size: 12.5px; line-height: 1.5; color: var(--muted); margin: -12px 2px 18px; }
+.recs-formula-note b { color: var(--text); font-weight: 600; }
+#recs-formula-pills .pill.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }

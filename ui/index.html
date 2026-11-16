@@ -146,6 +146,13 @@
       </div>
     </div>
     <div class="recs-filter-row">
+      <div class="filter-group" id="recs-formula-group">
+        <span class="filter-label">Formula:</span>
+        <div class="filter-pills" id="recs-formula-pills">
+          <button class="pill" data-kinds="usual" title="Shows of the kinds that your library has many of move up">My usual kinds</button>
+          <button class="pill" data-kinds="all" title="The kind of a show does not change its position">All kinds</button>
+        </div>
+      </div>
       <div class="filter-group">
         <div class="filter-pills" id="recs-switches">
           <button class="pill" id="recs-variety" aria-pressed="false" title="Give results that are less similar to each other">More variety</button>
@@ -171,6 +178,7 @@
         </div>
       </div>
     </div>
+    <div id="recs-formula-note" class="recs-formula-note"></div>
     <div id="recs-undo-bar"></div>
     <div id="rresults" class="cards"></div>
   </section>

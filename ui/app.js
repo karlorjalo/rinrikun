@@ -1678,6 +1678,29 @@ let recsMinScore = 0;
 // The list shows only new franchises, with the best scores, until the user turns a switch on
 let recsVariety = false;
 let recsSequels = false;
+// The formula of the list. "usual" gives a higher score to the kinds of shows that the library has
+// many of. "all" gives each kind of show the same chance. The browser keeps the selection.
+const FORMULA_KEY = "rinrikun-formula";
+const FORMULAS = {
+  usual: {
+    name: "My usual kinds",
+    text: "Shows of the kinds that your library has many of move up. The kind of a show is its year, its format, its length and its crowd score. The top of the list has more well-known shows.",
+  },
+  all: {
+    name: "All kinds",
+    text: "The year, the format, the length and the crowd score of a show do not change its position. The top of the list has more shows that are less well-known.",
+  },
+  seed: {
+    name: "Similar to the seed",
+    text: "The list has the shows that are most similar to the seed show. The two formulas have no effect on this list.",
+  },
+};
+let recsKinds = "usual";
+try {
+  if (localStorage.getItem(FORMULA_KEY) === "all") recsKinds = "all";
+} catch (e) {}
+// The number of the last request for a list
+let recsRequest = 0;
 
 function useSeed(r) {
   seed = r;
@@ -1689,6 +1712,9 @@ function renderRecsSeedBar() {
   // A seeded list is ordered by the similarity to the seed, so the variety switch has no effect
   const varietyBtn = $("#recs-variety");
   if (varietyBtn) varietyBtn.style.display = seed ? "none" : "";
+  // The formula selection also has no effect on a seeded list
+  const formulaGroup = $("#recs-formula-group");
+  if (formulaGroup) formulaGroup.style.display = seed ? "none" : "";
 
   if (!bar) return;
   if (seed) {
@@ -1710,7 +1736,35 @@ function renderRecsSeedBar() {
   }
 }
 
+// Tell above the list which formula made it
+function renderRecsFormulaNote(applied) {
+  const note = $("#recs-formula-note");
+  const formula = FORMULAS[applied];
+  if (!note || !formula) return;
+  note.dataset.formula = applied;
+  note.innerHTML = `<b>Formula: ${formula.name}.</b> ${formula.text}`;
+}
+
+function paintRecsFormulaPills() {
+  document.querySelectorAll("#recs-formula-pills .pill").forEach((btn) => {
+    const on = btn.dataset.kinds === recsKinds;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", String(on));
+  });
+}
+
 function initRecsFilters() {
+  paintRecsFormulaPills();
+  document.querySelectorAll("#recs-formula-pills .pill").forEach((btn) => {
+    btn.onclick = () => {
+      if (btn.dataset.kinds === recsKinds) return;
+      recsKinds = btn.dataset.kinds;
+      try { localStorage.setItem(FORMULA_KEY, recsKinds); } catch (e) {}
+      paintRecsFormulaPills();
+      recs();
+    };
+  });
+
   const bindSwitch = (id, set) => {
     const btn = $(id);
     if (!btn) return;
@@ -1858,10 +1912,17 @@ async function recs() {
   lastDismissed = null;
   renderRecsUndoBar();
   renderRecsSeedBar();
+  const applied = seed ? "seed" : recsKinds;
   const base = seed
     ? `/api/recommend?k=40&seed=${encodeURIComponent(seed.id)}`
-    : `/api/recommend?k=40&mode=${recsVariety ? "diverse" : "hybrid"}`;
-  rawRecs = await (await fetch(`${base}&new_only=${!recsSequels}`)).json();
+    : `/api/recommend?k=40&mode=${recsVariety ? "diverse" : "hybrid"}&kinds=${recsKinds}`;
+  const request = ++recsRequest;
+  const list = await (await fetch(`${base}&new_only=${!recsSequels}`)).json();
+  // An older request that ends late must not replace the list of a newer request. Thus the
+  // note above the list always names the formula of the list that the user sees.
+  if (request !== recsRequest) return;
+  rawRecs = list;
+  renderRecsFormulaNote(applied);
   renderRecsGrid();
   const ids = rawRecs.map((s) => s.id);
   const map = activeVectorMaps.get("recs-vector-canvas");
