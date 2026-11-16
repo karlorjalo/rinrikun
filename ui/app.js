@@ -839,13 +839,33 @@ function searchText(text) {
   return (text || "").normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
 }
 
+// The words of the text of a search, each as text for a comparison
+function searchWords(value) {
+  return (value || "").split(/\s+/).map(searchText).filter(Boolean);
+}
+
+// All titles of a show as text for a comparison, with one title in each line. `aka` has the
+// titles that the interface does not show: the English title, and for a show of the library the
+// titles of its AniList entries. A show of the library has only its title from Jellyfin, which is
+// in one language. Without `aka` a search in a different language does not find it.
+function showSearchText(show) {
+  return [show.title, show.title_native, ...(show.aka || [])].map(searchText).filter(Boolean).join("\n");
+}
+
+// The place of a found show in the results: a show with a title that starts with the first word
+// is first, then the shows of the user. A lower number is a better place.
+function searchRank(text, words, owned) {
+  const starts = text.startsWith(words[0]) || text.includes(`\n${words[0]}`);
+  return (starts ? 0 : 2) + (owned ? 0 : 1);
+}
+
 // The titles of the points of the map as text for a comparison. All maps use the same list.
 let mapSearchTexts = null;
 let mapSearchPoints = null;
 
 function getMapSearchTexts(points) {
   if (mapSearchPoints !== points) {
-    mapSearchTexts = points.map((pt) => `${searchText(pt.title)}\n${searchText(pt.title_native)}`);
+    mapSearchTexts = points.map(showSearchText);
     mapSearchPoints = points;
   }
   return mapSearchTexts;
@@ -1155,8 +1175,8 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   function runSearch() {
     clearTimeout(searchTimer);
     searchTimer = null;
-    // Each word of the text must be in the title, in the romaji title or in the Japanese title
-    const words = searchInput.value.split(/\s+/).map(searchText).filter(Boolean);
+    // Each word of the text must be in a title of the show: see showSearchText
+    const words = searchWords(searchInput.value);
     searchPos = -1;
     if (!words.length) {
       searchList = null;
@@ -1165,12 +1185,9 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
       const texts = getMapSearchTexts(points);
       const found = [];
       for (let i = 0; i < n; i++) {
-        if (words.every((word) => texts[i].includes(word))) {
-          // The order for the jumps: a title that starts with the text is first, then the shows
-          // of the user, then the shows with the highest AniList score
-          const starts = texts[i].startsWith(words[0]) || texts[i].includes(`\n${words[0]}`);
-          found.push([i, (starts ? 0 : 2) + (points[i].owned ? 0 : 1)]);
-        }
+        // The order for the jumps: see searchRank. Shows with the same rank are in the order
+        // of their AniList score, the highest first.
+        if (words.every((word) => texts[i].includes(word))) found.push([i, searchRank(texts[i], words, points[i].owned)]);
       }
       found.sort((a, b) => a[1] - b[1] || (points[b[0]].score ?? -1) - (points[a[0]].score ?? -1));
       searchList = found.map((item) => item[0]);
@@ -2098,7 +2115,9 @@ async function initSearch() {
 
       const { main, sub } = displayTitles(t);
       const subParts = [];
+      // A show of the library has one title. The second line then has its first other title.
       if (sub) subParts.push(esc(sub));
+      else if (t.aka && t.aka.length) subParts.push(esc(t.aka[0]));
       if (t.year) subParts.push(t.year);
 
       let badge = "";
@@ -2150,15 +2169,21 @@ async function initSearch() {
 
   let currentMatches = [];
   q.oninput = () => {
-    const v = q.value.trim().toLowerCase();
+    const v = q.value.trim();
     qClear.hidden = !v;
-    if (v.length < 2) {
+    const words = searchWords(v);
+    // One Latin letter finds too many shows. One Japanese character can be a full word.
+    if (!words.length || (v.length < 2 && /^[\x00-\x7f]*$/.test(v))) {
       closeSearch();
       return;
     }
-    currentMatches = titles
-      .filter((t) => (t.title + " " + (t.title_native || "")).toLowerCase().includes(v))
-      .slice(0, 10);
+    // Each word of the text must be in a title of the show: see showSearchText
+    const found = [];
+    titles.forEach((t, k) => {
+      if (t.searchKey === undefined) t.searchKey = showSearchText(t);
+      if (words.every((word) => t.searchKey.includes(word))) found.push([t, searchRank(t.searchKey, words, t.owned), k]);
+    });
+    currentMatches = found.sort((a, b) => a[1] - b[1] || a[2] - b[2]).slice(0, 10).map((item) => item[0]);
     renderDropdown(currentMatches);
   };
 
