@@ -132,3 +132,64 @@ def test_cache_from_an_older_query_refetches(tmp_path, monkeypatch):
     monkeypatch.setattr(anilist_pull, "_graphql", lambda page_no, timeout=60: page(new_media))
 
     assert anilist_pull.fetch_pool()[0]["status"] == "FINISHED"
+
+
+def _media(i, **kw):
+    return dict(MEDIA, id=i, relations={"edges": []}, recommendations={"nodes": []}, status="FINISHED", **kw)
+
+
+def test_related_ids():
+    rows = [
+        {"anilist_id": 1, "recommendations": [[2, 50], [7, 3]], "relations": [8]},
+        {"anilist_id": 2, "recommendations": [[1, 50]], "relations": []},
+    ]
+    assert anilist_pull.related_ids(rows) == {7, 8}
+
+
+def test_fetch_by_ids_caches_each_anime(tmp_path, monkeypatch):
+    monkeypatch.setattr(anilist_pull, "CACHE_DIR", tmp_path)
+    _fake_time(monkeypatch)
+    calls = []
+
+    def fake(ids, timeout=60):
+        calls.append(list(ids))
+        # AniList does not return id 3
+        return {"data": {"Page": {"media": [_media(i) for i in ids if i != 3]}}}
+
+    monkeypatch.setattr(anilist_pull, "_graphql_ids", fake)
+    rows = anilist_pull.fetch_by_ids({1, 2, 3})
+    assert [r["id"] for r in rows] == ["al:1", "al:2"]
+    assert calls == [[1, 2, 3]]
+
+    # The second call uses the cache, and does not ask for the absent id again
+    rows = anilist_pull.fetch_by_ids({1, 2, 3, 4})
+    assert [r["id"] for r in rows] == ["al:1", "al:2", "al:4"]
+    assert calls == [[1, 2, 3], [4]]
+
+    # A forced call asks for all ids again
+    anilist_pull.fetch_by_ids({1, 3}, force=True)
+    assert calls[-1] == [1, 3]
+
+
+def test_fetch_by_ids_refetches_a_cache_file_from_an_older_query(tmp_path, monkeypatch):
+    monkeypatch.setattr(anilist_pull, "CACHE_DIR", tmp_path)
+    _fake_time(monkeypatch)
+    (tmp_path / "media").mkdir()
+    (tmp_path / "media" / "1.json").write_text(json.dumps(dict(MEDIA, id=1)), encoding="utf-8")
+    monkeypatch.setattr(anilist_pull, "_graphql_ids",
+                        lambda ids, timeout=60: {"data": {"Page": {"media": [_media(i, episodes=12) for i in ids]}}})
+    assert anilist_pull.fetch_by_ids([1])[0]["episodes"] == 12
+
+
+def test_fetch_by_ids_in_batches_of_50(tmp_path, monkeypatch):
+    monkeypatch.setattr(anilist_pull, "CACHE_DIR", tmp_path)
+    _fake_time(monkeypatch)
+    sizes = []
+
+    def fake(ids, timeout=60):
+        sizes.append(len(ids))
+        return {"data": {"Page": {"media": [_media(i) for i in ids]}}}
+
+    monkeypatch.setattr(anilist_pull, "_graphql_ids", fake)
+    assert len(anilist_pull.fetch_by_ids(range(1, 121))) == 120
+    assert sizes == [50, 50, 20]

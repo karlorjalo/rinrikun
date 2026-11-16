@@ -14,6 +14,8 @@ relations { edges { relationType node { id type } } }
 recommendations(sort: RATING_DESC, perPage: 25) { nodes { rating mediaRecommendation { id type } } }"""
 QUERY = ("query ($page: Int) { Page(page: $page, perPage: 50) { pageInfo { lastPage } "
          "media(type: ANIME, sort: POPULARITY_DESC, isAdult: false) { " + MEDIA_FIELDS + " } } }")
+ID_QUERY = ("query ($ids: [Int]) { Page(perPage: 50) { "
+            "media(id_in: $ids, type: ANIME, isAdult: false) { " + MEDIA_FIELDS + " } } }")
 # A cached answer without these keys is from an older query
 REQUIRED_KEYS = ("relations", "recommendations", "status")
 # Seconds between two requests. AniList permits 30 requests in one minute.
@@ -124,8 +126,93 @@ def fetch_pool(max_pages: int = MAX_PAGES, force: bool = False) -> list[dict]:
     return rows
 
 
-def _graphql(page: int, timeout: int = 60) -> dict:
-    body = json.dumps({"query": QUERY, "variables": {"page": page}}).encode()
+def related_ids(pool_rows: list[dict]) -> set[int]:
+    """Return the AniList ids that the pool points to and does not have.
+
+    These are the shows that users recommend and the other members of the franchises. The most
+    popular shows alone do not include them.
+    """
+    have = {r["anilist_id"] for r in pool_rows}
+    wanted: set[int] = set()
+    for r in pool_rows:
+        wanted.update(other for other, _ in r.get("recommendations") or [])
+        wanted.update(r.get("relations") or [])
+    return wanted - have
+
+
+def _read_media(cache: Path) -> dict | None:
+    """Return one cached anime. Return None if the file is corrupt or older than the current query."""
+    try:
+        media = json.loads(cache.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(media, dict) or any(key not in media for key in REQUIRED_KEYS):
+        return None
+    return media
+
+
+def _fetch_ids(ids: list[int]) -> list[dict]:
+    last_err: Exception | None = None
+    for attempt in range(5):
+        try:
+            data = _graphql_ids(ids)
+            if not (data.get("data") or {}).get("Page"):
+                raise RuntimeError(f"AniList returned no data for ids {ids[:3]}: {str(data)[:200]}")
+            return data["data"]["Page"]["media"]
+        except Exception as err:
+            last_err = err
+            if attempt < 4:
+                time.sleep(10 * (attempt + 1))
+    raise RuntimeError(f"AniList unreachable for ids {ids[:3]}") from last_err
+
+
+def fetch_by_ids(ids, force: bool = False) -> list[dict]:
+    """Return the rows of the anime with these AniList ids. Each anime has its own cache file.
+
+    AniList does not return adult anime or removed entries. The function remembers these ids,
+    so that it does not ask for them again.
+    """
+    media_dir = CACHE_DIR / "media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    absent_file = CACHE_DIR / "media_absent.json"
+    absent: set[int] = set()
+    if absent_file.exists() and not force:
+        try:
+            absent = set(json.loads(absent_file.read_text(encoding="utf-8")))
+        except json.JSONDecodeError:
+            absent = set()
+    found: dict[int, dict] = {}
+    todo: list[int] = []
+    for i in sorted(set(ids)):
+        media = None if force else _read_media(media_dir / f"{i}.json")
+        if media is not None:
+            found[i] = media
+        elif i not in absent:
+            todo.append(i)
+    for start in range(0, len(todo), 50):
+        batch = todo[start:start + 50]
+        got = {m["id"]: m for m in _fetch_ids(batch)}
+        for i in batch:
+            if i in got:
+                (media_dir / f"{i}.json").write_text(json.dumps(got[i]), encoding="utf-8")
+                found[i] = got[i]
+            else:
+                absent.add(i)
+        absent_file.write_text(json.dumps(sorted(absent)), encoding="utf-8")
+        time.sleep(PAUSE)
+    return [row_from_media(found[i]) for i in sorted(found)]
+
+
+def _post(query: str, variables: dict, timeout: int) -> dict:
+    body = json.dumps({"query": query, "variables": variables}).encode()
     req = urllib.request.Request("https://graphql.anilist.co", data=body,
                                  headers={"Content-Type": "application/json", "User-Agent": UA})
     return json.load(urllib.request.urlopen(req, timeout=timeout))
+
+
+def _graphql(page: int, timeout: int = 60) -> dict:
+    return _post(QUERY, {"page": page}, timeout)
+
+
+def _graphql_ids(ids: list[int], timeout: int = 60) -> dict:
+    return _post(ID_QUERY, {"ids": ids}, timeout)

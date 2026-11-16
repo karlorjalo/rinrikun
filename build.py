@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 
-from anime_vec.anilist_pull import fetch_pool
+from anime_vec.anilist_pull import fetch_by_ids, fetch_pool, related_ids
 from anime_vec.embed import build_text, embed_texts, text_hash, vec_to_blob
 from anime_vec.jellyfin_pull import fetch_library
 from anime_vec.idmap import IdMap, load_entries
@@ -13,7 +13,7 @@ from anime_vec.store import Store
 DB = Path(__file__).resolve().parent / "anime_vec.db"
 
 
-def main(refresh_anilist: bool = False):
+def main(refresh_anilist: bool = False, pool_only: bool = False):
     store = Store(DB)
     lib_rows = fetch_library()
     print(f"library rows: {len(lib_rows)}")
@@ -25,6 +25,18 @@ def main(refresh_anilist: bool = False):
     except Exception as err:
         print(f"WARNING no id map ({err!r}): the match uses only titles")
         idmap = None
+    if not pool_only:
+        # The most popular anime are not the full catalog. Add the shows that the pool points to
+        # (user recommendations and franchise members) and the AniList entries of the library.
+        wanted = related_ids(pool_rows)
+        if idmap is not None:
+            for lib in lib_rows:
+                wanted |= idmap.anilist_ids(lib.get("provider_ids"), lib.get("format") == "movie", lib.get("seasons"))
+        wanted -= {r["anilist_id"] for r in pool_rows}
+        extra_rows = fetch_by_ids(wanted, force=refresh_anilist)
+        print(f"anilist rows outside the pool: {len(extra_rows)} of {len(wanted)} ids")
+        pool_rows += extra_rows
+
     links = link_library(lib_rows, pool_rows, idmap)
     print(f"pool rows matched to library: {links['by_id']} by id, {links['by_title']} by title")
     print(f"library rows without a pool row: {len(links['unlinked_library_rows'])}")
@@ -59,4 +71,4 @@ def main(refresh_anilist: bool = False):
 
 
 if __name__ == "__main__":
-    main(refresh_anilist="--refresh-anilist" in sys.argv)
+    main(refresh_anilist="--refresh-anilist" in sys.argv, pool_only="--pool-only" in sys.argv)
