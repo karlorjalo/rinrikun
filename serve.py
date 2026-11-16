@@ -120,10 +120,11 @@ def recommend(
     seed: str | None = None,
     mode: str = Query("hybrid", pattern="^(hybrid|diverse)$"),
     new_only: bool = False,
+    kinds: str = Query("all", pattern="^(all|usual)$"),
 ):
     if seed and seed not in engine.by_id:
         raise HTTPException(404, "unknown seed")
-    return engine.recommend(k=k, seed_id=seed, mode=mode, new_only=new_only)
+    return engine.recommend(k=k, seed_id=seed, mode=mode, new_only=new_only, kinds=kinds)
 
 
 @app.get("/api/shows")

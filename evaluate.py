@@ -1,6 +1,6 @@
 """Print the offline test of the recommendations. The database is opened read-only.
 
-    python evaluate.py              # the hidden franchise test for the two formulas
+    python evaluate.py              # the hidden franchise test for the formulas
     python evaluate.py --tiers      # also the mean percentile of a hidden show for each tier
     python evaluate.py --recent 20  # also hide the 20 franchises that you added last, all at the same time
 """
@@ -24,20 +24,24 @@ def main(argv: list[str]):
     print(f"rows {len(engine.rows)}, owned {len(engine.owned_idx)}, candidate franchises about {candidates}")
     print(f"a random list: first 40 = {40 / max(candidates, 1):.1%}")
     print()
-    print(f"{'hidden S and A franchises':<28}{'n':>5}{'first 20':>10}{'first 40':>10}{'first 100':>11}{'median':>8}")
-    for label, mode, k in (("hybrid", "hybrid", 100000), ("diverse (first 100 only)", "diverse", 100)):
-        s = hidden_franchise_test(engine, ("S", "A"), mode, k)
+    print(f"{'hidden S and A franchises':<36}{'n':>5}{'first 20':>10}{'first 40':>10}{'first 100':>11}{'median':>8}")
+    for label, mode, kinds, k in (("all kinds", "hybrid", "all", 100000), ("usual kinds", "hybrid", "usual", 100000),
+                                  ("all kinds, more variety (first 100)", "diverse", "all", 100),
+                                  ("usual kinds, more variety (first 100)", "diverse", "usual", 100)):
+        s = hidden_franchise_test(engine, ("S", "A"), mode, k, kinds)
         median = str(s["median"]) if mode == "hybrid" else "-"
-        print(f"{label:<28}{s['n']:>5}{s['hit20']:>10.1%}{s['hit40']:>10.1%}{s['hit100']:>11.1%}{median:>8}")
+        print(f"{label:<36}{s['n']:>5}{s['hit20']:>10.1%}{s['hit40']:>10.1%}{s['hit100']:>11.1%}{median:>8}")
     if "--recent" in argv:
         count = int(argv[argv.index("--recent") + 1])
-        s = recent_test(engine, count)
         print()
-        print(f"the {s['n']} S and A franchises that you added last, hidden at the same time:")
-        print(f"  first 20: {s['hit20']:.1%}   first 40: {s['hit40']:.1%}   first 100: {s['hit100']:.1%}   median rank: {s['median']}")
+        print(f"the {count} S and A franchises that you added last, hidden at the same time:")
+        for kinds in ("all", "usual"):
+            s = recent_test(engine, count, kinds=kinds)
+            print(f"  {kinds + ' kinds:':<13} first 20: {s['hit20']:.1%}   first 40: {s['hit40']:.1%}   "
+                  f"first 100: {s['hit100']:.1%}   median rank: {s['median']}")
     if "--tiers" in argv:
         print()
-        print("mean percentile of a hidden franchise by its tier (1.0 = top of the list):")
+        print("mean percentile of a hidden franchise by its tier (1.0 = top of the list), all kinds:")
         for tier in "SABCD":
             s = hidden_franchise_test(engine, (tier,))
             if s["n"]:

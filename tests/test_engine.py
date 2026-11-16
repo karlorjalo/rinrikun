@@ -704,3 +704,67 @@ def test_music_video_is_not_recommended(tmp_path):
         assert ids == {"al:11", "al:21"}, kwargs
     # A music video is still in the index: the map and the search have it
     assert "al:20" in {p["id"] for p in e.get_vector_map()["points"]}
+
+
+def _kind_engine(tmp_path):
+    """Build an engine with a library of TV series from about 2020, and candidates of other kinds.
+
+    All candidates have the same vector, thus only the kind of a candidate can change its position.
+    """
+    from anime_vec.store import Store
+    s = Store(tmp_path / "kinds.db")
+    specs = [
+        # id, owned, format, year, episodes, score
+        (1, 1, "tv", 2020, 12, 7.6), (2, 1, "tv", 2021, 12, 7.4), (3, 1, "tv", 2022, 13, 7.8), (4, 1, "tv", 2020, 24, 7.5),
+        (10, 0, "tv", 2021, 12, 7.6), (11, 0, "movie", 1985, 1, 5.5), (12, 0, "ova", 1995, 2, 6.2),
+        (13, 0, "tv", 2021, 13, 7.4), (14, 0, "tv", None, None, None),
+    ]
+    for rid, owned, fmt, year, episodes, score in specs:
+        s.upsert_rows([{"id": f"al:{rid}", "source": "anilist", "title": f"T{rid}", "title_native": "", "year": year,
+                        "format": fmt, "genres": [], "tags": [], "tag_ranks": [], "studios": [], "overview": "O",
+                        "score": score, "owned": owned, "tmdbid": None, "anilist_id": rid, "poster": None,
+                        "episodes": episodes}])
+        vec = np.zeros(4, dtype=np.float32)
+        vec[0 if owned else 1] = 1.0
+        s.save_embedding(f"al:{rid}", vec.tobytes())
+    return Engine(s)
+
+
+def test_kind_score_is_high_for_the_kinds_of_the_library(tmp_path):
+    e = _kind_engine(tmp_path)
+    cands = [e.pos[f"al:{i}"] for i in (10, 11, 12, 13, 14)]
+    usual_a, movie, ova, usual_b, unknown = e._kind_score(cands, e.owned_franchises())
+    assert min(usual_a, usual_b) > unknown > max(movie, ova)
+    # A property that is not known gives the mean value: al:14 is a TV series without other data
+    assert np.isfinite(unknown)
+    # No library: all rows get 0
+    assert not e._kind_score(cands, set()).any()
+
+
+def test_usual_kinds_formula_moves_the_usual_kinds_up(tmp_path):
+    e = _kind_engine(tmp_path)
+    usual = [r["id"] for r in e.recommend(k=5, kinds="usual")]
+    assert set(usual[:2]) == {"al:10", "al:13"}
+    assert set(usual[3:]) == {"al:11", "al:12"}
+    # The two formulas give the same shows. "all" is the default.
+    assert {r["id"] for r in e.recommend(k=5)} == set(usual)
+    assert [r["id"] for r in e.recommend(k=5)] == [r["id"] for r in e.recommend(k=5, kinds="all")]
+    # "More variety" also uses the formula
+    assert e.recommend(k=1, mode="diverse", kinds="usual")[0]["id"] in ("al:10", "al:13")
+    with pytest.raises(ValueError):
+        e.recommend(k=5, kinds="other")
+
+
+def test_seeded_list_ignores_the_kinds(tmp_path):
+    e = _kind_engine(tmp_path)
+    assert ([r["id"] for r in e.recommend(k=5, seed_id="al:1", kinds="usual")]
+            == [r["id"] for r in e.recommend(k=5, seed_id="al:1")])
+
+
+def test_hidden_franchise_test_uses_the_kinds(tmp_path):
+    from anime_vec.evaluation import rank_of_hidden
+    e = _kind_engine(tmp_path)
+    # The hidden show al:1 is a TV series from 2020: the "usual kinds" formula puts it above the
+    # movie and the OVA
+    rank, length = rank_of_hidden(e, "al:1", kinds="usual")
+    assert length == 6 and rank <= 3

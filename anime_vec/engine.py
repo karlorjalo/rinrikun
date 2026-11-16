@@ -1,4 +1,5 @@
 import hashlib
+from bisect import bisect_right
 
 import numpy as np
 
@@ -39,6 +40,20 @@ TIER_MARGIN = 0.5
 TIER_PENALTY = 1.0
 # A show that the user removed from the recommendations counts as a C-tier show in the tier model
 DISMISSED_TIER = TIER_VALUES["C"]
+# The "usual kinds" formula gives a higher score to the kinds of shows that the library has many of.
+# The kind of a show is its year, its format, its number of episodes and its crowd score.
+# Weight of this part in the hybrid score, in standard deviations
+KIND_WEIGHT = 1.0
+# The limits between the groups of a year, of a number of episodes and of a crowd score
+KIND_YEARS = (1990, 2000, 2005, 2010, 2015, 2020)
+KIND_EPISODES = (2, 7, 14, 27, 61)
+KIND_SCORES = (6.0, 6.5, 7.0, 7.5, 8.0)
+# The group of each format. A format that is not in this table is in group 6.
+KIND_FORMATS = {"tv": 0, "series": 0, "movie": 1, "ova": 2, "ona": 3, "special": 4, "tv_short": 5}
+# The number of groups of each property: year, format, number of episodes, crowd score
+KIND_SIZES = (len(KIND_YEARS) + 1, 7, len(KIND_EPISODES) + 1, len(KIND_SCORES) + 1)
+# The formulas of the recommendations
+KINDS = ("all", "usual")
 
 
 def _entry_key(r: dict) -> tuple:
@@ -60,6 +75,14 @@ def _watchable(r: dict) -> bool:
     not a show: it stays in the catalog and on the map, and it is not a recommendation.
     """
     return r.get("status") != "NOT_YET_RELEASED" and r.get("format") != "music"
+
+
+def _number(value) -> float:
+    """Return a value of the database as a number. Return 0 if it is empty or not a number."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _zscore(x: np.ndarray) -> np.ndarray:
@@ -158,6 +181,7 @@ class Engine:
         self.franchise = self._build_franchises()
         self._build_links()
         self.entry_row = self._build_entry_rows()
+        self.kind_codes = self._build_kind_codes()
 
         self.coords_2d, self.grid_2d, self.cell = self._build_layout(unique)
         self.regions = self._build_regions(unique)
@@ -269,19 +293,25 @@ class Engine:
         return {self.franchise[self.ids[i]] for i in self.owned_idx}
 
     def recommend(self, k: int = 20, seed_id: str | None = None, mode: str = "hybrid",
-                  new_only: bool = False) -> list[dict]:
+                  new_only: bool = False, kinds: str = "all") -> list[dict]:
         """Return the recommendations. Each result says if the user owns a show of the same franchise.
 
         The mode is "hybrid" (the best scores) or "diverse" (the same scores, with more variety).
         If new_only is true, the list has no shows from franchises that the user owns.
+
+        `kinds` selects the formula. "all" gives each kind of show the same chance. "usual" gives
+        a higher score to the kinds of shows that the library has many of. A list with a seed
+        is ordered by the similarity to the seed, and `kinds` has no effect on it.
         """
+        if kinds not in KINDS:
+            raise ValueError(f"unknown kinds {kinds}")
         owned = self.owned_franchises()
-        out = self._recommend(k, seed_id, mode, owned if new_only else set())
+        out = self._recommend(k, seed_id, mode, owned if new_only else set(), kinds)
         for r in out:
             r["franchise_owned"] = self.franchise[r["id"]] in owned
         return out
 
-    def _recommend(self, k: int, seed_id: str | None, mode: str, skip: set[str]) -> list[dict]:
+    def _recommend(self, k: int, seed_id: str | None, mode: str, skip: set[str], kinds: str = "all") -> list[dict]:
         if k <= 0:
             return []
 
@@ -345,6 +375,12 @@ class Engine:
         low = np.maximum(0.0, -_zscore(self._predicted_tier(cand_indices)) - TIER_MARGIN)
         scores = scores - TIER_PENALTY * low
 
+        # The "usual kinds" formula: a candidate of a kind that the library has many of moves up.
+        # In the hidden franchise test this part moves the S-tier and A-tier shows up in the full
+        # list (the first 100 more than the first 20). It also puts more well-known shows at the top.
+        if kinds == "usual":
+            scores = scores + KIND_WEIGHT * _zscore(self._kind_score(cand_indices, owned))
+
         if mode == "diverse":
             # Maximal marginal relevance: balance the score against the similarity to the shows already selected
             span = float(scores.max() - scores.min())
@@ -399,6 +435,59 @@ class Engine:
         alpha = np.linalg.solve(R @ R.T + TIER_RIDGE * np.eye(len(values)), values - values.mean())
         predicted = self.tag_M[indices].astype(np.float64) @ (R.T @ alpha) + values.mean()
         return predicted.astype(np.float32)
+
+    def _build_kind_codes(self) -> np.ndarray:
+        """Return the group of each row for each property of its kind. -1 = the property is not known.
+
+        The columns are the year, the format, the number of episodes and the crowd score.
+        A library row uses the data of its AniList counterpart.
+        """
+        codes = np.full((len(self.rows), len(KIND_SIZES)), -1, dtype=np.int64)
+        for i in range(len(self.rows)):
+            r = self._tag_source(i)
+            if r.get("anilist_id") is None:
+                continue
+            year, episodes, score = _number(r.get("year")), _number(r.get("episodes")), _number(r.get("score"))
+            if year > 0:
+                codes[i, 0] = bisect_right(KIND_YEARS, year)
+            codes[i, 1] = KIND_FORMATS.get(r.get("format") or "", 6)
+            if episodes > 0:
+                codes[i, 2] = bisect_right(KIND_EPISODES, episodes)
+            if score > 0:
+                codes[i, 3] = bisect_right(KIND_SCORES, score)
+        return codes
+
+    def _kind_score(self, indices: list[int], owned: set[str]) -> np.ndarray:
+        """Score each row by how usual its kind is in the library of the user.
+
+        For each property (year, format, number of episodes, crowd score) the score compares two
+        shares: the share of the library that is in the group of the row, and the share of the
+        rows in `indices` that is in this group. The score is the sum of the logarithms of these
+        ratios. A group that is more frequent in the library than in `indices` gives a positive
+        value. A property that is not known gives the mean value of the rows that have it.
+
+        `owned` are the franchises of the library. Each franchise counts one time, as its entry point.
+        """
+        total = np.zeros(len(indices), dtype=np.float64)
+        library = [self.entry_row[f] for f in sorted(owned) if f in self.entry_row]
+        if not library or not len(indices):
+            return total.astype(np.float32)
+        for col, size in enumerate(KIND_SIZES):
+            cand = self.kind_codes[indices, col]
+            lib = self.kind_codes[library, col]
+            lib = lib[lib >= 0]
+            known = cand >= 0
+            if not known.any() or not len(lib):
+                continue
+            n_cand = np.bincount(cand[known], minlength=size)
+            n_lib = np.bincount(lib, minlength=size)
+            # Each group gets 0.5 more, so that an empty group does not give an infinite value
+            ratio = (np.log((n_lib + 0.5) / (n_lib.sum() + 0.5 * size))
+                     - np.log((n_cand + 0.5) / (n_cand.sum() + 0.5 * size)))
+            value = np.where(known, ratio[np.clip(cand, 0, None)], 0.0)
+            value[~known] = value[known].mean()
+            total += value
+        return total.astype(np.float32)
 
     def _build_entry_rows(self) -> dict[str, int]:
         """Return the entry point of each franchise: the earliest TV series, or the earliest show if none."""

@@ -105,6 +105,10 @@ def test_api_recommend_new_only(tmp_path):
         new_recs = client.get("/api/recommend?k=10&new_only=true").json()
         assert [r["id"] for r in new_recs] == ["al:3"]
         assert client.get("/api/recommend?mode=diverse").status_code == 200
+        # The two formulas
+        assert [r["id"] for r in client.get("/api/recommend?k=10&kinds=usual").json()] != []
+        assert client.get("/api/recommend?kinds=all").status_code == 200
+        assert client.get("/api/recommend?kinds=other").status_code == 422
         # The Center and Peak formulas do not exist now
         assert client.get("/api/recommend?mode=center").status_code == 422
     finally:
