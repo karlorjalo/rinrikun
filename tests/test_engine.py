@@ -788,3 +788,19 @@ def test_a_higher_crowd_score_gives_no_advantage(tmp_path):
     assert fair == high
     assert low == lowest
     assert fair > low
+
+
+def test_show_without_a_tier_gives_links_with_a_smaller_weight(tmp_path):
+    # al:1 gets tier S. al:2 is a show of the user without a tier, and AniList users connect it to al:11.
+    e = _link_engine(tmp_path, extra=[("al:2", [0, 0, 1, 0], 1, [[11, 80]])])
+    e.set_show_tier("al:1", "S")
+    sources, weights = e._link_sources(*e._liked())
+    assert {e.ids[i]: float(w) for i, w in zip(sources, weights)} == {"al:1": 2.0, "al:2": 0.75}
+    by_id = {r["id"]: r for r in e.recommend(k=4)}
+    assert by_id["al:11"]["linked_favorite"] == "al:2"
+    assert by_id["al:10"]["linked_favorite"] == "al:1"
+    # A C-tier show gives no links
+    e.set_show_tier("al:2", "C")
+    sources, _ = e._link_sources(*e._liked())
+    assert [e.ids[i] for i in sources] == ["al:1"]
+    assert "linked_favorite" not in {r["id"]: r for r in e.recommend(k=4)}["al:11"]

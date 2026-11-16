@@ -23,6 +23,11 @@ LIKED_K = 5
 D_PENALTY = 1.0
 # Weight of the AniList user recommendations in the hybrid score, relative to the content score
 LINK_WEIGHT = 0.5
+# Weight of a show of the user that has no tier, as a source of links. The user selects the shows
+# of the library, thus such a show is a mild like before it has a tier. A B-tier show has the
+# weight 1.0. In the hidden franchise test this weight moved the S-tier and A-tier shows up.
+# The same shows as examples for the content score did not help.
+UNRATED_LINK_WEIGHT = 0.75
 # Weight of the similarity to the C-tier and D-tier shows, which decreases the hybrid score
 DISLIKE_WEIGHT = 0.5
 # Number of nearest disliked shows that give the dislike score of a candidate
@@ -363,7 +368,7 @@ class Engine:
         # Content tells the kind of a show. The AniList user recommendations tell which shows the
         # people who like one show also like. This second signal comes from other people.
         cand_fr = self.row_fr[cand_indices]
-        link_score, link_source = self._link_scores(liked, liked_w)
+        link_score, link_source = self._link_scores(*self._link_sources(liked, liked_w))
         scores = scores + LINK_WEIGHT * _zscore(link_score[cand_fr])
 
         # Shows that are similar to the C-tier and D-tier shows of the user, or to the shows that
@@ -552,6 +557,21 @@ class Engine:
         others, weights = self.links[a]
         hit = np.nonzero(others == b)[0]
         return float(weights[hit[0]]) if len(hit) else 0.0
+
+    def _link_sources(self, liked: list[int], liked_w: np.ndarray) -> tuple[list[int], np.ndarray]:
+        """Return the shows that give links, with their weights.
+
+        These are the liked shows, and the shows of the user that have no tier. A show without a
+        tier gives no links if its franchise has a C-tier or D-tier show.
+        """
+        liked_set = set(liked)
+        disliked = {int(self.row_fr[i]) for i in self.owned_idx if self.rows[i].get("tier") in ("C", "D")}
+        unrated = [i for i in self.owned_idx if self.rows[i].get("tier") is None and i not in liked_set
+                   and int(self.row_fr[i]) not in disliked]
+        if not unrated:
+            return list(liked), liked_w
+        weights = np.concatenate([liked_w, np.full(len(unrated), UNRATED_LINK_WEIGHT, dtype=np.float32)])
+        return list(liked) + unrated, weights
 
     def _link_scores(self, liked: list[int], liked_w: np.ndarray) -> tuple[np.ndarray, dict[int, int]]:
         """Return the link score of each franchise, and the liked show with the strongest link to it."""
