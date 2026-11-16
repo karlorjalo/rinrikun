@@ -49,6 +49,23 @@ python evaluate.py --tiers     # offline test of the recommendations (read-only)
 
 Rebuilds are incremental: unchanged rows keep their cached embeddings. A change of the model or of the prompt in `anime_vec/embed.py` makes all embeddings stale. The build also computes the map layout (about 1 minute) and keeps it in the database until the embeddings change.
 
+### Automatic rebuild (Windows)
+
+A new anime has few links on AniList at first, and it gets more with time. A build each week keeps the catalog and the links fresh. The folder `scripts/` has three PowerShell scripts for this:
+
+```
+powershell -ExecutionPolicy Bypass -File scripts\install_weekly_task.ps1    # create the scheduled task (Monday 04:30)
+powershell -ExecutionPolicy Bypass -File scripts\weekly_rebuild.ps1         # what the task runs: build, then start the servers again
+powershell -ExecutionPolicy Bypass -File scripts\restart_servers.ps1        # only start the servers again
+```
+
+- The task runs as your user, also when you are not logged on. If the computer is off at the time of the task, the task runs when the computer is on again.
+- `install_weekly_task.ps1 -Day Sunday -Time 03:00` selects a different time. `Unregister-ScheduledTask -TaskName "rinrikun weekly rebuild"` removes the task.
+- The build keeps one copy of the database from before the build in `scratch\anime_vec.db.bak-weekly`. Its log is `scratch\rebuild.log`.
+- If the build fails, the servers continue with the old index.
+- `restart_servers.ps1` starts two servers: `127.0.0.1:8765` and `0.0.0.0:8771`. Its parameter `-Servers` selects other servers.
+- When the build adds shows, it computes the map again. The positions of the shows on the map can then be different.
+
 ## Notes
 
 - The build connects each library show to its AniList entries with the public id map of the Fribb/anime-lists project (TMDB, TVDB and IMDb ids, with season numbers). The file stays in `idmap_cache/` for 7 days. A title match finds the shows that the id map does not have.
