@@ -103,5 +103,8 @@ def test_api_recommend_new_only(tmp_path):
         assert {r["id"]: r["franchise_owned"] for r in all_recs} == {"al:2": True, "al:3": False}
         new_recs = client.get("/api/recommend?k=10&new_only=true").json()
         assert [r["id"] for r in new_recs] == ["al:3"]
+        assert client.get("/api/recommend?mode=diverse").status_code == 200
+        # The Center and Peak formulas do not exist now
+        assert client.get("/api/recommend?mode=center").status_code == 422
     finally:
         serve.store, serve.engine = orig_store, orig_engine

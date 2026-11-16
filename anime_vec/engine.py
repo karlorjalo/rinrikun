@@ -196,6 +196,7 @@ class Engine:
                   new_only: bool = False) -> list[dict]:
         """Return the recommendations. Each result says if the user owns a show of the same franchise.
 
+        The mode is "hybrid" (the best scores) or "diverse" (the same scores, with more variety).
         If new_only is true, the list has no shows from franchises that the user owns.
         """
         owned = self.owned_franchises()
@@ -231,11 +232,6 @@ class Engine:
         cand_M = self.eff_M[cand_indices]
         mode = (mode or "hybrid").lower()
 
-        if mode == "center":
-            c_sims = cand_M @ self.taste_center()
-            order = self._one_per_franchise(np.argsort(-c_sims), k, cand_indices)
-            return [self._result(cand_indices[j], float(c_sims[j]), seed=None) for j in order]
-
         d_penalty = np.zeros(len(cand_indices), dtype=np.float32)
         d_indices = [i for i in self.owned_idx if self.rows[i].get("tier") == "D"]
         if d_indices:
@@ -243,21 +239,7 @@ class Engine:
             # Soft threshold: the penalty starts when the similarity to a D-tier show is more than D_SIM_START
             d_penalty = np.maximum(0.0, raw_d_sims - D_SIM_START) / (1.0 - D_SIM_START)
 
-        if mode == "peak":
-            s_indices = [i for i in self.owned_idx if self.rows[i].get("tier") == "S"]
-            if not s_indices:
-                s_indices = [i for i in self.owned_idx if self.rows[i].get("tier") == "A"]
-            if not s_indices:
-                s_indices = self.owned_idx
-            s_all_sims = cand_M @ self.eff_M[s_indices].T
-            s_best_idx = s_all_sims.argmax(axis=1)
-            s_peak_sims = s_all_sims.max(axis=1)
-            order = self._one_per_franchise(np.argsort(-(s_peak_sims - 0.15 * d_penalty)), k, cand_indices)
-            return [self._result(cand_indices[j], float(s_peak_sims[j]), seed=None,
-                                 matched_favorite=self._favorite_title(s_indices[s_best_idx[j]]))
-                    for j in order]
-
-        # "hybrid" and "diverse": one center cannot describe a taste that has many small groups.
+        # One center cannot describe a taste that has many small groups.
         # Score each candidate by its nearest liked shows, in the text space and in the tag space.
         liked, liked_w = self._liked()
         text_score, text_sims, best = _knn_score(cand_M, self.eff_M[liked], liked_w)

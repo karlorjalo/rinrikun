@@ -6,7 +6,7 @@ Semantic taste map for your anime library: embeds your Jellyfin library plus a p
 
 - **Profile** — computes the "taste center" (tier-weighted mean of the mean-centered embeddings) of your collection, lists the 15 shows nearest to it, and a tag-frequency summary.
 - **Similar** — type any title, get nearest neighbors with similarity % and shared tags.
-- **Recommendations** — unowned AniList anime, with one result for each franchise. The Hybrid score has three parts: the similarity to your nearest liked shows (text embedding plus tag TF-IDF), the AniList user recommendations that connect your liked shows to the candidate, and a penalty for the similarity to your C-tier and D-tier shows. A franchise that you do not own appears as its first TV season. You can also seed the list from any show you click.
+- **Recommendations** — unowned AniList anime from franchises that you do not own, with one result for each franchise. Two switches change the list: **More variety** gives results that are less similar to each other, and **Include sequels** adds the franchises that you own. The score has three parts: the similarity to your nearest liked shows (text embedding plus tag TF-IDF), the AniList user recommendations that connect your liked shows to the candidate, and a penalty for the similarity to your C-tier and D-tier shows. A franchise that you do not own appears as its first TV season. You can also seed the list from any show you click.
 - **Map** — a 2D t-SNE layout of the index. Shows that are neighbors in the embedding space are neighbors on the map.
 
 ## Setup

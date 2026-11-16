@@ -45,16 +45,15 @@ def test_recommend_modes(tmp_path):
     e.set_show_tier("al:0", "S")
     e.set_show_tier("al:1", "D")
 
-    for mode in ["hybrid", "peak", "diverse", "center"]:
+    for mode in ["hybrid", "diverse"]:
         res = e.recommend(k=2, mode=mode)
         assert len(res) == 2
         assert all(not r["owned"] for r in res)
         assert all(r["similarity"] <= 100.0 for r in res)
 
-    # In peak mode, matched_favorite should be the S-tier show title
-    peak_res = e.recommend(k=2, mode="peak")
-    assert all("matched_favorite" in r for r in peak_res)
-    assert peak_res[0]["matched_favorite"] == "T0"
+    # The only liked show is the S-tier show, thus it is the matched favorite of each result
+    res = e.recommend(k=2, mode="hybrid")
+    assert all(r["matched_favorite"] == "T0" for r in res)
 
 
 def test_vector_map(tmp_path):
@@ -313,7 +312,8 @@ def test_hybrid_prefers_a_liked_group_to_the_gap_between_groups(tmp_path):
         ("al:24", [0, 0, 0, 1, 0, 1], 0, [], []),
     ]
     e = _engine_from(tmp_path, specs)
-    assert e.recommend(k=1, mode="center")[0]["id"] == "al:21"
+    center = e.taste_center()
+    assert e.eff_M[e.pos["al:21"]] @ center > e.eff_M[e.pos["al:20"]] @ center
     top = e.recommend(k=1, mode="hybrid")[0]
     assert top["id"] == "al:20"
     assert top["matched_favorite"] in {f"al:{n}" for n in range(5)}
@@ -375,8 +375,7 @@ def test_franchise_groups_follow_relation_chains(tmp_path):
 def test_recommend_gives_one_result_for_each_franchise(tmp_path):
     e = _franchise_engine(tmp_path)
     same = {"al:10", "al:11", "al:12"}
-    for kwargs in ({"mode": "hybrid"}, {"mode": "peak"}, {"mode": "diverse"}, {"mode": "center"},
-                   {"seed_id": "al:1"}):
+    for kwargs in ({"mode": "hybrid"}, {"mode": "diverse"}, {"seed_id": "al:1"}):
         ids = [r["id"] for r in e.recommend(k=4, **kwargs)]
         assert len(ids) == 4, kwargs
         assert len(same & set(ids)) == 1, kwargs
@@ -386,8 +385,7 @@ def test_recommend_marks_and_hides_owned_franchises(tmp_path):
     e = _franchise_engine(tmp_path)
     # al:1 is the only owned show. Put it in the franchise of al:10, al:11 and al:12.
     e.franchise["al:1"] = e.franchise["al:10"]
-    for kwargs in ({"mode": "hybrid"}, {"mode": "peak"}, {"mode": "diverse"}, {"mode": "center"},
-                   {"seed_id": "al:20"}):
+    for kwargs in ({"mode": "hybrid"}, {"mode": "diverse"}, {"seed_id": "al:20"}):
         marked = {r["id"]: r["franchise_owned"] for r in e.recommend(k=10, **kwargs)}
         assert any(marked[i] for i in marked if i in ("al:10", "al:11", "al:12")), kwargs
         assert not marked.get("al:21", False), kwargs
@@ -468,7 +466,7 @@ def test_new_franchise_appears_as_its_first_tv_season(tmp_path):
                         "anilist_id": int(rid.split(":")[1]), "poster": None, "relations": relations}])
         s.save_embedding(rid, np.array(vec, dtype=np.float32).tobytes())
     e = Engine(s)
-    for mode in ("hybrid", "peak", "diverse", "center"):
+    for mode in ("hybrid", "diverse"):
         ids = [r["id"] for r in e.recommend(k=6, mode=mode)]
         assert "al:10" in ids and "al:11" not in ids and "al:12" not in ids, mode
 

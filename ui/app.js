@@ -1411,8 +1411,9 @@ let seed = null;
 let rawRecs = [];
 let recsFormatFilter = "all";
 let recsMinScore = 0;
-let recsMode = "hybrid";
-let recsNewOnly = false;
+// The list shows only new franchises, with the best scores, until the user turns a switch on
+let recsVariety = false;
+let recsSequels = false;
 
 function useSeed(r) {
   seed = r;
@@ -1421,9 +1422,9 @@ function useSeed(r) {
 
 function renderRecsSeedBar() {
   const bar = $("#recs-seed-bar");
-  const mPills = $("#recs-mode-pills");
-  const mGroup = mPills ? mPills.closest(".filter-group") : null;
-  if (mGroup) mGroup.style.display = seed ? "none" : "";
+  // A seeded list is ordered by the similarity to the seed, so the variety switch has no effect
+  const varietyBtn = $("#recs-variety");
+  if (varietyBtn) varietyBtn.style.display = seed ? "none" : "";
 
   if (!bar) return;
   if (seed) {
@@ -1434,7 +1435,7 @@ function renderRecsSeedBar() {
           <span class="seed-badge">Seed</span>
           <span class="seed-text"><b>${esc(main)}</b></span>
         </div>
-        <button id="recenter-btn" class="btn-action">Reset to center ↺</button>
+        <button id="recenter-btn" class="btn-action">Clear seed ✕</button>
       </div>`;
     $("#recenter-btn").onclick = () => {
       seed = null;
@@ -1446,29 +1447,19 @@ function renderRecsSeedBar() {
 }
 
 function initRecsFilters() {
-  const mPills = $("#recs-mode-pills");
-  if (mPills) {
-    mPills.querySelectorAll(".pill").forEach((btn) => {
-      btn.onclick = () => {
-        mPills.querySelectorAll(".pill").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        recsMode = btn.dataset.mode;
-        recs();
-      };
-    });
-  }
-
-  const nPills = $("#recs-franchise-pills");
-  if (nPills) {
-    nPills.querySelectorAll(".pill").forEach((btn) => {
-      btn.onclick = () => {
-        nPills.querySelectorAll(".pill").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        recsNewOnly = btn.dataset.newOnly === "true";
-        recs();
-      };
-    });
-  }
+  const bindSwitch = (id, set) => {
+    const btn = $(id);
+    if (!btn) return;
+    btn.onclick = () => {
+      const on = btn.getAttribute("aria-pressed") !== "true";
+      btn.setAttribute("aria-pressed", String(on));
+      btn.classList.toggle("active", on);
+      set(on);
+      recs();
+    };
+  };
+  bindSwitch("#recs-variety", (on) => { recsVariety = on; });
+  bindSwitch("#recs-sequels", (on) => { recsSequels = on; });
 
   const fPills = $("#recs-format-pills");
   if (fPills) {
@@ -1525,8 +1516,8 @@ async function recs() {
   renderRecsSeedBar();
   const base = seed
     ? `/api/recommend?k=40&seed=${encodeURIComponent(seed.id)}`
-    : `/api/recommend?k=40&mode=${encodeURIComponent(recsMode)}`;
-  rawRecs = await (await fetch(`${base}&new_only=${recsNewOnly}`)).json();
+    : `/api/recommend?k=40&mode=${recsVariety ? "diverse" : "hybrid"}`;
+  rawRecs = await (await fetch(`${base}&new_only=${!recsSequels}`)).json();
   renderRecsGrid();
   initVectorMap("recs-vector-canvas", "recs-vector-tooltip", rawRecs.map((s) => s.id), "Recommended");
 }

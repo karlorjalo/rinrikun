@@ -104,7 +104,7 @@ def show(id: str):
 def recommend(
     k: int = Query(20, le=100, ge=1),
     seed: str | None = None,
-    mode: str = Query("hybrid", pattern="^(hybrid|peak|diverse|center)$"),
+    mode: str = Query("hybrid", pattern="^(hybrid|diverse)$"),
     new_only: bool = False,
 ):
     if seed and seed not in engine.by_id:
