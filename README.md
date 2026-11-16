@@ -39,6 +39,7 @@ python build.py                # pull Jellyfin + AniList pool, embed, persist to
 python build.py --refresh-anilist   # force re-pull of the AniList pool
 python serve.py                # serves http://localhost:8765 and opens it
 python serve.py --host 0.0.0.0 --port 8771   # also accepts connections from other computers
+python evaluate.py --tiers     # offline test of the recommendations (read-only)
 ```
 
 Rebuilds are incremental: unchanged rows keep their cached embeddings. A change of the model or of the prompt in `anime_vec/embed.py` makes all embeddings stale. The build also computes the map layout (about 1 minute) and keeps it in the database until the embeddings change.

@@ -40,7 +40,12 @@ TIER_WEIGHTS = {
 
 
 class Store:
-    def __init__(self, path):
+    def __init__(self, path, read_only: bool = False):
+        self.read_only = read_only
+        if read_only:
+            # A test or a report must not change the database
+            self.con = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, check_same_thread=False)
+            return
         self.con = sqlite3.connect(str(path), check_same_thread=False)
         self.con.executescript(SCHEMA)
         # Older databases do not have the columns that later features added
@@ -90,6 +95,8 @@ class Store:
         return {r[0]: (r[1], r[2]) for r in self.con.execute("SELECT id, x, y FROM layout")}
 
     def save_layout(self, signature: str, coords: dict[str, tuple[float, float]]):
+        if self.read_only:
+            return
         self.con.execute("DELETE FROM layout")
         self.con.executemany("INSERT INTO layout (id, x, y) VALUES (?, ?, ?)",
                              [(k, float(v[0]), float(v[1])) for k, v in coords.items()])
