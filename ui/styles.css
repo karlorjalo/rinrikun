@@ -483,7 +483,7 @@ dialog#detail-modal::backdrop { background: rgba(20, 18, 16, 0.6); backdrop-filt
 }
 .recs-formula-note { font-size: 12.5px; line-height: 1.5; color: var(--muted); margin: -12px 2px 18px; }
 .recs-formula-note b { color: var(--text); font-weight: 600; }
-#recs-formula-pills .pill.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+#recs-formula-pills .pill.active, #recs-links-pills .pill.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 /* The typeface setting "Noto Sans JP everywhere": titles and headings use the typeface of the other text */
 :root[data-font="sans"] { --serif: var(--sans); }
 .settings-heading { margin-top: 6px; }
@@ -595,3 +595,5 @@ h2::before { content: ""; display: inline-block; width: 11px; height: 8px; margi
 :root[data-gradient-state="loading"] .vector-gradient-toggle.active { opacity: 0.6; }
 :root[data-gradient-state="error"] .vector-gradient-toggle.active { border-color: var(--tier-d); color: var(--tier-d); }
 :root[data-gradient-state="error"] .vector-gradient-toggle.active::after { content: "no data"; font-weight: 400; }
+.rec-results-formulas { margin-top: 6px; color: var(--muted); }
+.rec-results-formulas b { color: var(--text); font-weight: 600; }

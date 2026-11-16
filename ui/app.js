@@ -177,7 +177,7 @@ document.addEventListener("keydown", (e) => {
 // The address of a list of shows, with the formula of the Recommendations tab. The server uses
 // the formula for the match of each show.
 function withFormula(url) {
-  return `${url}${url.includes("?") ? "&" : "?"}kinds=${recsKinds}`;
+  return `${url}${url.includes("?") ? "&" : "?"}kinds=${recsKinds}&links=${recsLinks}`;
 }
 
 // The match of a show is the part of the franchises that the user does not have, which get a
@@ -543,6 +543,15 @@ function renderRecResults() {
     ? `You added ${res.added} of them${tiers.length ? ": " + tiers.join(" · ") : ""}.`
     : "You added none of them until now.";
   const removed = res.removed ? ` You removed ${res.removed}.` : "";
+  // The comparison of the two formulas has a use only after the user saw lists of the two
+  const formulas = res.formulas || {};
+  const perFormula = (name, label) => {
+    const f = formulas[name];
+    return `<b>${label}:</b> ${f.shown} shown, ${f.added} added, ${f.removed} removed.`;
+  };
+  const compare = formulas["no links"] && formulas["no links"].shown && formulas.links
+    ? `<div class="rec-results-text rec-results-formulas">${perFormula("links", "With crowd links")} ${perFormula("no links", "Without crowd links")} A show counts for the first list that gave it.</div>`
+    : "";
   const shows = res.shows.slice(0, 6).map((show) => {
     const pill = show.tier ? `<span class="tier-pill tier-${show.tier.toLowerCase()}">${show.tier}</span> ` : "";
     return `<span class="rec-results-show">${pill}${esc(displayTitles(show).main)}</span>`;
@@ -550,6 +559,7 @@ function renderRecResults() {
   box.innerHTML = `
     <div class="tier-summary-title"><span>Results of the recommendations</span></div>
     <div class="rec-results-text">Since ${since}, the list gave you ${res.shown} new franchises. ${added}${removed}</div>
+    ${compare}
     ${shows ? `<div class="rec-results-shows">${shows}</div>` : ""}`;
 }
 
@@ -2347,12 +2357,24 @@ const FORMULAS = {
   },
   seed: {
     name: "Similar to the seed",
-    text: "The list has the shows that are most similar to the seed show. The two formulas have no effect on this list.",
+    text: "The list has the shows that are most similar to the seed show. The formula and the crowd links have no effect on this list.",
   },
 };
 let recsKinds = "usual";
 try {
   if (localStorage.getItem(FORMULA_KEY) === "all") recsKinds = "all";
+} catch (e) {}
+// The crowd links are the recommendations of AniList users: the shows that the fans of one show
+// also like. Without them the formula uses only the ratings of the user and the facts of the
+// shows. The browser keeps the selection.
+const LINKS_KEY = "rinrikun-links";
+const LINKS_TEXT = {
+  true: "<b>Crowd links: on.</b> The formula also uses the shows that the fans of your shows recommend on AniList.",
+  false: "<b>Crowd links: off.</b> The formula uses only your ratings, and the tags and the text of the shows.",
+};
+let recsLinks = true;
+try {
+  if (localStorage.getItem(LINKS_KEY) === "off") recsLinks = false;
 } catch (e) {}
 // The number of the last request for a list
 let recsRequest = 0;
@@ -2370,6 +2392,8 @@ function renderRecsSeedBar() {
   // The formula selection also has no effect on a seeded list
   const formulaGroup = $("#recs-formula-group");
   if (formulaGroup) formulaGroup.style.display = seed ? "none" : "";
+  const linksGroup = $("#recs-links-group");
+  if (linksGroup) linksGroup.style.display = seed ? "none" : "";
 
   if (!bar) return;
   if (seed) {
@@ -2392,17 +2416,23 @@ function renderRecsSeedBar() {
 }
 
 // Tell above the list which formula made it
-function renderRecsFormulaNote(applied) {
+function renderRecsFormulaNote(applied, links) {
   const note = $("#recs-formula-note");
   const formula = FORMULAS[applied];
   if (!note || !formula) return;
   note.dataset.formula = applied;
-  note.innerHTML = `<b>Formula: ${formula.name}.</b> ${formula.text}`;
+  note.dataset.links = applied === "seed" ? "" : String(links);
+  note.innerHTML = `<b>Formula: ${formula.name}.</b> ${formula.text}${applied === "seed" ? "" : ` ${LINKS_TEXT[links]}`}`;
 }
 
 function paintRecsFormulaPills() {
   document.querySelectorAll("#recs-formula-pills .pill").forEach((btn) => {
     const on = btn.dataset.kinds === recsKinds;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", String(on));
+  });
+  document.querySelectorAll("#recs-links-pills .pill").forEach((btn) => {
+    const on = btn.dataset.links === String(recsLinks);
     btn.classList.toggle("active", on);
     btn.setAttribute("aria-pressed", String(on));
   });
@@ -2418,6 +2448,17 @@ function initRecsFilters() {
       paintRecsFormulaPills();
       recs();
       // The match of a show comes from the formula
+      scheduleMapMatch();
+    };
+  });
+  document.querySelectorAll("#recs-links-pills .pill").forEach((btn) => {
+    btn.onclick = () => {
+      const on = btn.dataset.links === "true";
+      if (on === recsLinks) return;
+      recsLinks = on;
+      try { localStorage.setItem(LINKS_KEY, on ? "on" : "off"); } catch (e) {}
+      paintRecsFormulaPills();
+      recs();
       scheduleMapMatch();
     };
   });
@@ -2571,16 +2612,17 @@ async function recs() {
   renderRecsUndoBar();
   renderRecsSeedBar();
   const applied = seed ? "seed" : recsKinds;
-  const base = seed
-    ? `/api/recommend?k=40&seed=${encodeURIComponent(seed.id)}&kinds=${recsKinds}`
-    : `/api/recommend?k=40&mode=${recsVariety ? "diverse" : "hybrid"}&kinds=${recsKinds}`;
+  const appliedLinks = recsLinks;
+  const base = withFormula(seed
+    ? `/api/recommend?k=40&seed=${encodeURIComponent(seed.id)}`
+    : `/api/recommend?k=40&mode=${recsVariety ? "diverse" : "hybrid"}`);
   const request = ++recsRequest;
   const list = await (await fetch(`${base}&new_only=${!recsSequels}`)).json();
   // An older request that ends late must not replace the list of a newer request. Thus the
   // note above the list always names the formula of the list that the user sees.
   if (request !== recsRequest) return;
   rawRecs = list;
-  renderRecsFormulaNote(applied);
+  renderRecsFormulaNote(applied, appliedLinks);
   renderRecsGrid();
   const ids = rawRecs.map((s) => s.id);
   const map = activeVectorMaps.get("recs-vector-canvas");
