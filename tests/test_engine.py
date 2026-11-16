@@ -687,3 +687,20 @@ def test_link_weight_is_smaller_for_shows_with_many_links(tmp_path):
     assert e.link_weight(f["al:1"], f["al:3"]) > e.link_weight(f["al:2"], f["al:3"]) > 0
     # degree of al:1 is 10, of al:3 is 20: weight = 10 / sqrt(10 * 20)
     assert e.link_weight(f["al:1"], f["al:3"]) == pytest.approx(10 / (200 ** 0.5), rel=1e-5)
+
+
+def test_music_video_is_not_recommended(tmp_path):
+    # The franchise of al:10 has a music video (the earliest entry) and a movie
+    e = _status_engine(tmp_path, [
+        ("al:1", "anilist", "tv", 2020, "FINISHED", 1, [], None),
+        ("al:10", "anilist", "music", 2015, "FINISHED", 0, [11], None),
+        ("al:11", "anilist", "movie", 2021, "FINISHED", 0, [10], None),
+        ("al:20", "anilist", "music", 2019, "FINISHED", 0, [], None),
+        ("al:21", "anilist", "tv", 2019, "FINISHED", 0, [], None),
+    ])
+    assert e.ids[e.entry_row[e.franchise["al:10"]]] == "al:11"
+    for kwargs in ({"mode": "hybrid"}, {"mode": "diverse"}, {"seed_id": "al:1"}):
+        ids = {r["id"] for r in e.recommend(k=10, **kwargs)}
+        assert ids == {"al:11", "al:21"}, kwargs
+    # A music video is still in the index: the map and the search have it
+    assert "al:20" in {p["id"] for p in e.get_vector_map()["points"]}

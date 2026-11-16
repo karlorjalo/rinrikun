@@ -44,17 +44,22 @@ DISMISSED_TIER = TIER_VALUES["C"]
 def _entry_key(r: dict) -> tuple:
     """Sort key that puts the entry point of a franchise first.
 
-    The entry point is a released show, then a TV series before the other formats, then the
-    earliest year. An unreleased sequel must not be the entry point, because the recommendations
-    do not show it. A library row has the format "series" for a TV series.
+    The entry point is a show that can be a recommendation, then a TV series before the other
+    formats, then the earliest year. An unreleased sequel or a music video must not be the entry
+    point, because the recommendations do not show it. A library row has the format "series"
+    for a TV series.
     """
     format_rank = {"tv": 0, "series": 0, "tv_short": 1, "ona": 1}
-    return (not _released(r), format_rank.get(r.get("format"), 2), r.get("year") or 9999, r["id"])
+    return (not _watchable(r), format_rank.get(r.get("format"), 2), r.get("year") or 9999, r["id"])
 
 
-def _released(r: dict) -> bool:
-    """A show that is not released cannot be watched, thus it is not a recommendation."""
-    return r.get("status") != "NOT_YET_RELEASED"
+def _watchable(r: dict) -> bool:
+    """Return True if the row can be a recommendation.
+
+    A show that is not released cannot be watched. A music video is an AniList entry, but it is
+    not a show: it stays in the catalog and on the map, and it is not a recommendation.
+    """
+    return r.get("status") != "NOT_YET_RELEASED" and r.get("format") != "music"
 
 
 def _zscore(x: np.ndarray) -> np.ndarray:
@@ -288,7 +293,7 @@ class Engine:
             exclude_ids = {seed_id} | set(self.counterparts.get(seed_id, []))
             allowed = [j for j in np.argsort(-sims)
                        if self.ids[j] not in exclude_ids and not self.rows[j]["owned"]
-                       and self.franchise[self.ids[j]] not in skip and _released(self.rows[j])
+                       and self.franchise[self.ids[j]] not in skip and _watchable(self.rows[j])
                        and self.ids[j] not in self.dismissed]
             return [self._result(j, float(sims[j]), seed=None) for j in self._one_per_franchise(allowed, k)]
 
@@ -297,7 +302,7 @@ class Engine:
         owned = self.owned_franchises()
         cand_indices = [j for j, r in enumerate(self.rows)
                         if not r["owned"] and r["id"] not in self.duplicate_of and self.franchise[r["id"]] not in skip
-                        and _released(r) and r["id"] not in self.dismissed
+                        and _watchable(r) and r["id"] not in self.dismissed
                         and (self.franchise[r["id"]] in owned or self.entry_row[self.franchise[r["id"]]] == j)]
         if not cand_indices:
             return []
