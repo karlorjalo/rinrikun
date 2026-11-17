@@ -49,9 +49,9 @@ def test_api_weights_endpoints(tmp_path):
         assert ratings_res.json()[0]["tier"] == "S"
         # Each list has the match of a show. Only a list with a seed has a similarity.
         assert 0.0 <= ratings_res.json()[0]["match"] <= 100.0 and "similarity" not in ratings_res.json()[0]
-        assert client.get("/api/ratings?kinds=usual").status_code == 200
-        assert client.get("/api/ratings?kinds=other").status_code == 422
-        assert "match" in client.get("/api/show/al:3?kinds=usual").json()
+        # The match of a show does not use the formula of a list: a parameter for it has no effect
+        assert client.get("/api/ratings?kinds=other").json() == ratings_res.json()
+        assert "match" in client.get("/api/show/al:3").json()
         assert all("match" in r and "similarity" in r for r in client.get("/api/similar?id=al:1").json())
         assert all("match" in r and "similarity" not in r for r in client.get("/api/recommend").json())
         assert all("match" in r and "tier_guess" in r for r in client.get("/api/review-queue").json())
@@ -102,17 +102,10 @@ def test_api_weights_endpoints(tmp_path):
         assert "points" in vm_res.json()
         assert len(vm_res.json()["points"]) == 3
 
-        # 9. The match of the map points: one value for each point, for each formula
-        for kinds in ("all", "usual"):
-            mm_res = client.get(f"/api/vector-map/match?kinds={kinds}")
-            assert mm_res.status_code == 200
-            assert len(mm_res.json()) == 3
-        assert client.get("/api/vector-map/match?kinds=other").status_code == 422
-        # Each list of shows also accepts the formula without the crowd links
-        for url in ("/api/vector-map/match", "/api/review-queue", "/api/ratings", "/api/watched", "/api/dismissed",
-                    "/api/similar?id=al:1", "/api/show/al:3"):
-            assert client.get(url + ("&" if "?" in url else "?") + "kinds=usual&links=false").status_code == 200
-        assert client.get("/api/ratings?links=maybe").status_code == 422
+        # 9. The match of the map points: one value for each point
+        mm_res = client.get("/api/vector-map/match")
+        assert mm_res.status_code == 200
+        assert len(mm_res.json()) == 3
 
         # 10. The list of the shows has the other titles of each show, for the search
         assert all(x["aka"] == [] for x in client.get("/api/shows").json())

@@ -874,15 +874,27 @@ def _match_engine(tmp_path):
     return e
 
 
-def test_match_has_the_order_of_the_recommendations(tmp_path):
+def test_match_is_the_content_score_without_a_tier_model(tmp_path):
     e = _match_engine(tmp_path)
     match = e.match_percent()
     recs = e.recommend(k=10)
-    values = [float(match[e.pos[r["id"]]]) for r in recs]
-    assert values == sorted(values, reverse=True)
+    cand = [e.pos[r["id"]] for r in recs]
+    values = [float(match[j]) for j in cand]
+    # Three rated shows are too few for the tier model. Then the match has the order of the content score.
+    content = e._content(cand)["scores"]
+    assert [values[k] for k in np.argsort(-content, kind="stable")] == sorted(values, reverse=True)
     assert all(0.0 <= v < 100.0 for v in values)
     # with_match gives the same values, with one decimal
     assert [r["match"] for r in e.with_match(recs)] == [round(v, 1) for v in values]
+
+
+def test_match_does_not_use_the_crowd_links(tmp_path):
+    e = _link_engine(tmp_path)
+    ids = [r["id"] for r in e.recommend(k=4)]
+    match = e.match_percent()
+    # al:10 and al:11 have the same content. The crowd link of al:10 changes the list, not the match.
+    assert ids.index("al:10") < ids.index("al:11")
+    assert match[e.pos["al:10"]] == match[e.pos["al:11"]]
 
 
 def test_match_of_a_show_of_the_user_ignores_the_show_itself(tmp_path):
@@ -890,7 +902,10 @@ def test_match_of_a_show_of_the_user_ignores_the_show_itself(tmp_path):
     match = e.match_percent()
     # al:12 has the content of the liked show al:2, thus its content score is the best possible.
     # al:2 itself gets the score that it has without al:2: its content is far from al:1.
-    assert match[e.pos["al:2"]] < match[e.pos["al:12"]]
+    cand = [e.pos[i] for i in ("al:10", "al:11", "al:12", "al:13")]
+    content = e._content(cand, [e.pos["al:2"]])
+    assert content["extra_scores"][0] < content["scores"][2]
+    assert match[e.pos["al:2"]] <= match[e.pos["al:12"]]
     # All rows have a match: candidates, shows of the user, and shows without a tier
     assert not np.isnan(match).any()
 
@@ -903,8 +918,6 @@ def test_match_changes_when_a_tier_changes(tmp_path):
     after = e.match_percent()
     # al:12 is like al:2, which is now a disliked show
     assert after[e.pos["al:12"]] < before[e.pos["al:12"]]
-    # The two formulas have their own values
-    assert e.match_percent("usual") is not e.match_percent("all")
 
 
 def test_match_of_an_anilist_row_of_a_library_show(tmp_path):
@@ -958,7 +971,7 @@ def test_tier_prediction_without_the_row_itself(tmp_path, monkeypatch):
         e.set_show_tier(f"al:{n}", tier)
     rows = [e.pos[f"al:{n}"] for n in range(6)]
     with_row = e._predicted_tier(rows)
-    without_row = e._predicted_tier(rows, leave_out=True)
+    without_row = e._predicted_tier(rows, leave_out="row")
     # al:2 has tier D among shows with tag A that have tier S. The model that knows al:2 predicts a
     # lower tier for it than the model that does not know it.
     assert without_row[2] > with_row[2]
@@ -1024,14 +1037,14 @@ def test_threads_compute_the_match_one_time(tmp_path):
     e = _match_engine(tmp_path)
     e.match_percent()
     calls = []
-    original = e._hybrid
+    original = e._content
 
-    def slow_hybrid(*args, **kwargs):
+    def slow_content(*args, **kwargs):
         calls.append(1)
         time.sleep(0.2)
         return original(*args, **kwargs)
 
-    e._hybrid = slow_hybrid
+    e._content = slow_content
     # A change of a tier makes the match stale. Four requests then ask for it at the same time.
     e.set_show_tier("al:2", "B")
     results = []
@@ -1047,11 +1060,10 @@ def test_threads_compute_the_match_one_time(tmp_path):
 def test_map_match_has_the_order_of_the_map_points(tmp_path):
     e = _match_engine(tmp_path)
     points = e.get_vector_map()["points"]
-    for kinds in ("all", "usual"):
-        match = e.match_percent(kinds)
-        values = e.map_match(kinds)
-        assert len(values) == len(points)
-        assert values == [round(float(match[e.pos[p["id"]]]), 1) for p in points]
+    match = e.match_percent()
+    values = e.map_match()
+    assert len(values) == len(points)
+    assert values == [round(float(match[e.pos[p["id"]]]), 1) for p in points]
 
 
 def test_map_match_is_none_without_shows_of_the_user(tmp_path):
@@ -1183,32 +1195,104 @@ def test_hybrid_uses_the_taste_model(tmp_path, monkeypatch):
 
 def test_formula_without_the_crowd_links(tmp_path, monkeypatch):
     e = _link_engine(tmp_path)
-    pos = e.pos
-    with_links = e.match_percent()
-    without = e.match_percent(links=False)
+    cand = [e.pos[i] for i in ("al:10", "al:11", "al:12", "al:13")]
+    owned = e.owned_franchises()
+    with_links = e._hybrid(cand, "all", owned)["scores"]
+    without = e._hybrid(cand, "all", owned, links=False)["scores"]
     # al:10 and al:11 have the same content. Only the crowd link of al:10 is different.
-    assert with_links[pos["al:10"]] > with_links[pos["al:11"]]
-    assert without[pos["al:10"]] == without[pos["al:11"]]
-    # Each formula keeps its own values
-    assert e.match_percent(links=False) is without and e.match_percent() is with_links
+    assert with_links[0] > with_links[1]
+    assert without[0] == without[1]
+    ids = [r["id"] for r in e.recommend(k=4)]
+    assert ids.index("al:10") < ids.index("al:11")
     assert all("linked_favorite" not in r for r in e.recommend(k=4, links=False))
-    assert [r["match"] for r in e.with_match(e.recommend(k=4, links=False), links=False)] == sorted(
-        (r["match"] for r in e.with_match(e.recommend(k=4, links=False), links=False)), reverse=True)
     # The formula without the links is the formula with a link weight of 0
     monkeypatch.setattr("anime_vec.engine.LINK_WEIGHT", 0.0)
-    e._match_cache.clear()
-    assert np.allclose(e.match_percent(), without)
+    assert np.allclose(e._hybrid(cand, "all", owned)["scores"], without)
 
 
-def test_lists_of_the_user_use_the_formula_without_the_links(tmp_path):
+def test_lists_of_the_user_have_the_match(tmp_path):
     e = _match_engine(tmp_path)
-    for links in (True, False):
-        match = e.match_percent(links=links)
-        assert [r["match"] for r in e.rated_shows(links=links)] == [
-            round(float(match[e.pos[r["id"]]]), 1) for r in e.rated_shows(links=links)]
-        assert [r["match"] for r in e.review_queue(links=links)] == [
-            round(float(match[e.pos[r["id"]]]), 1) for r in e.review_queue(links=links)]
-        assert e.map_match(links=links) == [round(float(v), 1) for v in match]
+    match = e.match_percent()
+    assert [r["match"] for r in e.rated_shows()] == [round(float(match[e.pos[r["id"]]]), 1) for r in e.rated_shows()]
+    assert [r["match"] for r in e.review_queue()] == [round(float(match[e.pos[r["id"]]]), 1) for r in e.review_queue()]
+    assert e.map_match() == [round(float(v), 1) for v in match]
+
+
+def test_match_uses_the_predicted_tier(tmp_path, monkeypatch):
+    e = _steps_engine(tmp_path)
+    cand = [e.pos[f"al:{100 + n}"] for n in range(30)]
+    before = e.match_percent()[cand].copy()
+    last = cand[int(np.argmin(before))]
+
+    def one_show(self, indices, leave_out=None):
+        return np.array([4.0 if i == last else 2.0 for i in indices], dtype=np.float32)
+
+    # The candidate with the lowest match gets the highest predicted tier of all candidates
+    monkeypatch.setattr(Engine, "_predicted_tier", one_show)
+    e._match_cache.clear()
+    assert e.match_percent()[last] > before.min()
+
+
+def _season_engine(tmp_path, monkeypatch):
+    """al:1 and al:2 are two seasons of one franchise with the tag A, and the two have tier S."""
+    import anime_vec.engine as engine_module
+    monkeypatch.setattr(engine_module, "TIER_MODEL_MIN_RATED", 3)
+    from anime_vec.store import Store
+    s = Store(tmp_path / "seasons.db")
+    specs = [(1, ["A"], 1, []), (2, ["A"], 1, [1]), (3, ["A"], 1, []), (4, ["B"], 1, []), (5, ["B"], 1, []), (6, ["A", "B"], 1, [])]
+    specs += [(20 + n, ["A"] if n % 2 else ["B"], 0, []) for n in range(12)]
+    for n, (rid, tags, owned, relations) in enumerate(specs):
+        s.upsert_rows([{"id": f"al:{rid}", "source": "anilist", "title": f"T{rid}", "title_native": "", "year": 2020,
+                        "format": "tv", "genres": [], "tags": tags, "tag_ranks": [80] * len(tags), "studios": [],
+                        "overview": "O", "score": 7.0, "owned": owned, "tmdbid": None, "anilist_id": rid, "poster": None,
+                        "relations": relations}])
+        vec = np.zeros(20, dtype=np.float32)
+        vec[n] = 1.0
+        vec[(n * 7) % 20] += 0.3
+        s.save_embedding(f"al:{rid}", vec.tobytes())
+    e = Engine(s)
+    for rid, tier in ((1, "S"), (2, "S"), (3, "B"), (4, "C"), (5, "C"), (6, "B")):
+        e.set_show_tier(f"al:{rid}", tier)
+    assert e.franchise["al:1"] == e.franchise["al:2"] != e.franchise["al:3"]
+    return e
+
+
+def test_tier_prediction_without_the_franchise(tmp_path, monkeypatch):
+    e = _season_engine(tmp_path, monkeypatch)
+    row = e.pos["al:1"]
+    with_all = e._predicted_tier([row])[0]
+    without_row = e._predicted_tier([row], leave_out="row")[0]
+    without_franchise = e._predicted_tier([row], leave_out="franchise")[0]
+    # Without al:1 the model still knows the S tier of the other season. Without the franchise it does not.
+    assert with_all > without_franchise and without_row > without_franchise
+    # A row of a franchise that the model did not learn from has the usual prediction
+    new = e.pos["al:21"]
+    assert e._predicted_tier([new], leave_out="franchise")[0] == pytest.approx(e._predicted_tier([new])[0])
+    with pytest.raises(ValueError):
+        e._predicted_tier([row], leave_out="season")
+    # The check with a model that really does not have the two seasons
+    e.set_show_tier("al:1", None)
+    e.set_show_tier("al:2", None)
+    assert e._predicted_tier([row])[0] == pytest.approx(without_franchise, abs=1e-3)
+
+
+def test_match_of_a_show_of_the_user_ignores_its_franchise(tmp_path, monkeypatch):
+    e = _season_engine(tmp_path, monkeypatch)
+    calls = []
+    original = Engine._predicted_tier
+
+    def spy(self, indices, leave_out=None):
+        calls.append((list(indices), leave_out))
+        return original(self, indices, leave_out)
+
+    monkeypatch.setattr(Engine, "_predicted_tier", spy)
+    e._match_cache.clear()
+    match = e.match_percent()
+    # The candidates get the usual prediction. The shows of the user get the prediction of a model
+    # that does not know their franchise: the S tier of the other season must not count for al:1.
+    assert [leave_out for _, leave_out in calls] == [None, "franchise"]
+    assert e.pos["al:20"] in calls[0][0] and e.pos["al:1"] in calls[1][0]
+    assert not np.isnan(match).any()
 
 
 def _steps_engine(tmp_path):

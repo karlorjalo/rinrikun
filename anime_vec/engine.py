@@ -239,7 +239,7 @@ class Engine:
         self._build_links()
         self.entry_row = self._build_entry_rows()
         self.kind_codes = self._build_kind_codes()
-        # The match of each row, for each formula. See match_percent.
+        # The match of each row, and the tier guess. See match_percent and tier_guess.
         self._match_cache: dict = {}
         # The server answers requests in more than one thread. After a change of a tier, some
         # requests need the match at the same time. One thread computes it and the other threads
@@ -499,27 +499,23 @@ class Engine:
             out.append(r)
         return out
 
-    def _hybrid(self, cand_indices: list[int], kinds: str, owned: set[str], extra: list[int] | None = None,
-                links: bool = True) -> dict:
-        """Compute the hybrid score of each candidate.
+    def _content(self, cand_indices: list[int], extra: list[int] | None = None) -> dict:
+        """Compute the content score of each candidate: how near the candidate is to the taste of the user.
 
-        If `links` is false, the score has no part from the crowd links.
-
-        `stages` in the result has the score of the candidates after each part of the formula:
-        "content", "links", "dislikes" and "kind". A part that the formula does not use, or that
-        changes no score, has no stage.
+        The score is the mean of two values: the similarity to the nearest liked shows (text and
+        tags), and the taste model. A candidate that is very similar to a D-tier show gets a penalty.
 
         `extra` are rows that are not candidates, for example the shows of the user. Each of them
         gets a score on the scale of the candidates: each part of its score uses the mean and the
         standard deviation that the part has for the candidates. An extra row ignores the shows of
         its own franchise in each part. Thus a show of the user gets about the score that it
-        would have if the user did not have it.
+        would have if the user did not have its franchise.
 
-        Return the scores, the scores of the extra rows, and the data for the results.
+        Return the scores, the scores of the extra rows, the nearest liked show of each candidate,
+        and the liked shows with their weights.
         """
         cand_M = self.eff_M[cand_indices]
         cand_T = self.tag_M[cand_indices]
-        cand_fr = self.row_fr[cand_indices]
         extra = list(extra) if extra is not None else []
         extra_fr = self.row_fr[extra]
 
@@ -560,19 +556,34 @@ class Engine:
             extra_taste = self._taste_scores(extra, leave_out=True)
             extra_content = 0.5 * _scale_like(nearest, extra_nearest) + 0.5 * _scale_like(taste, extra_taste)
             extra_scores = _scale_like(content, extra_content) - D_PENALTY * extra_d
+        return {"scores": scores, "extra_scores": extra_scores, "best": best, "liked": liked, "liked_w": liked_w}
+
+    def _hybrid(self, cand_indices: list[int], kinds: str, owned: set[str], links: bool = True) -> dict:
+        """Compute the hybrid score of each candidate. This score gives the order of a list of recommendations.
+
+        If `links` is false, the score has no part from the crowd links.
+
+        `stages` in the result has the score of the candidates after each part of the formula:
+        "content", "links", "dislikes" and "kind". A part that the formula does not use, or that
+        changes no score, has no stage.
+
+        Return the scores and the data for the results.
+        """
+        cand_M = self.eff_M[cand_indices]
+        cand_T = self.tag_M[cand_indices]
+        cand_fr = self.row_fr[cand_indices]
+        content = self._content(cand_indices)
+        scores, best, liked, liked_w = content["scores"], content["best"], content["liked"], content["liked_w"]
         stages = [("content", scores.copy())]
 
         # Content tells the kind of a show. The AniList user recommendations tell which shows the
         # people who like one show also like. This second signal comes from other people, and it
         # starts at the liked shows of the user. The user can turn it off.
-        # A franchise has no link to itself, thus an extra row needs no special rule here.
         link_source: dict[int, int] = {}
         if links:
             link_score, link_source = self._link_scores(*self._link_sources(liked, liked_w))
             cand_links = link_score[cand_fr]
             scores = scores + LINK_WEIGHT * _zscore(cand_links)
-            if extra:
-                extra_scores = extra_scores + LINK_WEIGHT * _scale_like(cand_links, link_score[extra_fr])
             stages.append(("links", scores.copy()))
 
         # Shows that are similar to the C-tier and D-tier shows of the user, or to the shows that
@@ -584,12 +595,6 @@ class Engine:
             bad_tag, _, _ = _knn_score(cand_T, self.tag_M[disliked], ones, DISLIKED_K)
             bad = 0.5 * _zscore(bad_text) + 0.5 * _zscore(bad_tag)
             scores = scores - DISLIKE_WEIGHT * _zscore(bad)
-            if extra:
-                skip = same_franchise(disliked)
-                extra_bad_text = _knn_score_without(self.eff_M[extra], self.eff_M[disliked], ones, skip, DISLIKED_K)
-                extra_bad_tag = _knn_score_without(self.tag_M[extra], self.tag_M[disliked], ones, skip, DISLIKED_K)
-                extra_bad = 0.5 * _scale_like(bad_text, extra_bad_text) + 0.5 * _scale_like(bad_tag, extra_bad_tag)
-                extra_scores = extra_scores - DISLIKE_WEIGHT * _scale_like(bad, extra_bad)
 
         # A candidate that the tier model puts clearly below the other candidates gets a lower score.
         # A high prediction gives no bonus: in the hidden franchise test a bonus made the list worse,
@@ -597,9 +602,6 @@ class Engine:
         predicted = self._predicted_tier(cand_indices)
         low = np.maximum(0.0, -_zscore(predicted) - TIER_MARGIN)
         scores = scores - TIER_PENALTY * low
-        if extra:
-            extra_predicted = self._predicted_tier(extra, leave_out=True)
-            extra_scores = extra_scores - TIER_PENALTY * np.maximum(0.0, -_scale_like(predicted, extra_predicted) - TIER_MARGIN)
         if disliked or low.any():
             stages.append(("dislikes", scores.copy()))
 
@@ -610,11 +612,9 @@ class Engine:
             tables = self._kind_tables(cand_indices, owned)
             kind = self._kind_values(cand_indices, tables)
             scores = scores + KIND_WEIGHT * _zscore(kind)
-            if extra:
-                extra_scores = extra_scores + KIND_WEIGHT * _scale_like(kind, self._kind_values(extra, tables))
             stages.append(("kind", scores.copy()))
 
-        return {"scores": scores, "extra_scores": extra_scores, "best": best, "liked": liked,
+        return {"scores": scores, "best": best, "liked": liked,
                 "link_source": link_source, "cand_fr": cand_fr, "stages": stages}
 
     def recommendation_steps(self, k: int = 40, kinds: str = "all", links: bool = True, new_only: bool = True) -> dict:
@@ -665,25 +665,36 @@ class Engine:
         """Return a value that changes when the shows, the tiers or the removed shows of the user change."""
         return tuple(self.owned_idx), tuple(sorted(self.weights.items())), tuple(sorted(self.dismissed))
 
-    def match_percent(self, kinds: str = "all", links: bool = True) -> np.ndarray:
+    def match_percent(self) -> np.ndarray:
         """Return the match of each row in percent. The value is NaN for a row without a match.
 
-        The match of a show is the part of the new franchises of the catalog that have a lower
-        hybrid score than the show. 99 means: the show scores higher than 99% of the franchises
-        that the user does not have. It uses the same formula as the recommendations, thus the
-        first recommendation has the highest match. `kinds` and `links` select the formula.
+        The match tells how near a show is to the user. Its score is the sum of two parts with
+        the same weight: the content score (the nearest liked shows and the taste model, see
+        _content), and the tier that the tier model predicts for the show. The match is the part
+        of the new franchises of the catalog that have a lower score than the show. 99 means:
+        the show is nearer to the user than 99% of the franchises that the user does not have.
 
-        A show of the user gets the score that it would have if the user did not have it: each
-        part of the score ignores the shows of its own franchise. Thus the match of a show of the
-        user tells how well the formula finds this show from the other shows of the user.
+        The match does not use the crowd links, and it does not use the kinds of the formulas.
+        Thus a show has one match for all formulas, and a list of recommendations is not always
+        in the order of the match.
+
+        In a test on 172 rated franchises, each hidden in turn, the median match was 97 for the
+        S tier, 94 for the A tier, 93 for the B tier, and 91 for the C and D tiers. Of the 33
+        franchises with a match of 99 or more, 61% had the S or the A tier, and none had the C or
+        the D tier. But the rank correlation with the tier was only 0.16. Thus the match follows
+        the tiers, and it is a weak prediction for one show.
+
+        A show of the user gets the score that it would have if the user did not have its
+        franchise: each part ignores the shows of this franchise. Thus the match of a show of
+        the user tells how well the other shows of the user predict this show.
         """
         with self.lock:
-            return self._match_percent(kinds, links)
+            return self._match_percent()
 
-    def _match_percent(self, kinds: str, links: bool = True) -> np.ndarray:
+    def _match_percent(self) -> np.ndarray:
         """Compute or get the result of match_percent. The caller holds the lock."""
         key = self._state_key()
-        cached = self._match_cache.get((kinds, links))
+        cached = self._match_cache.get("match")
         if cached is not None and cached[0] == key:
             return cached[1]
         out = np.full(len(self.rows), np.nan, dtype=np.float32)
@@ -696,17 +707,21 @@ class Engine:
         if cand and self.owned_idx:
             cand_set = set(cand)
             extra = [j for j in unique if j not in cand_set]
-            hybrid = self._hybrid(cand, kinds, owned, extra, links)
+            content = self._content(cand, extra)
+            predicted = self._predicted_tier(cand)
+            scores = content["scores"] + _zscore(predicted)
             # The reference: the franchises that the user does not have
             new = np.array([self.franchise[self.ids[j]] not in owned for j in cand])
-            reference = np.sort(hybrid["scores"][new] if new.any() else hybrid["scores"])
-            out[cand] = 100.0 * np.searchsorted(reference, hybrid["scores"], side="left") / len(reference)
+            reference = np.sort(scores[new] if new.any() else scores)
+            out[cand] = 100.0 * np.searchsorted(reference, scores, side="left") / len(reference)
             if extra:
-                out[extra] = 100.0 * np.searchsorted(reference, hybrid["extra_scores"], side="left") / len(reference)
+                extra_predicted = self._predicted_tier(extra, leave_out="franchise")
+                extra_scores = content["extra_scores"] + _scale_like(predicted, extra_predicted)
+                out[extra] = 100.0 * np.searchsorted(reference, extra_scores, side="left") / len(reference)
             # An AniList row of a library show has the match of the library show
             for dup_id, lib_id in self.duplicate_of.items():
                 out[self.pos[dup_id]] = out[self.pos[lib_id]]
-        self._match_cache[(kinds, links)] = (key, out)
+        self._match_cache["match"] = (key, out)
         return out
 
     def tier_guess(self) -> np.ndarray:
@@ -728,36 +743,38 @@ class Engine:
         rated = [self.rows[i]["tier"] for i in self.owned_idx if self.rows[i].get("tier") in TIER_VALUES]
         if len(rated) >= TIER_MODEL_MIN_RATED and len(set(rated)) > 1:
             unique = [j for j, r in enumerate(self.rows) if r["id"] not in self.duplicate_of]
-            out[unique] = self._predicted_tier(unique, leave_out=True)
+            out[unique] = self._predicted_tier(unique, leave_out="row")
             for dup_id, lib_id in self.duplicate_of.items():
                 out[self.pos[dup_id]] = out[self.pos[lib_id]]
         self._match_cache["tier guess"] = (key, out)
         return out
 
-    def watch_next_order(self, rows: list[int], kinds: str = "all", links: bool = True) -> list[int]:
+    def watch_next_order(self, rows: list[int]) -> list[int]:
         """Order shows without a tier: the shows that the user will probably rate highest are first.
 
-        The order uses two signals with the same weight: the match, and the tier guess. In a test
-        on the rated shows (each franchise hidden from the tier model) the two together were as
-        good as or better than each alone: the first quarter of the order had 27% S-tier shows,
-        the last quarter 9%. Of all rated shows 17% are S-tier shows.
+        The order uses two signals with the same weight: the match, and the tier guess. The
+        match ignores the other shows of the franchise of a show. The tier guess uses them: the
+        tier of one season is a good guess for the next season. In a test on the 221 rated
+        shows (the match and the guess of a show did not know its rating), the first quarter of
+        this order had 27% S-tier shows, and the last quarter 9%. Of all rated shows 17% are
+        S-tier shows.
         """
         rows = list(rows)
         if len(rows) < 2:
             return rows
-        score = _zscore(_ranks(np.nan_to_num(self.match_percent(kinds, links)[rows], nan=0.0)))
+        score = _zscore(_ranks(np.nan_to_num(self.match_percent()[rows], nan=0.0)))
         guess = self.tier_guess()[rows]
         if not np.isnan(guess).any():
             score = score + _zscore(guess.astype(np.float64))
         return [rows[k] for k in np.argsort(-score, kind="stable")]
 
-    def with_match(self, results: list[dict], kinds: str = "all", links: bool = True) -> list[dict]:
+    def with_match(self, results: list[dict]) -> list[dict]:
         """Add the match (see match_percent) to each result. The value is None for a show without a match.
 
         A show without a tier also gets `tier_guess`: the letter of the tier that the tier model
         predicts for it, or None.
         """
-        match = self.match_percent(kinds, links)
+        match = self.match_percent()
         guess = self.tier_guess()
         for r in results:
             j = self.pos[r["id"]]
@@ -767,17 +784,17 @@ class Engine:
                 r["tier_guess"] = next((letter for letter, limit in TIER_GUESS_LIMITS if guess[j] >= limit), "D")
         return results
 
-    def map_match(self, kinds: str = "all", links: bool = True) -> list:
+    def map_match(self) -> list:
         """Return the match of each point of the map, in the order of the points of get_vector_map.
 
         A value is the match in percent with one decimal, or None for a show without a match.
         The map uses the values for its match gradient.
         """
-        match = self.match_percent(kinds, links)
+        match = self.match_percent()
         return [None if np.isnan(match[i]) else round(float(match[i]), 1)
                 for i, r in enumerate(self.rows) if r["id"] not in self.duplicate_of]
 
-    def _predicted_tier(self, indices: list[int], leave_out: bool = False) -> np.ndarray:
+    def _predicted_tier(self, indices: list[int], leave_out: str | None = None) -> np.ndarray:
         """Predict the tier that the user will give to each row, as a number (4 = S, 0 = D).
 
         The model is a ridge regression on the tags of the shows that the user rated: it learns
@@ -785,9 +802,15 @@ class Engine:
         not predict the tier of this user, but the tiers of the user for shows with the same tags do.
         All predictions are 0 if the user has too few ratings.
 
-        If leave_out is true, a row that the model learned from gets the prediction of a model
-        that did not learn from this row.
+        `leave_out` selects the model for a row that is in the data of the model, or near it:
+          "row"        A row that the model learned from gets the prediction of a model that did
+                       not learn from this row. The other shows of its franchise still count:
+                       the tier of one season is a good guess for the next season.
+          "franchise"  A row gets the prediction of a model that did not learn from the shows of
+                       the franchise of the row.
         """
+        if leave_out not in (None, "row", "franchise"):
+            raise ValueError(f"unknown leave_out {leave_out}")
         rated = [i for i in self.owned_idx if self.rows[i].get("tier") in TIER_VALUES]
         # A removed recommendation is a show near the taste of the user that the user does not want.
         # The model has few low tiers, thus these shows are its most useful examples.
@@ -799,7 +822,7 @@ class Engine:
         R = self.tag_M[rated + dismissed].astype(np.float64)
         alpha = np.linalg.solve(R @ R.T + TIER_RIDGE * np.eye(len(values)), values - values.mean())
         predicted = self.tag_M[indices].astype(np.float64) @ (R.T @ alpha) + values.mean()
-        if leave_out:
+        if leave_out == "row":
             # For a ridge regression, the fit without one row comes from the fit with all rows:
             # (fit of the row - leverage * value of the row) / (1 - leverage). The model subtracts
             # the mean of the values first, and this mean is also different without the row.
@@ -815,6 +838,28 @@ class Engine:
             for n, row in enumerate(indices):
                 if row in position:
                     predicted[n] = without[position[row]]
+        elif leave_out == "franchise":
+            # One more model for each franchise that the model learned from: the model without
+            # the shows of this franchise. A new solution of the equations for each franchise is
+            # slow. The inverse matrix of the model with all shows gives the same result: the
+            # solution without some rows is the solution with all rows, minus a correction that
+            # uses only the columns of these rows.
+            inverse = np.linalg.inv(R @ R.T + TIER_RIDGE * np.eye(len(values)))
+            learned = self.row_fr[rated + dismissed]
+            wanted: dict[int, list[int]] = {}
+            for n, row in enumerate(indices):
+                wanted.setdefault(int(self.row_fr[row]), []).append(n)
+            for f in np.unique(learned):
+                places = wanted.get(int(f))
+                keep = learned != f
+                if not places or not keep.any():
+                    continue
+                gone = np.nonzero(~keep)[0]
+                mean = values[keep].mean()
+                solution = inverse @ np.where(keep, values - mean, 0.0)
+                solution -= inverse[:, gone] @ np.linalg.solve(inverse[np.ix_(gone, gone)], solution[gone])
+                rows_of_f = [indices[n] for n in places]
+                predicted[places] = self.tag_M[rows_of_f].astype(np.float64) @ (R.T @ solution) + mean
         return predicted.astype(np.float32)
 
     def _build_taste_model(self):
@@ -1198,24 +1243,23 @@ class Engine:
         changed = [sid for sid in target_ids if sid in self.by_id]
         return {"id": show_id, "tier": primary["tier"], "weight": primary["weight"], "ids": changed}
 
-    def review_queue(self, unrated_only: bool = False, kinds: str = "all", links: bool = True) -> list[dict]:
+    def review_queue(self, unrated_only: bool = False) -> list[dict]:
         """Return the shows of the user: the shows without a tier first, then the rated shows by their match.
 
         A show without a tier is frequently a show that the user did not watch yet. These shows
         have the order of watch_next_order, thus the start of the list is also the answer to
         "which show of mine do I watch next?".
         """
-        match = np.nan_to_num(self.match_percent(kinds, links), nan=-1.0)
-        order = self.watch_next_order([i for i in self.owned_idx if self.rows[i].get("tier") is None], kinds, links)
+        match = np.nan_to_num(self.match_percent(), nan=-1.0)
+        order = self.watch_next_order([i for i in self.owned_idx if self.rows[i].get("tier") is None])
         if not unrated_only:
             order += sorted((i for i in self.owned_idx if self.rows[i].get("tier") is not None),
                             key=lambda i: -float(match[i]))
-        return self.with_match([self._result(i) for i in order], kinds, links)
+        return self.with_match([self._result(i) for i in order])
 
-    def rated_shows(self, kinds: str = "all", links: bool = True) -> list[dict]:
+    def rated_shows(self) -> list[dict]:
         """Return the shows that the user rated: by tier, then by their match."""
-        out = self.with_match([self._result(i) for i in self.owned_idx if self.rows[i].get("tier") is not None],
-                              kinds, links)
+        out = self.with_match([self._result(i) for i in self.owned_idx if self.rows[i].get("tier") is not None])
         tier_order = {"S": 0, "A": 1, "B": 2, "C": 3, "D": 4}
         return sorted(out, key=lambda x: (tier_order.get(x.get("tier"), 99), -(x.get("match") or 0.0)))
 

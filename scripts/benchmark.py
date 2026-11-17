@@ -34,6 +34,8 @@ from anime_vec.evaluation import franchise_members, hidden, rated_shows
 from anime_vec.store import Store
 
 HAS_SWITCH = "links" in inspect.signature(Engine.recommend).parameters
+# An older version has one match for each formula
+MATCH_ARGS = ("usual",) if "kinds" in inspect.signature(Engine.match_percent).parameters else ()
 VARIANTS = (("usual", True), ("usual", False), ("all", True), ("all", False))
 RECENT_COUNT = 20
 
@@ -112,7 +114,7 @@ def main(label: str):
         times.append(time.perf_counter() - t)
     engine._match_cache.clear()
     t = time.perf_counter()
-    engine.match_percent("usual")
+    engine.match_percent(*MATCH_ARGS)
     match_time = time.perf_counter() - t
     engine._match_cache.clear()
     timing = {"engine_ready_s": round(ready, 2), "list_first_s": round(first, 3),

@@ -65,31 +65,31 @@ def delete_weights(id: str = Query(...)):
         return engine.set_show_tier(id, None)
 
 
-# The formula of the match of a show: see Engine.match_percent
+# The formula of a list of recommendations: see Engine.recommend
 KINDS = Query("all", pattern="^(all|usual)$")
 # False gives the formula without the crowd links: the recommendations of AniList users
 LINKS = Query(True)
 
 
 @app.get("/api/vector-map/match")
-def vector_map_match(kinds: str = KINDS, links: bool = LINKS):
+def vector_map_match():
     """Return the match of each point of the map, in the order of the points of /api/vector-map."""
-    return engine.map_match(kinds, links)
+    return engine.map_match()
 
 
 @app.get("/api/review-queue")
-def review_queue(unrated_only: bool = False, kinds: str = KINDS, links: bool = LINKS):
-    return engine.review_queue(unrated_only=unrated_only, kinds=kinds, links=links)
+def review_queue(unrated_only: bool = False):
+    return engine.review_queue(unrated_only=unrated_only)
 
 
 @app.get("/api/ratings")
-def get_ratings(kinds: str = KINDS, links: bool = LINKS):
-    return engine.rated_shows(kinds=kinds, links=links)
+def get_ratings():
+    return engine.rated_shows()
 
 
 @app.get("/api/watched")
-def get_watched(kinds: str = KINDS, links: bool = LINKS):
-    return engine.with_match(engine.manual_shows(), kinds, links)
+def get_watched():
+    return engine.with_match(engine.manual_shows())
 
 
 @app.post("/api/watched")
@@ -104,8 +104,8 @@ def post_watched(payload: dict):
 
 
 @app.get("/api/dismissed")
-def get_dismissed(kinds: str = KINDS, links: bool = LINKS):
-    return engine.with_match(engine.dismissed_shows(), kinds, links)
+def get_dismissed():
+    return engine.with_match(engine.dismissed_shows())
 
 
 @app.post("/api/dismissed")
@@ -120,17 +120,17 @@ def post_dismissed(payload: dict):
 
 
 @app.get("/api/similar")
-def similar(id: str, k: int = Query(24, le=100, ge=1), kinds: str = KINDS, links: bool = LINKS):
+def similar(id: str, k: int = Query(24, le=100, ge=1)):
     if id not in engine.by_id:
         raise HTTPException(404, "unknown id")
-    return engine.with_match(engine.similar_to(id, k=k), kinds, links)
+    return engine.with_match(engine.similar_to(id, k=k))
 
 
 @app.get("/api/show/{id:path}")
-def show(id: str, kinds: str = KINDS, links: bool = LINKS):
+def show(id: str):
     if id not in engine.by_id:
         raise HTTPException(404, "unknown id")
-    return engine.with_match([engine.public_row(engine.pos[id])], kinds, links)[0]
+    return engine.with_match([engine.public_row(engine.pos[id])])[0]
 
 
 @app.get("/api/recommend")
@@ -150,7 +150,7 @@ def recommend(
         # The log also keeps the formula, thus it can compare the lists with and without the crowd links.
         store.log_recommendations([(r["id"], place) for place, r in enumerate(results) if not r.get("franchise_owned")],
                                   kinds if links else f"{kinds}, no links", datetime.date.today().isoformat())
-    return engine.with_match(results, kinds, links)
+    return engine.with_match(results)
 
 
 @app.get("/api/recommend/steps")
