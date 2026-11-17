@@ -639,3 +639,13 @@ h2::before { content: ""; display: inline-block; width: 11px; height: 8px; margi
   .vector-canvas-box.story-open .vector-zoom-controls, .vector-canvas-box.story-open .vector-hint-pill { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .story-row, .story-row::before { transition: none; } }
+/* The Discover deck of the Review tab: the three answers below the card */
+.tier-buttons[hidden], .discover-buttons[hidden], .discover-hint[hidden] { display: none; }
+.discover-buttons { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; }
+.btn-discover { padding: 12px 14px; font-size: 14px; font-weight: 600; }
+.btn-discover-yes { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); color: var(--accent); }
+.btn-discover-yes:hover { background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
+.btn-discover-no { color: var(--muted); }
+.btn-discover-no:hover { border-color: var(--tier-d); color: var(--tier-d); }
+.discover-hint { font-size: 11.5px; color: var(--muted); text-align: center; }
+.btn-action.btn-interest.active { color: var(--accent); border-color: var(--accent); }

@@ -72,6 +72,7 @@
       <div class="deck-filter-row">
         <button class="pill active" id="deck-filter-unrated" data-filter="unrated">Unrated only</button>
         <button class="pill" id="deck-filter-all" data-filter="all">All your shows</button>
+        <button class="pill" id="deck-filter-discover" data-filter="discover" title="Random shows that you do not have: say if you are interested">Discover</button>
       </div>
     </div>
 
@@ -85,6 +86,12 @@
         <button class="btn-tier tier-a" data-tier="A" title="Press 4 or A"><span class="tier-key">4</span><span class="tier-label">Favorite</span><span class="tier-mult">A</span></button>
         <button class="btn-tier tier-s" data-tier="S" title="Press 5 or S"><span class="tier-key">5</span><span class="tier-label">Masterpiece</span><span class="tier-mult">S</span></button>
       </div>
+      <div class="discover-buttons" id="discover-buttons" hidden>
+        <button class="btn-action btn-discover btn-discover-no" id="discover-no" title="Press N or ←">✕ Not interested</button>
+        <button class="btn-action btn-discover" id="discover-seen" title="Press W">Seen it</button>
+        <button class="btn-action btn-discover btn-discover-yes" id="discover-yes" title="Press I or →">♥ Interested</button>
+      </div>
+      <div class="discover-hint" id="discover-hint" hidden></div>
       <div class="deck-nav-buttons">
         <button class="btn-action" id="deck-undo" title="Backspace or ←">↺ Undo</button>
         <button class="btn-action" id="deck-skip" title="Space or →">Skip →</button>
@@ -116,6 +123,7 @@
             <button class="pill active" data-source="rated">Rated</button>
             <button class="pill" data-source="manual" title="Shows that you marked as watched and that are not in the library">Manually added <span class="pill-count" id="count-manual">0</span></button>
             <button class="pill" data-source="dismissed" title="Shows that you removed from the recommendations">Not interested <span class="pill-count" id="count-dismissed">0</span></button>
+            <button class="pill" data-source="interested" title="Shows that you want to watch: your answers &quot;Interested&quot;">Watch list <span class="pill-count" id="count-interested">0</span></button>
           </div>
         </div>
         <div class="filter-group">

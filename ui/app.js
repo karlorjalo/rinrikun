@@ -313,6 +313,14 @@ async function openModal(r) {
          ${r.dismissed ? '✕ Not interested · Undo' : '✕ Not interested'}
        </button>`;
 
+  // A show that the user does not own can go on the watch list
+  const interestBtn = r.owned
+    ? ""
+    : `<button class="btn-action btn-interest ${r.interest === 1 ? 'active' : ''}" id="modal-toggle-interest" aria-pressed="${r.interest === 1}"
+         title="${r.interest === 1 ? 'Take this show off your watch list' : 'Put this show on your watch list. Shows like it get a higher score.'}">
+         ${r.interest === 1 ? '♥ Interested · Undo' : '♥ Interested'}
+       </button>`;
+
   const tierPills = ["S", "A", "B", "C", "D"].map((t) => {
     const active = r.tier === t ? "active" : "";
     return `<button class="btn-modal-tier tier-${t.toLowerCase()} ${active}" data-tier="${t}">${t}</button>`;
@@ -346,7 +354,7 @@ async function openModal(r) {
             <button class="btn-action primary" id="modal-find-sim">Find Similar</button>
             <button class="btn-action" id="modal-seed-rec">Recommend Like This</button>
             ${watchedBtn}
-            ${dismissBtn}
+            ${interestBtn}${dismissBtn}
             ${anilistLink}
           </div>
           ${tierSection}
@@ -382,6 +390,14 @@ async function openModal(r) {
       } else {
         await dismissRecommendation(r);
       }
+      if (!$("#tab-ratings").hidden) loadRatings();
+      openModal(r);
+    };
+  }
+
+  if ($("#modal-toggle-interest")) {
+    $("#modal-toggle-interest").onclick = async () => {
+      await setInterest(r, r.interest === 1 ? null : true, "page");
       if (!$("#tab-ratings").hidden) loadRatings();
       openModal(r);
     };
@@ -518,9 +534,10 @@ let profileData = null;
 let recResults = null;
 
 async function profile() {
-  [profileData, recResults] = await Promise.all([
+  [profileData, recResults, interestResults] = await Promise.all([
     fetch("/api/profile").then((r) => r.json()),
     fetch("/api/rec-log").then((r) => r.json()).catch(() => null),
+    fetch("/api/interest/results").then((r) => r.json()).catch(() => null),
   ]);
   renderProfile();
 }
@@ -564,6 +581,30 @@ function renderRecResults() {
     ${shows ? `<div class="rec-results-shows">${shows}</div>` : ""}`;
 }
 
+// The results of the Discover deck: the answers of the user by the match of the shows
+let interestResults = null;
+
+function renderInterestResults() {
+  const box = $("#interest-results");
+  if (!box) return;
+  const res = interestResults;
+  if (!res || !res.answers) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const groups = (res.groups || []).filter((g) => g.answers).map((g) =>
+    `<span class="rec-results-show"><b>Match ${g.low} to ${g.high}:</b> ${g.interested} of ${g.answers} interested (${Math.round((100 * g.interested) / g.answers)}%)</span>`).join("");
+  const model = res.model
+    ? ` The taste model puts an interested show above a not-interested show in ${Math.round(100 * res.model.auc)}% of the pairs. In this test it did not know the answers of the two shows.`
+    : "";
+  box.innerHTML = `
+    <div class="tier-summary-title"><span>Results of the Discover deck</span></div>
+    <div class="rec-results-text">You gave ${res.answers} answers: ${res.interested} interested, ${res.not_interested} not interested.${model}</div>
+    ${groups ? `<div class="rec-results-shows">${groups}</div>
+    <div class="rec-results-text rec-results-formulas">A group has the answers of the deck for the shows that had this match at the time of the answer. If the match is good, a group with a higher match has a larger part of "interested".</div>` : ""}`;
+}
+
 function renderProfile() {
   const p = profileData;
   const el = $("#tab-profile");
@@ -585,6 +626,7 @@ function renderProfile() {
     node.textContent = tiers[node.dataset.tierCount] || 0;
   });
   renderRecResults();
+  renderInterestResults();
 }
 
 function buildProfile(el) {
@@ -606,6 +648,7 @@ function buildProfile(el) {
         </div>
       </div>
       <div class="tier-summary-box rec-results" id="rec-results" hidden></div>
+      <div class="tier-summary-box rec-results" id="interest-results" hidden></div>
     </div>
 
     <div class="vector-map-wrap" id="profile-vector-map-wrap">
@@ -3012,9 +3055,29 @@ let reviewFilter = "unrated";
 let reviewUndoStack = [];
 let totalWatchedCount = 0;
 let totalRatedCount = 0;
+// The Discover deck is a mode of the Review tab. It shows random shows that the user does not
+// have, and the user says "interested", "not interested" or "seen it" for each show. The answers
+// are weak examples for the taste model: the library has only shows that the user selected,
+// thus it has few shows that the user does not like. See /api/discover.
+let discoverCounts = { interested: 0, not_interested: 0 };
+// The user pressed "Seen it" for the card of now, and selects a tier
+let discoverSeen = false;
+let discoverLoading = false;
+// The page sends an answer to the server. A second key in this time must not answer the same show again.
+let discoverBusy = false;
+// The deck gets this number of cards in one request
+const DISCOVER_BATCH = 12;
 
 async function loadReviewQueue() {
   try {
+    if (reviewFilter === "discover") {
+      reviewQueue = [];
+      reviewIndex = 0;
+      reviewUndoStack = [];
+      discoverSeen = false;
+      await loadDiscoverCards();
+      return;
+    }
     const unratedOnly = reviewFilter === "unrated";
     const res = await (await fetch(`/api/review-queue?unrated_only=${unratedOnly}`)).json();
     if (!Array.isArray(res)) {
@@ -3043,6 +3106,11 @@ async function loadReviewQueue() {
 function updateDeckProgress() {
   const p = $("#deck-progress");
   if (!p) return;
+  if (reviewFilter === "discover") {
+    const answers = discoverCounts.interested + discoverCounts.not_interested;
+    p.textContent = `${answers} answers · ${discoverCounts.interested} interested · ${discoverCounts.not_interested} not interested`;
+    return;
+  }
   if (totalWatchedCount > 0) {
     p.textContent = `${totalRatedCount} of ${totalWatchedCount} rated`;
   } else {
@@ -3063,6 +3131,16 @@ function updateActiveTierButton(tier) {
 function renderDeckCard() {
   const wrap = $("#deck-wrap");
   if (!wrap) return;
+  paintDeckControls();
+
+  if (reviewFilter === "discover" && reviewIndex >= reviewQueue.length) {
+    wrap.innerHTML = `
+      <div class="deck-card" style="align-items:center;justify-content:center;text-align:center;padding:48px 24px;">
+        <p style="color:var(--muted);font-size:14px;margin:0;">${discoverLoading ? "Getting shows…" : "The Discover deck has no more shows."}</p>
+      </div>`;
+    updateActiveTierButton(null);
+    return;
+  }
 
   if (!reviewQueue.length || reviewIndex >= reviewQueue.length) {
     wrap.innerHTML = `
@@ -3119,10 +3197,10 @@ function renderDeckCard() {
       </div>
       <div class="deck-info">
         <div class="deck-meta-top">
-          <span>${show.source === "library" ? "Local library" : "Watched"}</span>
+          <span>${reviewFilter === "discover" ? "Discover · you do not have this show" : show.source === "library" ? "Local library" : "Watched"}</span>
           <div style="display:flex;align-items:center;gap:6px;">
             ${tierBadge}
-            <span style="font-size:11.5px;color:var(--muted);">${reviewIndex + 1} / ${reviewQueue.length}</span>
+            ${reviewFilter === "discover" ? "" : `<span style="font-size:11.5px;color:var(--muted);">${reviewIndex + 1} / ${reviewQueue.length}</span>`}
           </div>
         </div>
         <h3 class="deck-title">${esc(main)}</h3>
@@ -3142,6 +3220,11 @@ function renderDeckCard() {
 
 async function rateReviewShow(tier) {
   if (!reviewQueue.length || reviewIndex >= reviewQueue.length) return;
+  if (reviewFilter === "discover") {
+    // In the Discover deck a tier is for a show that the user saw
+    if (discoverSeen) await seenDiscover(tier);
+    return;
+  }
   const show = reviewQueue[reviewIndex];
   const prevTier = show.tier || null;
 
@@ -3170,6 +3253,10 @@ async function rateReviewShow(tier) {
 }
 
 async function undoReview() {
+  if (reviewFilter === "discover") {
+    await undoDiscover();
+    return;
+  }
   if (!reviewUndoStack.length) return;
   const last = reviewUndoStack.pop();
   const show = last.show;
@@ -3202,6 +3289,12 @@ async function undoReview() {
 }
 
 function skipReview() {
+  if (reviewFilter === "discover") {
+    // After "Seen it", Skip saves the show as watched without a tier
+    if (discoverSeen) seenDiscover(null);
+    else if (reviewIndex < reviewQueue.length) nextDiscoverCard();
+    return;
+  }
   if (reviewIndex < reviewQueue.length) {
     reviewIndex++;
     updateDeckProgress();
@@ -3209,16 +3302,169 @@ function skipReview() {
   }
 }
 
+// Get the next cards of the Discover deck and put them at the end of the queue
+async function loadDiscoverCards() {
+  if (discoverLoading) return;
+  discoverLoading = true;
+  renderDeckCard();
+  try {
+    const res = await (await fetch(`/api/discover?count=${DISCOVER_BATCH}`)).json();
+    // The user went to a different mode in the time of the request
+    if (reviewFilter === "discover") {
+      const have = new Set(reviewQueue.map((show) => show.id));
+      discoverCounts = res.counts || discoverCounts;
+      reviewQueue.push(...(res.cards || []).filter((show) => !have.has(show.id)));
+    }
+  } catch (e) {
+    console.error("Failed to load the Discover deck", e);
+  }
+  discoverLoading = false;
+  updateDeckProgress();
+  renderDeckCard();
+}
+
+// The Review deck has the tier buttons. The Discover deck has its three answers, and it shows
+// the tier buttons only after "Seen it".
+function paintDeckControls() {
+  const discover = reviewFilter === "discover";
+  const tiers = document.querySelector(".deck-controls .tier-buttons");
+  if (tiers) tiers.hidden = discover && !discoverSeen;
+  const answers = $("#discover-buttons");
+  if (answers) answers.hidden = !discover || discoverSeen;
+  const hint = $("#discover-hint");
+  if (hint) {
+    hint.hidden = !discover;
+    hint.textContent = discoverSeen
+      ? "You saw this show: give it a tier, or press Skip for no tier. Esc goes back."
+      : "Keys: N not interested · I interested · W seen it · Space skip · Backspace undo";
+  }
+  if ($("#deck-skip")) $("#deck-skip").title = discover ? "Space" : "Space or →";
+  if ($("#deck-undo")) $("#deck-undo").title = discover ? "Backspace" : "Backspace or ←";
+}
+
+function nextDiscoverCard() {
+  discoverSeen = false;
+  reviewIndex++;
+  // Get more cards before the deck is empty
+  if (reviewIndex >= reviewQueue.length - 2) loadDiscoverCards();
+  updateDeckProgress();
+  renderDeckCard();
+}
+
+// Save the answer of the user for a show: true = interested, false = not interested, null = no
+// answer. `source` is "deck" for the Discover deck and "page" for a button of a page.
+async function setInterest(show, value, source) {
+  const res = await fetch("/api/interest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: show.id, value, source }),
+  });
+  if (!res.ok) throw new Error(`answer failed: ${res.status}`);
+  const data = await res.json();
+  show.interest = data.interest;
+  show.dismissed = data.dismissed;
+  discoverCounts = data.counts || discoverCounts;
+  // An answer changes the taste model, thus the match of the other shows changes
+  scheduleMapMatch(1200);
+}
+
+async function answerDiscover(value) {
+  if (reviewFilter !== "discover" || discoverSeen || discoverBusy || reviewIndex >= reviewQueue.length) return;
+  const show = reviewQueue[reviewIndex];
+  discoverBusy = true;
+  try {
+    await setInterest(show, value, "deck");
+  } catch (e) {
+    console.error("Failed to save the answer", e);
+    return;
+  } finally {
+    discoverBusy = false;
+  }
+  reviewUndoStack.push({ show, kind: "answer" });
+  nextDiscoverCard();
+}
+
+// "Seen it": the show goes to the watched shows of the user, with a tier or without one
+async function seenDiscover(tier) {
+  if (discoverBusy || reviewIndex >= reviewQueue.length) return;
+  const show = reviewQueue[reviewIndex];
+  const json = { "Content-Type": "application/json" };
+  discoverBusy = true;
+  try {
+    await apiWrite("/api/watched", { method: "POST", headers: json, body: JSON.stringify({ id: show.id, watched: true }) });
+    if (tier) await apiWrite("/api/weights", { method: "POST", headers: json, body: JSON.stringify({ id: show.id, tier }) });
+  } catch (e) {
+    console.error("Failed to save the watched show", e);
+    return;
+  } finally {
+    discoverBusy = false;
+  }
+  show.owned = 1;
+  show.manual_watched = 1;
+  show.tier = tier;
+  const title = titles.find((x) => x.id === show.id);
+  if (title) Object.assign(title, { owned: 1, manual_watched: 1, tier });
+  reviewUndoStack.push({ show, kind: "seen", tier });
+  nextDiscoverCard();
+}
+
+// Undo in the Discover deck: go back from the tier buttons, or take the last answer back
+async function undoDiscover() {
+  if (discoverSeen) {
+    discoverSeen = false;
+    renderDeckCard();
+    return;
+  }
+  if (discoverBusy || !reviewUndoStack.length) return;
+  const last = reviewUndoStack.pop();
+  const show = last.show;
+  discoverBusy = true;
+  try {
+    if (last.kind === "answer") {
+      await setInterest(show, null, "deck");
+    } else {
+      if (last.tier) await apiWrite(`/api/weights?id=${encodeURIComponent(show.id)}`, { method: "DELETE" });
+      await apiWrite("/api/watched", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: show.id, watched: false }),
+      });
+      show.owned = 0;
+      show.manual_watched = 0;
+      show.tier = null;
+      const title = titles.find((x) => x.id === show.id);
+      if (title) Object.assign(title, { owned: 0, manual_watched: 0, tier: null });
+    }
+  } catch (e) {
+    console.error("Failed to take the answer back", e);
+  } finally {
+    discoverBusy = false;
+  }
+  reviewIndex = Math.max(0, reviewQueue.indexOf(show));
+  updateDeckProgress();
+  renderDeckCard();
+}
+
 function setReviewFilter(filter) {
   reviewFilter = filter;
+  discoverSeen = false;
   $("#deck-filter-unrated").classList.toggle("active", filter === "unrated");
   $("#deck-filter-all").classList.toggle("active", filter === "all");
+  $("#deck-filter-discover").classList.toggle("active", filter === "discover");
   loadReviewQueue();
 }
 
 function initReviewDeck() {
   $("#deck-filter-unrated").onclick = () => setReviewFilter("unrated");
   $("#deck-filter-all").onclick = () => setReviewFilter("all");
+  $("#deck-filter-discover").onclick = () => setReviewFilter("discover");
+  $("#discover-no").onclick = () => answerDiscover(false);
+  $("#discover-yes").onclick = () => answerDiscover(true);
+  $("#discover-seen").onclick = () => {
+    if (reviewIndex >= reviewQueue.length) return;
+    discoverSeen = true;
+    renderDeckCard();
+  };
 
   document.querySelectorAll(".btn-tier").forEach((btn) => {
     btn.onclick = () => {
@@ -3238,6 +3484,23 @@ function initReviewDeck() {
 
     const key = e.key.toUpperCase();
     const code = e.code || "";
+    if (reviewFilter === "discover" && !discoverSeen) {
+      // The keys of the Discover deck. A key with Ctrl, Alt or the command key is a command of the browser.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (key === "N" || e.key === "ArrowLeft") answerDiscover(false);
+      else if (key === "I" || e.key === "ArrowRight") answerDiscover(true);
+      else if (key === "W") $("#discover-seen").click();
+      else if (e.key === " ") skipReview();
+      else if (e.key === "Backspace") undoReview();
+      else return;
+      e.preventDefault();
+      return;
+    }
+    if (reviewFilter === "discover" && e.key === "Escape") {
+      e.preventDefault();
+      undoReview();
+      return;
+    }
     if (key === "1" || code === "Digit1" || code === "Numpad1" || key === "D") {
       e.preventDefault();
       rateReviewShow("D");
@@ -3268,21 +3531,25 @@ let ratedShows = [];
 let manualShows = [];
 // The shows that the user removed from the recommendations
 let dismissedShows = [];
+// The shows with the answer "interested": the watch list
+let interestedShows = [];
 let ratingsSource = "rated";
 let ratingsTierFilter = "all";
 let ratingsSort = "tier";
 
 async function loadRatings() {
   try {
-    const [res, manual, dismissed] = await Promise.all([
+    const [res, manual, dismissed, interested] = await Promise.all([
       fetch("/api/ratings").then((r) => r.json()),
       fetch("/api/watched").then((r) => r.json()),
       fetch("/api/dismissed").then((r) => r.json()),
+      fetch("/api/interest").then((r) => r.json()).catch(() => []),
     ]);
     if (!Array.isArray(res)) return;
     ratedShows = res;
     manualShows = Array.isArray(manual) ? manual : [];
     dismissedShows = Array.isArray(dismissed) ? dismissed : [];
+    interestedShows = Array.isArray(interested) ? interested : [];
     renderRatingsSummary();
   } catch (e) {
     console.error("Failed to load ratings", e);
@@ -3293,6 +3560,7 @@ async function loadRatings() {
 function renderRatingsSummary() {
   if ($("#count-manual")) $("#count-manual").textContent = manualShows.length;
   if ($("#count-dismissed")) $("#count-dismissed").textContent = dismissedShows.length;
+  if ($("#count-interested")) $("#count-interested").textContent = interestedShows.length;
 
   const counts = { S: 0, A: 0, B: 0, C: 0, D: 0 };
   ratedShows.forEach((s) => {
@@ -3341,7 +3609,8 @@ function renderRatingsGrid() {
   box.innerHTML = "";
 
   const source = ratingsSource === "manual" ? manualShows
-    : ratingsSource === "dismissed" ? dismissedShows : ratedShows;
+    : ratingsSource === "dismissed" ? dismissedShows
+    : ratingsSource === "interested" ? interestedShows : ratedShows;
   let filtered = source.filter((r) => {
     if (ratingsTierFilter === "all") return true;
     return r.tier === ratingsTierFilter;
@@ -3366,7 +3635,10 @@ function renderRatingsGrid() {
   });
 
   if (!filtered.length) {
-    if (ratingsSource === "dismissed" && ratingsTierFilter === "all") {
+    if (ratingsSource === "interested") {
+      box.innerHTML = `<div style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 20px;">
+          <p style="margin:0;">Your watch list is empty. In the Review tab, open Discover and answer "Interested" for a show that you want to watch.</p></div>`;
+    } else if (ratingsSource === "dismissed" && ratingsTierFilter === "all") {
       box.innerHTML = `<div style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 20px;">
           ${vnWindow("切り捨てた作品はまだ一つもないのね。優しいのか、優柔不断なのか……。")}
           <p style="margin:0;">No removed recommendations. In the Recommendations tab, click ✕ on a show that you do not want.</p></div>`;
