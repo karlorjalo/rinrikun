@@ -174,15 +174,16 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && tipTarget) hideTip();
 });
 
-// The address of a list of shows, with the formula of the Recommendations tab. The server uses
-// the formula for the match of each show.
+// The address of a list of recommendations, with the formula of the Recommendations tab
 function withFormula(url) {
   return `${url}${url.includes("?") ? "&" : "?"}kinds=${recsKinds}&links=${recsLinks}`;
 }
 
-// The match of a show is the part of the franchises that the user does not have, which get a
-// lower score from the formula of the recommendations. For a show of the user it is the match
-// that the show would have if the user did not have it.
+// The match of a show tells how near the show is to the user: to the taste of the user, and to
+// the tier that the tier model predicts for the show. It is the part of the franchises that the
+// user does not have, which are less near. It does not use the crowd links or the formula of a
+// list. For a show of the user it is the match that the show would have if the user did not have
+// its franchise.
 function formatMatch(match) {
   if (match == null) return null;
   return match >= 99.95 ? "100" : match >= 99 ? match.toFixed(1) : String(Math.round(match));
@@ -192,8 +193,8 @@ function matchHtml(r) {
   const text = formatMatch(r.match);
   if (text == null) return "";
   const title = r.owned
-    ? `Without this show in your list, the formula would put it above ${text}% of the franchises that you do not have`
-    : `The formula puts this show above ${text}% of the franchises that you do not have`;
+    ? `Without this franchise in your list, this show would be nearer to your taste and your predicted tier than ${text}% of the franchises that you do not have`
+    : `This show is nearer to your taste and your predicted tier than ${text}% of the franchises that you do not have`;
   return `<span class="affinity" data-tip="${title}" tabindex="0">${text}% match</span>`;
 }
 
@@ -214,7 +215,7 @@ function similarHtml(r) {
 // Get the match of a show again after a change of a tier or of the watched state
 async function refreshMatch(r) {
   try {
-    const full = await (await fetch(withFormula(`/api/show/${encodeURIComponent(r.id)}`))).json();
+    const full = await (await fetch(`/api/show/${encodeURIComponent(r.id)}`)).json();
     r.match = full.match;
     r.tier_guess = full.tier_guess;
   } catch (e) {}
@@ -261,7 +262,7 @@ async function changeTierInModal(r, tier) {
 async function openModal(r) {
   if (r.overview === undefined && r.id) {
     try {
-      const full = await (await fetch(withFormula(`/api/show/${encodeURIComponent(r.id)}`))).json();
+      const full = await (await fetch(`/api/show/${encodeURIComponent(r.id)}`)).json();
       r = { ...r, ...full };
     } catch (e) {}
   }
@@ -717,7 +718,7 @@ async function apiWrite(url, options) {
 // With the setting "Match gradient" on, a poster on a map is brighter for a higher match, and a
 // dot of the catalog is stronger. The server gives the match of each point of the map, in the
 // order of the points. The page gets the values when the setting is on. It gets them again after
-// a change of a tier, of the watched state, of the removed shows or of the formula.
+// a change of a tier, of the watched state or of the removed shows.
 
 // The brightness of a poster with a match of 0, as a part of the full brightness
 const MATCH_DARK = 0.12;
@@ -757,7 +758,7 @@ async function loadMapMatch(attempt = 0) {
   if (!mapMatchLoaded) setGradientState("loading");
   try {
     const data = await getVectorMap();
-    const res = await fetch(withFormula("/api/vector-map/match"));
+    const res = await fetch("/api/vector-map/match");
     if (!res.ok) throw new Error(`the server answered ${res.status}`);
     const values = await res.json();
     // An older request that ends late must not replace the values of a newer request
@@ -2343,7 +2344,7 @@ function renderSimilarGrid() {
 }
 
 async function fetchSimilarShows(t) {
-  const res = await (await fetch(withFormula(`/api/similar?id=${encodeURIComponent(t.id)}&k=${similarCount}`))).json();
+  const res = await (await fetch(`/api/similar?id=${encodeURIComponent(t.id)}&k=${similarCount}`)).json();
   if (Array.isArray(res)) {
     rawSimilar = res;
   } else {
@@ -2456,6 +2457,9 @@ const LINKS_TEXT = {
   true: "<b>Crowd links: on.</b> The formula also uses the shows that the fans of your shows recommend on AniList.",
   false: "<b>Crowd links: off.</b> The formula uses only your ratings, and the tags and the text of the shows.",
 };
+// The match of a show is not a part of the formula of the list. The note above the list says so,
+// because a list with the crowd links can have a show with a lower match near its top.
+const MATCH_TEXT = "<b>Match:</b> how near a show is to your taste and to your predicted tier. It does not use the formula, thus the list is not always in the order of the match.";
 let recsLinks = true;
 try {
   if (localStorage.getItem(LINKS_KEY) === "off") recsLinks = false;
@@ -2506,7 +2510,7 @@ function renderRecsFormulaNote(applied, links) {
   if (!note || !formula) return;
   note.dataset.formula = applied;
   note.dataset.links = applied === "seed" ? "" : String(links);
-  note.innerHTML = `<b>Formula: ${formula.name}.</b> ${formula.text}${applied === "seed" ? "" : ` ${LINKS_TEXT[links]}`}`;
+  note.innerHTML = `<b>Formula: ${formula.name}.</b> ${formula.text}${applied === "seed" ? "" : ` ${LINKS_TEXT[links]} ${MATCH_TEXT}`}`;
 }
 
 function paintRecsFormulaPills() {
@@ -2531,8 +2535,6 @@ function initRecsFilters() {
       try { localStorage.setItem(FORMULA_KEY, recsKinds); } catch (e) {}
       paintRecsFormulaPills();
       recs();
-      // The match of a show comes from the formula
-      scheduleMapMatch();
     };
   });
   document.querySelectorAll("#recs-links-pills .pill").forEach((btn) => {
@@ -2543,7 +2545,6 @@ function initRecsFilters() {
       try { localStorage.setItem(LINKS_KEY, on ? "on" : "off"); } catch (e) {}
       paintRecsFormulaPills();
       recs();
-      scheduleMapMatch();
     };
   });
 
@@ -3015,7 +3016,7 @@ let totalRatedCount = 0;
 async function loadReviewQueue() {
   try {
     const unratedOnly = reviewFilter === "unrated";
-    const res = await (await fetch(withFormula(`/api/review-queue?unrated_only=${unratedOnly}`))).json();
+    const res = await (await fetch(`/api/review-queue?unrated_only=${unratedOnly}`)).json();
     if (!Array.isArray(res)) {
       console.error("Failed to load review queue:", res);
       const wrap = $("#deck-wrap");
@@ -3274,9 +3275,9 @@ let ratingsSort = "tier";
 async function loadRatings() {
   try {
     const [res, manual, dismissed] = await Promise.all([
-      fetch(withFormula("/api/ratings")).then((r) => r.json()),
-      fetch(withFormula("/api/watched")).then((r) => r.json()),
-      fetch(withFormula("/api/dismissed")).then((r) => r.json()),
+      fetch("/api/ratings").then((r) => r.json()),
+      fetch("/api/watched").then((r) => r.json()),
+      fetch("/api/dismissed").then((r) => r.json()),
     ]);
     if (!Array.isArray(res)) return;
     ratedShows = res;
