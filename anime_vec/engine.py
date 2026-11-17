@@ -1,4 +1,5 @@
 import hashlib
+import random
 import threading
 from bisect import bisect_right
 
@@ -64,6 +65,17 @@ TASTE_RIDGE = 1.0
 # from the recommendations. A liked show has its tier weight (S 2.0, A 1.5, B 1.0). Each other
 # show of the catalog has the value 0.
 TASTE_DISLIKED = -1.0
+# An answer of the Discover deck is a weaker signal than a tier: the user saw only the poster,
+# the text and the tags of the show. An answer has one half of the value of the nearest tier:
+# "interested" is one half of a B-tier show, "not interested" is one half of a C-tier show.
+# The answers are not examples for the tier model: a show that the user did not watch has no tier.
+TASTE_INTERESTED = 0.5
+TASTE_NOT_INTERESTED = -0.5
+# The Discover deck draws its shows at random in groups of the match: (lowest match of the group,
+# part of the cards that come from the group). Most cards come from the groups with a high
+# match: an answer for such a show tells the taste model the most. In one group each show has
+# the same chance, thus the answers of a group are a fair sample of the group.
+DISCOVER_GROUPS = ((99.0, 0.30), (95.0, 0.30), (80.0, 0.25), (0.0, 0.15))
 # The "usual kinds" formula gives a higher score to the kinds of shows that the library has many of.
 # The kind of a show is its year, its format and its number of episodes. The crowd score counts
 # only as a lower limit.
@@ -169,8 +181,14 @@ class Engine:
         self.by_id = {r["id"]: r for r in self.rows}
         # The shows that the user removed from the recommendations ("not interested")
         self.dismissed = {i for i in store.get_dismissed_ids() if i in self.by_id}
+        # The answers of the Discover deck: 1 = interested, 0 = not interested. See set_interest.
+        self.interest = {i: v["value"] for i, v in store.get_interest().items() if i in self.by_id}
+        # The match of each card that the Discover deck gave, until the user answers it
+        self._deck_match: dict[str, float] = {}
         for r in self.rows:
-            r["dismissed"] = 1 if r["id"] in self.dismissed else 0
+            # For the interface, a show with the answer "not interested" is a removed show
+            r["dismissed"] = 1 if self._refused(r["id"]) else 0
+            r["interest"] = self.interest.get(r["id"])
         M = np.array([blob_to_vec(store.get_embedding(r["id"])) for r in self.rows], dtype=np.float32)
         self.M = M / np.clip(np.linalg.norm(M, axis=1, keepdims=True), 1e-9, None)
 
@@ -447,7 +465,7 @@ class Engine:
             allowed = [j for j in np.argsort(-sims)
                        if self.ids[j] not in exclude_ids and not self.rows[j]["owned"]
                        and self.franchise[self.ids[j]] not in skip and _watchable(self.rows[j])
-                       and self.ids[j] not in self.dismissed]
+                       and not self._refused(self.ids[j])]
             return [self._result(j, float(sims[j]), seed=None) for j in self._one_per_franchise(allowed, k)]
 
         # A franchise that the user does not own has one candidate: its entry point. A franchise that
@@ -455,7 +473,7 @@ class Engine:
         owned = self.owned_franchises()
         cand_indices = [j for j, r in enumerate(self.rows)
                         if not r["owned"] and r["id"] not in self.duplicate_of and self.franchise[r["id"]] not in skip
-                        and _watchable(r) and r["id"] not in self.dismissed
+                        and _watchable(r) and not self._refused(r["id"])
                         and (self.franchise[r["id"]] in owned or self.entry_row[self.franchise[r["id"]]] == j)]
         if not cand_indices:
             return []
@@ -640,12 +658,12 @@ class Engine:
         # The candidates of _recommend
         cand = [j for j, r in enumerate(self.rows)
                 if not r["owned"] and r["id"] not in self.duplicate_of and self.franchise[r["id"]] not in skip
-                and _watchable(r) and r["id"] not in self.dismissed
+                and _watchable(r) and not self._refused(r["id"])
                 and (self.franchise[r["id"]] in owned or self.entry_row[self.franchise[r["id"]]] == j)]
         point_of = {j: n for n, j in enumerate(j for j, r in enumerate(self.rows) if r["id"] not in self.duplicate_of)}
         liked, liked_w = self._liked()
         disliked = [i for i in self.owned_idx if self.rows[i].get("tier") in ("C", "D")]
-        info = {"shows": len(self.owned_idx), "franchises": len(owned), "removed": len(self.dismissed),
+        info = {"shows": len(self.owned_idx), "franchises": len(owned), "removed": len(self._refused_ids()),
                 "liked": len(liked) if self.owned_idx else 0, "disliked": len(disliked),
                 "sources": len({int(self.row_fr[i]) for i in self._link_sources(liked, liked_w)[0]}) if self.owned_idx else 0}
         steps = [{"key": "catalog", "count": len(point_of), "points": None},
@@ -662,8 +680,9 @@ class Engine:
         return {"kinds": kinds, "links": links, "k": k, "info": info, "steps": steps}
 
     def _state_key(self) -> tuple:
-        """Return a value that changes when the shows, the tiers or the removed shows of the user change."""
-        return tuple(self.owned_idx), tuple(sorted(self.weights.items())), tuple(sorted(self.dismissed))
+        """Return a value that changes when the shows, the tiers, the removed shows or the answers of the user change."""
+        return (tuple(self.owned_idx), tuple(sorted(self.weights.items())), tuple(sorted(self.dismissed)),
+                tuple(sorted(self.interest.items())))
 
     def match_percent(self) -> np.ndarray:
         """Return the match of each row in percent. The value is NaN for a row without a match.
@@ -702,7 +721,7 @@ class Engine:
         unique = [j for j, r in enumerate(self.rows) if r["id"] not in self.duplicate_of]
         # The candidates of a list that also has the franchises of the user (see _recommend)
         cand = [j for j in unique
-                if not self.rows[j]["owned"] and _watchable(self.rows[j]) and self.ids[j] not in self.dismissed
+                if not self.rows[j]["owned"] and _watchable(self.rows[j]) and not self._refused(self.ids[j])
                 and (self.franchise[self.ids[j]] in owned or self.entry_row[self.franchise[self.ids[j]]] == j)]
         if cand and self.owned_idx:
             cand_set = set(cand)
@@ -884,8 +903,9 @@ class Engine:
         """Return the score of the taste model for each row. A higher score is nearer to the taste of the user.
 
         The model learns from the liked shows, from the C-tier and D-tier shows, and from the
-        shows that the user removed from the recommendations. All scores are 0 if the user has
-        none of these shows.
+        shows that the user removed from the recommendations. It also learns from the answers of
+        the Discover deck, with a smaller weight. All scores are 0 if the user has none of these
+        shows.
 
         If leave_out is true, a row gets the score of a model that did not learn from the shows
         of the franchise of the row. Thus a show of the user gets about the score that it would
@@ -893,10 +913,13 @@ class Engine:
         """
         liked, liked_w = self._liked()
         disliked = [i for i in self.owned_idx if self.rows[i].get("tier") in ("C", "D")] + self._dismissed_rows()
-        rows = list(liked) + disliked
+        # The answers of the Discover deck, for the shows that the user does not have
+        answers = [(self.pos[i], value) for i, value in sorted(self.interest.items()) if not self.by_id[i]["owned"]]
+        rows = list(liked) + disliked + [j for j, _ in answers]
         if not rows or not len(indices):
             return np.zeros(len(indices), dtype=np.float32)
-        values = np.concatenate([np.asarray(liked_w, dtype=np.float64), np.full(len(disliked), TASTE_DISLIKED)])
+        values = np.concatenate([np.asarray(liked_w, dtype=np.float64), np.full(len(disliked), TASTE_DISLIKED),
+                                 np.array([TASTE_INTERESTED if value else TASTE_NOT_INTERESTED for _, value in answers])])
         examples = (self.tag_M[rows].astype(np.float64) - self.taste_mean) * values[:, None]
         weights = self.taste_solver @ examples.sum(axis=0)
         # The score of a row is (tag vector - mean) @ weights. The two products are computed
@@ -1195,19 +1218,139 @@ class Engine:
         """Remove a show from the recommendations, or put it back.
 
         A removed show is never a recommendation. It also counts as a dislike: shows that are
-        similar to it get a lower score.
+        similar to it get a lower score. A removed show has no answer of the Discover deck: to
+        remove a show replaces the answer, and to put a show back deletes the answer "not interested".
         """
         if show_id not in self.by_id:
             raise KeyError(f"unknown show id {show_id}")
         self.store.set_dismissed(show_id, dismissed)
-        self.by_id[show_id]["dismissed"] = 1 if dismissed else 0
         if dismissed:
             self.dismissed.add(show_id)
         else:
             self.dismissed.discard(show_id)
+        if dismissed or self.interest.get(show_id) == 0:
+            self._drop_interest(show_id)
+        self.by_id[show_id]["dismissed"] = 1 if self._refused(show_id) else 0
+
+    def _refused(self, show_id: str) -> bool:
+        """Return True if the user does not want the show: the user removed it, or the answer was "not interested"."""
+        return show_id in self.dismissed or self.interest.get(show_id) == 0
+
+    def _refused_ids(self) -> set[str]:
+        return self.dismissed | {i for i, value in self.interest.items() if value == 0}
 
     def dismissed_shows(self) -> list[dict]:
-        return [self._result(self.pos[show_id]) for show_id in sorted(self.dismissed)]
+        """Return the shows that the user does not want: see _refused."""
+        return [self._result(self.pos[show_id]) for show_id in sorted(self._refused_ids())]
+
+    def _drop_interest(self, show_id: str):
+        if show_id in self.interest:
+            self.store.set_interest(show_id, None)
+            del self.interest[show_id]
+        self.by_id[show_id]["interest"] = None
+
+    def set_interest(self, show_id: str, value: bool | None, source: str = "deck"):
+        """Record the answer of the user for a show that the user does not have. None deletes the answer.
+
+        True is "interested": the show stays a possible recommendation, and it is on the watch
+        list. False is "not interested": the show is never a recommendation. The two answers
+        are weak examples for the taste model (see TASTE_INTERESTED). The answer keeps the match
+        that the show had before the answer, for interest_results. `source` is "deck" for an
+        answer of the Discover deck, which draws its shows at random, and "page" for other answers.
+        """
+        if show_id not in self.by_id:
+            raise KeyError(f"unknown show id {show_id}")
+        row = self.by_id[show_id]
+        if value is None:
+            self._drop_interest(show_id)
+        else:
+            if row["owned"]:
+                raise ValueError("the user has this show: it gets a tier, not an answer")
+            # The match that the deck showed for the show. An answer from a page uses the match of now.
+            # Thus an answer of the deck needs no new calculation of the match, and it is fast.
+            match = self._deck_match.pop(show_id, None)
+            if match is None:
+                match = float(self.match_percent()[self.pos[show_id]])
+            self.store.set_interest(show_id, int(value), None if np.isnan(match) else match, source)
+            self.interest[show_id] = int(value)
+            row["interest"] = int(value)
+            if value and show_id in self.dismissed:
+                # "Interested" puts a removed show back
+                self.store.set_dismissed(show_id, False)
+                self.dismissed.discard(show_id)
+        row["dismissed"] = 1 if self._refused(show_id) else 0
+
+    def interest_counts(self) -> dict[str, int]:
+        interested = sum(1 for value in self.interest.values() if value)
+        return {"interested": interested, "not_interested": len(self.interest) - interested}
+
+    def interest_shows(self) -> list[dict]:
+        """Return the shows with the answer "interested", the highest match first: the watch list."""
+        out = self.with_match([self._result(self.pos[i]) for i, value in sorted(self.interest.items())
+                               if value and not self.by_id[i]["owned"]])
+        return sorted(out, key=lambda r: -(r.get("match") or 0.0))
+
+    def discover(self, count: int = 12, seed: int | None = None) -> list[dict]:
+        """Return random shows for the Discover deck.
+
+        A card is the entry point of a franchise that the user does not have. It has no answer,
+        and the user did not remove it. The draw is random in the groups of DISCOVER_GROUPS.
+        `seed` makes the draw the same each time, for the tests.
+        """
+        owned = self.owned_franchises()
+        match = self.match_percent()
+        groups: list[list[int]] = [[] for _ in DISCOVER_GROUPS]
+        for j, r in enumerate(self.rows):
+            if (r["owned"] or r["id"] in self.duplicate_of or self.franchise[r["id"]] in owned or not _watchable(r)
+                    or self._refused(r["id"]) or r["id"] in self.interest
+                    or self.entry_row[self.franchise[r["id"]]] != j or np.isnan(match[j])):
+                continue
+            groups[next(n for n, (low, _) in enumerate(DISCOVER_GROUPS) if match[j] >= low)].append(j)
+        rng = random.Random(seed)
+        picked: list[int] = []
+        while len(picked) < count:
+            filled = [n for n, group in enumerate(groups) if group]
+            if not filled:
+                break
+            parts = [DISCOVER_GROUPS[n][1] for n in filled]
+            n = rng.choices(filled, weights=parts if sum(parts) > 0 else None)[0]
+            picked.append(groups[n].pop(rng.randrange(len(groups[n]))))
+        for j in picked:
+            self._deck_match[self.ids[j]] = float(match[j])
+        return self.with_match([self._result(j) for j in picked])
+
+    def interest_results(self) -> dict:
+        """Compare the answers of the Discover deck with the match of the shows.
+
+        `groups` has the answers of the deck in the groups of DISCOVER_GROUPS, by the match at
+        the time of the answer. A group is a fair sample: if the match is good, a group with a
+        higher match has a larger part of "interested". An answer from a page is not in the
+        groups, because the user selected its show.
+
+        `model` tells how well the taste model predicts an answer that it does not know: the
+        part of the pairs (interested show, not-interested show) in which the interested show
+        has the higher score. 0.5 is the result of a random order. It is None for fewer than 3
+        answers of one kind.
+        """
+        stored = self.store.get_interest()
+        deck = [(v["match"], v["value"]) for i, v in stored.items()
+                if i in self.interest and v.get("source") == "deck" and v.get("match") is not None]
+        groups = []
+        high = None
+        for low, _ in DISCOVER_GROUPS:
+            inside = [value for match, value in deck if match >= low and (high is None or match < high)]
+            groups.append({"low": low, "high": 100.0 if high is None else high, "answers": len(inside), "interested": int(sum(inside))})
+            high = low
+        answers = [(self.pos[i], value) for i, value in sorted(self.interest.items()) if not self.by_id[i]["owned"]]
+        yes = [n for n, (_, value) in enumerate(answers) if value]
+        no = [n for n, (_, value) in enumerate(answers) if not value]
+        model = None
+        if len(yes) >= 3 and len(no) >= 3:
+            scores = self._taste_scores([j for j, _ in answers], leave_out=True).astype(np.float64)
+            above = scores[yes][:, None] - scores[no][None, :]
+            model = {"pairs": len(yes) * len(no), "auc": round(float(((above > 0).sum() + 0.5 * (above == 0).sum()) / above.size), 3)}
+        counts = self.interest_counts()
+        return {"answers": len(self.interest), **counts, "groups": groups, "model": model}
 
     def manual_shows(self) -> list[dict]:
         manual_ids = self.store.get_manual_watched_ids()
@@ -1302,7 +1445,7 @@ class Engine:
                 r = self.rows[rows[0]]
                 out["shows"].append({"id": r["id"], "title": r.get("title"), "title_native": r.get("title_native"),
                                      "tier": tier, "first_seen": entry["first_seen"], "best_rank": entry["best_rank"]})
-            elif show_id in self.dismissed:
+            elif self._refused(show_id):
                 out["removed"] += 1
                 formula["removed"] += 1
         out["shows"].sort(key=lambda x: (x["first_seen"], x["id"]), reverse=True)

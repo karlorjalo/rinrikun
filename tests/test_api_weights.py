@@ -302,3 +302,43 @@ def test_api_log_keeps_the_formula_of_the_first_list(tmp_path):
                                    "no links": {"shown": 1, "added": 1, "removed": 0}}
     finally:
         serve.store, serve.engine = orig_store, orig_engine
+
+
+def test_api_discover_and_interest(tmp_path):
+    import serve
+    store = Store(tmp_path / "api_discover.db")
+    store.upsert_rows([make_row(1, owned=1)] + [make_row(i, owned=0) for i in range(2, 9)])
+    for i in range(1, 9):
+        store.save_embedding(f"al:{i}", b"\x00" * 1536)
+    orig_store, orig_engine = serve.store, serve.engine
+    serve.store, serve.engine = store, Engine(store)
+    try:
+        client = TestClient(serve.app)
+        deck = client.get("/api/discover?count=3").json()
+        assert len(deck["cards"]) == 3 and deck["counts"] == {"interested": 0, "not_interested": 0}
+        assert all(not c["owned"] and "match" in c and c["interest"] is None for c in deck["cards"])
+        first, second = deck["cards"][0]["id"], deck["cards"][1]["id"]
+        res = client.post("/api/interest", json={"id": first, "value": True, "source": "deck"}).json()
+        assert res == {"id": first, "interest": 1, "dismissed": 0, "counts": {"interested": 1, "not_interested": 0}}
+        res = client.post("/api/interest", json={"id": second, "value": False, "source": "deck"}).json()
+        assert res["interest"] == 0 and res["dismissed"] == 1 and res["counts"] == {"interested": 1, "not_interested": 1}
+        # The watch list, the removed shows and the results
+        assert [r["id"] for r in client.get("/api/interest").json()] == [first]
+        assert [r["id"] for r in client.get("/api/dismissed").json()] == [second]
+        results = client.get("/api/interest/results").json()
+        assert results["answers"] == 2 and sum(g["answers"] for g in results["groups"]) == 2
+        assert store.get_interest()[first]["source"] == "deck"
+        # The two shows are not cards now
+        later = {c["id"] for c in client.get("/api/discover?count=50").json()["cards"]}
+        assert len(later) == 5 and not later & {first, second}
+        # No answer, an answer from a page, and the errors
+        assert client.post("/api/interest", json={"id": first, "value": None}).json()["interest"] is None
+        assert client.post("/api/interest", json={"id": first, "value": True}).json()["interest"] == 1
+        assert store.get_interest()[first]["source"] == "page"
+        assert client.post("/api/dismissed", json={"id": second, "dismissed": False}).status_code == 200
+        assert client.get("/api/dismissed").json() == [] and second not in store.get_interest()
+        assert client.post("/api/interest", json={"id": "al:1", "value": True}).status_code == 400
+        assert client.post("/api/interest", json={"id": "al:99", "value": True}).status_code == 404
+        assert client.get("/api/discover?count=0").status_code == 422
+    finally:
+        serve.store, serve.engine = orig_store, orig_engine

@@ -247,3 +247,24 @@ def test_old_database_gets_the_english_title_column(tmp_path):
     assert s.load_rows()[0]["title_english"] is None
     s.upsert_rows([make_row(1, title_english="New")])
     assert s.load_rows()[0]["title_english"] == "New"
+
+
+def test_interest_roundtrip(tmp_path):
+    s = Store(tmp_path / "interest.db")
+    assert s.get_interest() == {}
+    s.set_interest("al:1", 1, 97.5, "deck")
+    s.set_interest("al:2", 0, None, "page")
+    assert s.get_interest() == {"al:1": {"value": 1, "match": 97.5, "source": "deck"},
+                                "al:2": {"value": 0, "match": None, "source": "page"}}
+    # A new answer replaces the old answer, and None deletes it
+    s.set_interest("al:1", 0, 12.0, "deck")
+    s.set_interest("al:2", None)
+    assert s.get_interest() == {"al:1": {"value": 0, "match": 12.0, "source": "deck"}}
+    # A read-only database from an older version does not have the table
+    import sqlite3
+    old = tmp_path / "old_interest.db"
+    con = sqlite3.connect(old)
+    con.execute("CREATE TABLE shows (id TEXT PRIMARY KEY)")
+    con.commit()
+    con.close()
+    assert Store(old, read_only=True).get_interest() == {}

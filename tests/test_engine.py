@@ -1352,3 +1352,114 @@ def test_steps_without_shows_of_the_user(tmp_path):
     e = _engine_from(tmp_path, specs)
     out = e.recommendation_steps(k=3)
     assert [(s["key"], s["count"]) for s in out["steps"]] == [("catalog", 4), ("new", 4)]
+
+
+def _discover_engine(tmp_path):
+    """Three liked shows with the tag Band, and 40 shows that the user does not have, with four tags."""
+    specs = [("al:1", [1, 0, 0, 0], 1, ["Band"], [90]), ("al:2", [0.9, 0.1, 0, 0], 1, ["Band"], [90]),
+             ("al:3", [0.8, 0.2, 0, 0], 1, ["Band", "School"], [90, 60])]
+    for n in range(40):
+        specs.append((f"al:{100 + n}", [np.cos(n / 12), np.sin(n / 12), 0.02 * n, 0.1], 0,
+                      [("Band", "Mecha", "School", "Space")[n % 4]], [80]))
+    e = _engine_from(tmp_path, specs)
+    for show_id in ("al:1", "al:2", "al:3"):
+        e.set_show_tier(show_id, "A")
+    return e
+
+
+def test_answers_of_the_deck_are_weak_examples_for_the_taste_model(tmp_path):
+    e = _discover_engine(tmp_path)
+    space, mecha = "al:103", "al:101"
+    before = _taste_of(e, space)
+    # al:107 has the tag Space
+    e.set_interest("al:107", True)
+    assert _taste_of(e, space) > before
+    # al:105 has the tag Mecha
+    base = _taste_of(e, mecha)
+    e.set_interest("al:105", False)
+    weak = base - _taste_of(e, mecha)
+    assert weak > 0
+    assert e.by_id["al:107"]["interest"] == 1 and e.by_id["al:105"]["interest"] == 0
+    # A removed show is a stronger example than the answer "not interested"
+    e.set_interest("al:105", None)
+    assert _taste_of(e, mecha) == pytest.approx(base, abs=1e-6)
+    e.set_dismissed("al:105", True)
+    assert base - _taste_of(e, mecha) > weak
+    # The tier model does not learn from an answer
+    assert e.pos["al:107"] not in e._dismissed_rows()
+    # A new engine has the answers
+    assert Engine(e.store).interest == {"al:107": 1}
+
+
+def test_not_interested_show_is_a_removed_show(tmp_path):
+    e = _discover_engine(tmp_path)
+    key = e._state_key()
+    e.set_interest("al:104", False)
+    e.set_interest("al:108", True)
+    assert e._state_key() != key
+    ids = [r["id"] for r in e.recommend(k=100)]
+    assert "al:104" not in ids and "al:108" in ids
+    assert e.by_id["al:104"]["dismissed"] == 1 and e.by_id["al:108"]["dismissed"] == 0
+    assert [r["id"] for r in e.dismissed_shows()] == ["al:104"]
+    assert [r["id"] for r in e.interest_shows()] == ["al:108"] and e.interest_shows()[0]["match"] is not None
+    assert e.interest_counts() == {"interested": 1, "not_interested": 1}
+    assert not np.isnan(e.match_percent()[e.pos["al:104"]])
+    # To put the show back deletes the answer
+    e.set_dismissed("al:104", False)
+    assert "al:104" not in e.interest and e.by_id["al:104"]["dismissed"] == 0
+    assert "al:104" in [r["id"] for r in e.recommend(k=100)]
+    # To remove a show replaces the answer "interested", and "interested" puts a removed show back
+    e.set_dismissed("al:108", True)
+    assert "al:108" not in e.interest and e.by_id["al:108"]["interest"] is None
+    e.set_interest("al:108", True)
+    assert e.dismissed == set() and e.by_id["al:108"]["dismissed"] == 0
+    with pytest.raises(ValueError):
+        e.set_interest("al:1", True)
+    with pytest.raises(KeyError):
+        e.set_interest("al:999", True)
+
+
+def test_discover_draws_shows_without_an_answer_from_the_groups(tmp_path, monkeypatch):
+    import anime_vec.engine as engine_module
+    e = _discover_engine(tmp_path)
+    cards = e.discover(count=12, seed=3)
+    ids = [c["id"] for c in cards]
+    assert len(set(ids)) == 12 and all(not c["owned"] and c["match"] is not None for c in cards)
+    assert ids == [c["id"] for c in e.discover(count=12, seed=3)]
+    assert ids != [c["id"] for c in e.discover(count=12, seed=4)]
+    # A show with an answer and a removed show are not cards
+    for n, show_id in enumerate(ids[:10]):
+        e.set_interest(show_id, n % 2 == 0)
+    e.set_dismissed(ids[10], True)
+    later = [c["id"] for c in e.discover(count=40, seed=3)]
+    assert len(later) == 40 - 11 and not set(later) & set(ids[:11])
+    # All cards come from the first group while it has shows
+    monkeypatch.setattr(engine_module, "DISCOVER_GROUPS", ((50.0, 1.0), (0.0, 0.0)))
+    high = [j for j in range(len(e.rows)) if e.rows[j]["id"] in later and e.match_percent()[j] >= 50.0]
+    drawn = e.discover(count=len(high), seed=1)
+    assert len(high) > 3 and all(c["match"] >= 50.0 for c in drawn)
+    assert len(e.discover(count=40, seed=1)) == len(later)
+
+
+def test_interest_results_have_the_answers_of_the_deck_by_match(tmp_path):
+    e = _discover_engine(tmp_path)
+    assert e.interest_results() == {"answers": 0, "interested": 0, "not_interested": 0, "model": None,
+                                    "groups": [{"low": low, "high": high, "answers": 0, "interested": 0}
+                                               for low, high in ((99.0, 100.0), (95.0, 99.0), (80.0, 95.0), (0.0, 80.0))]}
+    match = e.match_percent().copy()
+    band = [f"al:{100 + n}" for n in range(0, 40, 4)]
+    mecha = [f"al:{100 + n}" for n in range(1, 40, 4)]
+    for show_id in band[:4]:
+        e.set_interest(show_id, True)
+    for show_id in mecha[:4]:
+        e.set_interest(show_id, False)
+    # An answer from a page is not in the groups
+    e.set_interest(band[5], True, source="page")
+    res = e.interest_results()
+    assert (res["answers"], res["interested"], res["not_interested"]) == (9, 5, 4)
+    assert sum(g["answers"] for g in res["groups"]) == 8 and sum(g["interested"] for g in res["groups"]) == 4
+    # Each answer is in the group of the match that the show had before the answers
+    first = next(g for g in res["groups"] if g["low"] <= match[e.pos[band[0]]] < g["high"] or g["high"] == 100.0 <= match[e.pos[band[0]]])
+    assert first["answers"] >= 1
+    # The interested shows have the tag of the liked shows, thus the model orders all pairs correctly
+    assert res["model"] == {"pairs": 20, "auc": 1.0}

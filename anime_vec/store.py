@@ -23,6 +23,13 @@ CREATE TABLE IF NOT EXISTS dismissed (
   id TEXT PRIMARY KEY,
   created_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS interest (
+  id TEXT PRIMARY KEY,
+  value INTEGER NOT NULL,
+  match REAL,
+  source TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS layout (
   id TEXT PRIMARY KEY,
   x REAL NOT NULL,
@@ -109,6 +116,29 @@ class Store:
             self.con.execute("INSERT OR REPLACE INTO dismissed (id) VALUES (?)", (show_id,))
         else:
             self.con.execute("DELETE FROM dismissed WHERE id=?", (show_id,))
+        self.con.commit()
+
+    def get_interest(self) -> dict[str, dict]:
+        """Return the answers of the Discover deck, by the id of the show.
+
+        An answer has the value (1 = interested, 0 = not interested), the match of the show at
+        the time of the answer, and the source: "deck" for the Discover deck, "page" for a
+        button on a page.
+        """
+        try:
+            cur = self.con.execute("SELECT id, value, match, source FROM interest")
+        except sqlite3.OperationalError:
+            # A read-only database from an older version does not have this table
+            return {}
+        return {r[0]: {"value": int(r[1]), "match": r[2], "source": r[3]} for r in cur.fetchall()}
+
+    def set_interest(self, show_id: str, value: int | None, match: float | None = None, source: str = "deck"):
+        """Record an answer of the user for a show. The value None deletes the answer."""
+        if value is None:
+            self.con.execute("DELETE FROM interest WHERE id=?", (show_id,))
+        else:
+            self.con.execute("INSERT OR REPLACE INTO interest (id, value, match, source) VALUES (?, ?, ?, ?)",
+                             (show_id, int(value), match, source))
         self.con.commit()
 
     def log_recommendations(self, items: list[tuple[str, int]], kinds: str, today: str):

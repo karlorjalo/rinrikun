@@ -119,6 +119,42 @@ def post_dismissed(payload: dict):
     return {"id": show_id, "dismissed": dismissed}
 
 
+@app.get("/api/discover")
+def discover(count: int = Query(12, le=50, ge=1)):
+    """Return random shows for the Discover deck, and the numbers of the answers of the user."""
+    return {"cards": engine.discover(count), "counts": engine.interest_counts()}
+
+
+@app.get("/api/interest")
+def get_interest():
+    """Return the shows that the user is interested in: the watch list."""
+    return engine.interest_shows()
+
+
+@app.post("/api/interest")
+def post_interest(payload: dict):
+    """Record the answer of the user for a show: true = interested, false = not interested, null = no answer."""
+    show_id = payload.get("id")
+    if not show_id or show_id not in engine.by_id:
+        raise HTTPException(404, "unknown show id")
+    value = payload.get("value")
+    source = "deck" if payload.get("source") == "deck" else "page"
+    with engine.lock:
+        try:
+            engine.set_interest(show_id, None if value is None else bool(value), source)
+        except ValueError as error:
+            raise HTTPException(400, str(error))
+    row = engine.by_id[show_id]
+    return {"id": show_id, "interest": row.get("interest"), "dismissed": row.get("dismissed", 0),
+            "counts": engine.interest_counts()}
+
+
+@app.get("/api/interest/results")
+def interest_results():
+    """Return the answers of the Discover deck by the match of the shows."""
+    return engine.interest_results()
+
+
 @app.get("/api/similar")
 def similar(id: str, k: int = Query(24, le=100, ge=1)):
     if id not in engine.by_id:
