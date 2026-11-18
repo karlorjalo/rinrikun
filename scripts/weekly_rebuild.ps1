@@ -1,4 +1,4 @@
-# Build the index again, then start the servers again.
+# Build the index again, then start the server again.
 # The scheduled task from install_weekly_task.ps1 runs this script one time each week.
 #
 # The build gets the new anime and the new links from AniList, and the changes of the Jellyfin
@@ -27,11 +27,11 @@ if (Test-Path anime_vec.db) { Copy-Item anime_vec.db scratch\anime_vec.db.bak-we
 # cmd writes the output of the build to the log
 cmd /c "`"$python`" -u build.py >> `"$log`" 2>&1"
 if ($LASTEXITCODE -ne 0) {
-    Write-Log "the build failed with code $LASTEXITCODE. The servers continue with the old index."
+    Write-Log "the build failed with code $LASTEXITCODE. The server continues with the old index."
     exit 1
 }
 Write-Log "build done"
 
-# The servers read the index only when they start
+# The server reads the index only when it starts
 & (Join-Path $PSScriptRoot "restart_servers.ps1") | Out-File -FilePath $log -Append -Encoding utf8
 Write-Log "rebuild finished"

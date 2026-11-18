@@ -1,4 +1,6 @@
 import datetime
+import os
+import socket
 import sys
 import threading
 import urllib.request
@@ -244,10 +246,54 @@ def index():
 
 app.mount("/ui", StaticFiles(directory=ROOT / "ui"), name="ui")
 
-if __name__ == "__main__":
-    port = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else 8765
-    # The default host accepts connections only from this computer. The API has no login.
-    host = sys.argv[sys.argv.index("--host") + 1] if "--host" in sys.argv else "127.0.0.1"
-    threading.Timer(1.0, webbrowser.open, args=[f"http://localhost:{port}"]).start()
+
+def parse_address(text: str) -> tuple[str, int]:
+    """Return the host and the port of an address in the form "host:port"."""
+    host, _, port = text.rpartition(":")
+    if not host or not port.isdigit():
+        raise ValueError(f"{text!r} is not an address. Use host:port, for example 0.0.0.0:8771")
+    return host.strip("[]"), int(port)
+
+
+def listen(host: str, port: int) -> socket.socket:
+    """Return a socket that is bound to the address. Port 0 gives a free port."""
+    sock = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET)
+    if os.name != "nt":
+        # A new server can use the address immediately after the old server stopped. Windows
+        # permits this without the option. With the option, Windows also permits a second
+        # process on the same address at the same time.
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((host, port))
+    return sock
+
+
+def run_server(addresses: list[tuple[str, int]]):
+    """Serve the interface on each address, in this one process.
+
+    The engine keeps the data of the user in memory, and it reads the database only when it
+    starts. Thus two server processes do not agree after the user changed a tier or gave an
+    answer through one of them. One process with two addresses has one engine.
+    """
     import uvicorn
-    uvicorn.run(app, host=host, port=port)
+    sockets = [listen(host, port) for host, port in addresses]
+    uvicorn.Server(uvicorn.Config(app)).run(sockets=sockets)
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Serve the rinrikun interface.")
+    # The default host accepts connections only from this computer. The API has no login.
+    parser.add_argument("--host", default="127.0.0.1", help="the address of the server (default: only this computer)")
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--also", action="append", default=[], metavar="HOST:PORT",
+                        help="one more address for the same server process, for example 0.0.0.0:8771. "
+                             "You can give this option more than one time.")
+    parser.add_argument("--no-browser", action="store_true", help="do not open the page in a browser")
+    args = parser.parse_args()
+    try:
+        addresses = [(args.host, args.port)] + [parse_address(text) for text in args.also]
+    except ValueError as error:
+        parser.error(str(error))
+    if not args.no_browser:
+        threading.Timer(1.0, webbrowser.open, args=[f"http://localhost:{args.port}"]).start()
+    run_server(addresses)
