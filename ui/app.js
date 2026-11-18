@@ -124,7 +124,11 @@ function tipElement(node) {
   return node && node.closest ? node.closest("[data-tip]") : null;
 }
 
+// The time at which the box of the element appeared
+let tipShownAt = 0;
+
 function showTip(el) {
+  if (tipTarget !== el || tipBox.hidden) tipShownAt = performance.now();
   tipTarget = el;
   tipBox.textContent = el.dataset.tip;
   // An open dialog is above all other parts of the page. The box must be in the dialog, or the
@@ -135,11 +139,18 @@ function showTip(el) {
   const rect = el.getBoundingClientRect();
   const width = tipBox.offsetWidth;
   const height = tipBox.offsetHeight;
-  const left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.left + rect.width / 2 - width / 2));
+  // The part of the page that the user sees. On a phone it can be smaller than the window of the
+  // page, when a part of the page is wider than the screen.
+  const view = window.visualViewport;
+  const viewLeft = view ? view.offsetLeft : 0;
+  const viewTop = view ? view.offsetTop : 0;
+  const viewWidth = view ? view.width : window.innerWidth;
+  const viewHeight = view ? view.height : window.innerHeight;
+  const left = Math.max(viewLeft + 8, Math.min(viewLeft + viewWidth - width - 8, rect.left + rect.width / 2 - width / 2));
   // Below the element. Above it if there is no space below.
-  const top = rect.bottom + 8 + height > window.innerHeight - 8 ? rect.top - height - 8 : rect.bottom + 8;
+  const top = rect.bottom + 8 + height > viewTop + viewHeight - 8 ? rect.top - height - 8 : rect.bottom + 8;
   tipBox.style.left = `${left}px`;
-  tipBox.style.top = `${Math.max(8, top)}px`;
+  tipBox.style.top = `${Math.max(viewTop + 8, top)}px`;
 }
 
 function hideTip() {
@@ -166,7 +177,10 @@ document.addEventListener("click", (e) => {
   }
   e.stopPropagation();
   e.preventDefault();
-  if (tipTarget === el && !tipBox.hidden && e.detail && e.pointerType === "touch") hideTip();
+  // A second tap closes the box. The first tap gives the element the focus, which shows the box
+  // immediately before this click: that box must stay.
+  const fromThisTap = performance.now() - tipShownAt < 500;
+  if (tipTarget === el && !tipBox.hidden && e.detail && e.pointerType === "touch" && !fromThisTap) hideTip();
   else showTip(el);
 }, true);
 window.addEventListener("scroll", hideTip, true);
