@@ -72,10 +72,12 @@ TASTE_NOT_INTERESTED = -0.5
 # user in a new show: see Engine.match_percent for the test.
 MATCH_TIER_WEIGHT = 0.25
 # The Discover deck draws its shows at random in groups of the match: (lowest match of the group,
-# part of the cards that come from the group). Most cards come from the groups with a high
-# match: an answer for such a show tells the taste model the most. In one group each show has
-# the same chance, thus the answers of a group are a fair sample of the group.
-DISCOVER_GROUPS = ((99.0, 0.30), (95.0, 0.30), (80.0, 0.25), (0.0, 0.15))
+# part of the cards that come from the group). In one group each show has the same chance, thus
+# the answers of a group are a fair sample of the group. Most cards come from the groups between
+# 80 and 99. There the first 110 answers of the user were mixed (27% and 58% "interested"), thus
+# an answer tells the taste model the most. Below 80 the answer was "not interested" for 23 of
+# 24 shows, thus this group gets only a few cards: they show if the match stays correct there.
+DISCOVER_GROUPS = ((99.0, 0.25), (95.0, 0.35), (80.0, 0.35), (0.0, 0.05))
 # The "usual kinds" formula gives a higher score to the kinds of shows that the library has many of.
 # The kind of a show is its year, its format and its number of episodes. The crowd score counts
 # only as a lower limit.
