@@ -1233,6 +1233,56 @@ def test_match_uses_the_predicted_tier(tmp_path, monkeypatch):
     assert e.match_percent()[last] > before.min()
 
 
+def test_match_gives_the_predicted_tier_a_small_weight(tmp_path, monkeypatch):
+    import anime_vec.engine as engine_module
+    e = _steps_engine(tmp_path)
+    cand = [e.pos[f"al:{100 + n}"] for n in range(30)]
+    content = e._content(cand)["scores"]
+    tiers = np.array([float(n % 5) for n in range(30)], dtype=np.float32)
+    by_row = dict(zip(cand, tiers))
+
+    def fixed(self, indices, leave_out=None):
+        return np.array([by_row.get(i, 2.0) for i in indices], dtype=np.float32)
+
+    monkeypatch.setattr(Engine, "_predicted_tier", fixed)
+    z = (tiers - tiers.mean()) / tiers.std()
+    assert 0.0 < engine_module.MATCH_TIER_WEIGHT < 1.0
+    for weight in (engine_module.MATCH_TIER_WEIGHT, 0.0, 1.0):
+        monkeypatch.setattr(engine_module, "MATCH_TIER_WEIGHT", weight)
+        e._match_cache.clear()
+        match = e.match_percent()[cand]
+        # The match has the order of: content score + weight * predicted tier
+        assert list(np.argsort(-match, kind="stable")) == list(np.argsort(-(content + weight * z), kind="stable"))
+
+
+def test_match_of_a_show_with_an_answer_does_not_know_the_answer(tmp_path, monkeypatch):
+    e = _discover_engine(tmp_path)
+    calls = []
+    original = Engine._content
+
+    def spy(self, cand_indices, extra=None):
+        calls.append((list(cand_indices), list(extra or [])))
+        return original(self, cand_indices, extra)
+
+    monkeypatch.setattr(Engine, "_content", spy)
+    e.match_percent()
+    yes, no, sequel = e.pos["al:107"], e.pos["al:105"], e.pos["al:110"]
+    assert {yes, no, sequel} <= set(calls[-1][0])
+    e.set_interest("al:107", True)
+    e.set_interest("al:105", False)
+    # al:110 is now a show of a franchise that the user has
+    e.franchise["al:110"] = e.franchise["al:1"]
+    e.set_interest("al:110", True, source="page")
+    match = e.match_percent()
+    cand, extra = calls[-1]
+    # A show of a new franchise with an answer is an extra row: its score comes from a taste model
+    # that does not know the answer. A show of a franchise of the user stays a candidate.
+    assert yes not in cand and no not in cand and {yes, no} <= set(extra)
+    assert sequel in cand
+    assert not np.isnan(match[[yes, no, sequel]]).any()
+    assert _taste_of(e, "al:107", leave_out=True) < _taste_of(e, "al:107")
+
+
 def _season_engine(tmp_path, monkeypatch):
     """al:1 and al:2 are two seasons of one franchise with the tag A, and the two have tier S."""
     import anime_vec.engine as engine_module
@@ -1446,7 +1496,6 @@ def test_interest_results_have_the_answers_of_the_deck_by_match(tmp_path):
     assert e.interest_results() == {"answers": 0, "interested": 0, "not_interested": 0, "model": None,
                                     "groups": [{"low": low, "high": high, "answers": 0, "interested": 0}
                                                for low, high in ((99.0, 100.0), (95.0, 99.0), (80.0, 95.0), (0.0, 80.0))]}
-    match = e.match_percent().copy()
     band = [f"al:{100 + n}" for n in range(0, 40, 4)]
     mecha = [f"al:{100 + n}" for n in range(1, 40, 4)]
     for show_id in band[:4]:
@@ -1458,8 +1507,11 @@ def test_interest_results_have_the_answers_of_the_deck_by_match(tmp_path):
     res = e.interest_results()
     assert (res["answers"], res["interested"], res["not_interested"]) == (9, 5, 4)
     assert sum(g["answers"] for g in res["groups"]) == 8 and sum(g["interested"] for g in res["groups"]) == 4
-    # Each answer is in the group of the match that the show had before the answers
-    first = next(g for g in res["groups"] if g["low"] <= match[e.pos[band[0]]] < g["high"] or g["high"] == 100.0 <= match[e.pos[band[0]]])
-    assert first["answers"] >= 1
+    # Each answer of the deck is in the group of the match of its show
+    match = e.match_percent()
+    deck = [(float(match[e.pos[i]]), 1) for i in band[:4]] + [(float(match[e.pos[i]]), 0) for i in mecha[:4]]
+    for g in res["groups"]:
+        inside = [value for m, value in deck if g["low"] <= m and (m < g["high"] or g["high"] == 100.0)]
+        assert (g["answers"], g["interested"]) == (len(inside), sum(inside))
     # The interested shows have the tag of the liked shows, thus the model orders all pairs correctly
     assert res["model"] == {"pairs": 20, "auc": 1.0}

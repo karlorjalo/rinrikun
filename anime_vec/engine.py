@@ -71,6 +71,10 @@ TASTE_DISLIKED = -1.0
 # The answers are not examples for the tier model: a show that the user did not watch has no tier.
 TASTE_INTERESTED = 0.5
 TASTE_NOT_INTERESTED = -0.5
+# The weight of the predicted tier in the match. The content score has the weight 1. The tier
+# model orders the rated shows of the user a little, but it does not predict the interest of the
+# user in a new show: see Engine.match_percent for the test.
+MATCH_TIER_WEIGHT = 0.25
 # The Discover deck draws its shows at random in groups of the match: (lowest match of the group,
 # part of the cards that come from the group). Most cards come from the groups with a high
 # match: an answer for such a show tells the taste model the most. In one group each show has
@@ -687,25 +691,32 @@ class Engine:
     def match_percent(self) -> np.ndarray:
         """Return the match of each row in percent. The value is NaN for a row without a match.
 
-        The match tells how near a show is to the user. Its score is the sum of two parts with
-        the same weight: the content score (the nearest liked shows and the taste model, see
-        _content), and the tier that the tier model predicts for the show. The match is the part
-        of the new franchises of the catalog that have a lower score than the show. 99 means:
-        the show is nearer to the user than 99% of the franchises that the user does not have.
+        The match tells how near a show is to the user. Its score has two parts: the content
+        score (the nearest liked shows and the taste model, see _content), and the tier that the
+        tier model predicts for the show, with the weight MATCH_TIER_WEIGHT. The match is the
+        part of the new franchises of the catalog that have a lower score than the show. 99
+        means: the show is nearer to the user than 99% of the franchises that the user does not
+        have.
 
         The match does not use the crowd links, and it does not use the kinds of the formulas.
         Thus a show has one match for all formulas, and a list of recommendations is not always
         in the order of the match.
 
-        In a test on 172 rated franchises, each hidden in turn, the median match was 97 for the
-        S tier, 94 for the A tier, 93 for the B tier, and 91 for the C and D tiers. Of the 33
-        franchises with a match of 99 or more, 61% had the S or the A tier, and none had the C or
-        the D tier. But the rank correlation with the tier was only 0.16. Thus the match follows
-        the tiers, and it is a weak prediction for one show.
+        The tier part has a small weight, because it does not predict the interest of the user
+        in a new show. In a test with 113 answers of the Discover deck, the match with this
+        weight put an interested show above a not-interested show in 83% of the pairs. With the
+        same weight for the two parts the result was 74%. The tier part stays because it orders
+        the rated shows of the user a little: with each rated franchise hidden in turn, the rank
+        correlation of the match with the tier was 0.11 (0.08 without the tier part). The median
+        match was 98.8 for the S tier, 96.3 for the A tier, 97.3 for the B tier and 98.6 for the
+        C tier. Thus the match tells if a show is for the user, and it is a weak prediction of
+        the tier of one show.
 
         A show of the user gets the score that it would have if the user did not have its
         franchise: each part ignores the shows of this franchise. Thus the match of a show of
-        the user tells how well the other shows of the user predict this show.
+        the user tells how well the other shows of the user predict this show. In the same way,
+        a show with an answer of the Discover deck gets the score that it would have without the
+        answer.
         """
         with self.lock:
             return self._match_percent()
@@ -719,23 +730,26 @@ class Engine:
         out = np.full(len(self.rows), np.nan, dtype=np.float32)
         owned = self.owned_franchises()
         unique = [j for j, r in enumerate(self.rows) if r["id"] not in self.duplicate_of]
-        # The candidates of a list that also has the franchises of the user (see _recommend)
+        # The candidates of a list that also has the franchises of the user (see _recommend).
+        # A show of a new franchise that has an answer of the Discover deck is not a candidate
+        # here: as an extra row it gets the score of a taste model that does not know its answer.
         cand = [j for j in unique
                 if not self.rows[j]["owned"] and _watchable(self.rows[j]) and not self._refused(self.ids[j])
-                and (self.franchise[self.ids[j]] in owned or self.entry_row[self.franchise[self.ids[j]]] == j)]
+                and (self.franchise[self.ids[j]] in owned
+                     or (self.entry_row[self.franchise[self.ids[j]]] == j and self.ids[j] not in self.interest))]
         if cand and self.owned_idx:
             cand_set = set(cand)
             extra = [j for j in unique if j not in cand_set]
             content = self._content(cand, extra)
             predicted = self._predicted_tier(cand)
-            scores = content["scores"] + _zscore(predicted)
+            scores = content["scores"] + MATCH_TIER_WEIGHT * _zscore(predicted)
             # The reference: the franchises that the user does not have
             new = np.array([self.franchise[self.ids[j]] not in owned for j in cand])
             reference = np.sort(scores[new] if new.any() else scores)
             out[cand] = 100.0 * np.searchsorted(reference, scores, side="left") / len(reference)
             if extra:
                 extra_predicted = self._predicted_tier(extra, leave_out="franchise")
-                extra_scores = content["extra_scores"] + _scale_like(predicted, extra_predicted)
+                extra_scores = content["extra_scores"] + MATCH_TIER_WEIGHT * _scale_like(predicted, extra_predicted)
                 out[extra] = 100.0 * np.searchsorted(reference, extra_scores, side="left") / len(reference)
             # An AniList row of a library show has the match of the library show
             for dup_id, lib_id in self.duplicate_of.items():
@@ -773,9 +787,9 @@ class Engine:
 
         The order uses two signals with the same weight: the match, and the tier guess. The
         match ignores the other shows of the franchise of a show. The tier guess uses them: the
-        tier of one season is a good guess for the next season. In a test on the 221 rated
+        tier of one season is a good guess for the next season. In a test on the 222 rated
         shows (the match and the guess of a show did not know its rating), the first quarter of
-        this order had 27% S-tier shows, and the last quarter 9%. Of all rated shows 17% are
+        this order had 29% S-tier shows, and the last quarter 7%. Of all rated shows 17% are
         S-tier shows.
         """
         rows = list(rows)
@@ -1254,9 +1268,9 @@ class Engine:
 
         True is "interested": the show stays a possible recommendation, and it is on the watch
         list. False is "not interested": the show is never a recommendation. The two answers
-        are weak examples for the taste model (see TASTE_INTERESTED). The answer keeps the match
-        that the show had before the answer, for interest_results. `source` is "deck" for an
-        answer of the Discover deck, which draws its shows at random, and "page" for other answers.
+        are weak examples for the taste model (see TASTE_INTERESTED). The database keeps the
+        match that the show had before the answer, as a record. `source` is "deck" for an answer
+        of the Discover deck, which draws its shows at random, and "page" for other answers.
         """
         if show_id not in self.by_id:
             raise KeyError(f"unknown show id {show_id}")
@@ -1322,10 +1336,10 @@ class Engine:
     def interest_results(self) -> dict:
         """Compare the answers of the Discover deck with the match of the shows.
 
-        `groups` has the answers of the deck in the groups of DISCOVER_GROUPS, by the match at
-        the time of the answer. A group is a fair sample: if the match is good, a group with a
-        higher match has a larger part of "interested". An answer from a page is not in the
-        groups, because the user selected its show.
+        `groups` has the answers of the deck in the groups of DISCOVER_GROUPS, by the match of
+        the show. This match does not know the answer of the show: see match_percent. If the
+        match is good, a group with a higher match has a larger part of "interested". An answer
+        from a page is not in the groups, because the user selected its show.
 
         `model` tells how well the taste model predicts an answer that it does not know: the
         part of the pairs (interested show, not-interested show) in which the interested show
@@ -1333,8 +1347,10 @@ class Engine:
         answers of one kind.
         """
         stored = self.store.get_interest()
-        deck = [(v["match"], v["value"]) for i, v in stored.items()
-                if i in self.interest and v.get("source") == "deck" and v.get("match") is not None]
+        match = self.match_percent()
+        deck = [(float(match[self.pos[i]]), value) for i, value in self.interest.items()
+                if stored.get(i, {}).get("source") == "deck" and not self.by_id[i]["owned"]
+                and not np.isnan(match[self.pos[i]])]
         groups = []
         high = None
         for low, _ in DISCOVER_GROUPS:
