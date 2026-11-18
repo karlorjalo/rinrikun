@@ -193,9 +193,9 @@ function withFormula(url) {
   return `${url}${url.includes("?") ? "&" : "?"}kinds=${recsKinds}&links=${recsLinks}`;
 }
 
-// The match of a show tells how near the show is to the user: to the taste of the user, and to
-// the tier that the tier model predicts for the show. It is the part of the franchises that the
-// user does not have, which are less near. It does not use the crowd links or the formula of a
+// The match of a show tells how near the show is to the taste of the user. The tier that the tier
+// model predicts for the show has a small part in it. The match is the part of the franchises that
+// the user does not have, which are less near. It does not use the crowd links or the formula of a
 // list. For a show of the user it is the match that the show would have if the user did not have
 // its franchise.
 function formatMatch(match) {
@@ -207,8 +207,8 @@ function matchHtml(r) {
   const text = formatMatch(r.match);
   if (text == null) return "";
   const title = r.owned
-    ? `Without this franchise in your list, this show would be nearer to your taste and your predicted tier than ${text}% of the franchises that you do not have`
-    : `This show is nearer to your taste and your predicted tier than ${text}% of the franchises that you do not have`;
+    ? `Without this franchise in your list, this show would be nearer to your taste than ${text}% of the franchises that you do not have`
+    : `This show is nearer to your taste than ${text}% of the franchises that you do not have`;
   return `<span class="affinity" data-tip="${title}" tabindex="0">${text}% match</span>`;
 }
 
@@ -2516,7 +2516,7 @@ const LINKS_TEXT = {
 };
 // The match of a show is not a part of the formula of the list. The note above the list says so,
 // because a list with the crowd links can have a show with a lower match near its top.
-const MATCH_TEXT = "<b>Match:</b> how near a show is to your taste and to your predicted tier. It does not use the formula, thus the list is not always in the order of the match.";
+const MATCH_TEXT = "<b>Match:</b> how near a show is to your taste. Your predicted tier has a small part in it. The match does not use the formula, thus the list is not always in the order of the match.";
 let recsLinks = true;
 try {
   if (localStorage.getItem(LINKS_KEY) === "off") recsLinks = false;
