@@ -114,6 +114,12 @@ function formatOverview(text) {
 // An element with the attribute data-tip shows its text in a small box, at once, when the pointer
 // is on it, when it has the focus, or when the user taps it. The tooltip of the browser (the title
 // attribute) appears late, and it does not appear on a touch screen.
+//
+// An element with the attribute data-tip-rich shows a box with more than text, for example with
+// pictures. The attribute is a key of TIP_CONTENT, and the function for the key gets the element
+// and returns the HTML of the box. If the element also has the attribute data-tip-pass, it is a
+// control: a click on it does the work of the control.
+const TIP_CONTENT = {};
 const tipBox = document.createElement("div");
 tipBox.className = "tip-box";
 tipBox.setAttribute("role", "tooltip");
@@ -121,7 +127,12 @@ tipBox.hidden = true;
 let tipTarget = null;
 
 function tipElement(node) {
-  return node && node.closest ? node.closest("[data-tip]") : null;
+  return node && node.closest ? node.closest("[data-tip], [data-tip-rich]") : null;
+}
+
+// A small "i" in a circle that shows a text when the pointer is on it
+function infoDot(text, label = "More about these numbers") {
+  return `<button type="button" class="info-dot" data-tip="${esc(text)}" aria-label="${esc(label)}">i</button>`;
 }
 
 // The time at which the box of the element appeared
@@ -130,7 +141,10 @@ let tipShownAt = 0;
 function showTip(el) {
   if (tipTarget !== el || tipBox.hidden) tipShownAt = performance.now();
   tipTarget = el;
-  tipBox.textContent = el.dataset.tip;
+  const make = TIP_CONTENT[el.dataset.tipRich];
+  tipBox.classList.toggle("tip-rich", !!make);
+  if (make) tipBox.innerHTML = make(el);
+  else tipBox.textContent = el.dataset.tip || "";
   // An open dialog is above all other parts of the page. The box must be in the dialog, or the
   // dialog covers it.
   const home = el.closest("dialog[open]") || document.body;
@@ -160,6 +174,8 @@ function hideTip() {
 
 document.addEventListener("mouseover", (e) => {
   const el = tipElement(e.target);
+  // The pointer can move between the parts of one element: the box stays as it is
+  if (el && el === tipTarget && !tipBox.hidden) return;
   if (el) showTip(el);
   else if (tipTarget) hideTip();
 });
@@ -175,6 +191,8 @@ document.addEventListener("click", (e) => {
     hideTip();
     return;
   }
+  // A control with a box does its usual work
+  if (el.dataset.tipPass !== undefined) return;
   e.stopPropagation();
   e.preventDefault();
   // A second tap closes the box. The first tap gives the element the focus, which shows the box
@@ -556,7 +574,7 @@ async function profile() {
   renderProfile();
 }
 
-// The results of the recommendations: the shows that the list gave, and the shows of these that
+// The numbers of the recommendations: the shows that the list gave, and the shows of these that
 // the user added later, with their tiers
 function renderRecResults() {
   const box = $("#rec-results");
@@ -569,33 +587,32 @@ function renderRecResults() {
   box.hidden = false;
   const since = new Date(res.since + "T00:00:00").toLocaleDateString("en-GB", { year: "numeric", month: "short", day: "numeric" });
   const tiers = ["S", "A", "B", "C", "D"].filter((t) => res.tiers[t])
-    .map((t) => `<span class="tier-pill tier-${t.toLowerCase()}">${t}</span> ${res.tiers[t]}`);
-  if (res.unrated) tiers.push(`${res.unrated} without a tier`);
-  const added = res.added
-    ? `You added ${res.added} of them${tiers.length ? ": " + tiers.join(" · ") : ""}.`
-    : "You added none of them until now.";
-  const removed = res.removed ? ` You removed ${res.removed}.` : "";
+    .map((t) => `<span class="tier-summary-item"><span class="tier-pill tier-${t.toLowerCase()}">${t}</span> <span class="tier-summary-count">${res.tiers[t]}</span></span>`);
+  if (res.unrated) tiers.push(statItem(res.unrated, "without a tier"));
+  // The box has only the numbers. The text is in the tooltip of the "i".
+  let about = "The new franchises that the Recommendations tab showed you, and how many of them you added or removed later.";
   // The comparison of the two formulas has a use only after the user saw lists of the two
   const formulas = res.formulas || {};
-  const perFormula = (name, label) => {
-    const f = formulas[name];
-    return `<b>${label}:</b> ${f.shown} shown, ${f.added} added, ${f.removed} removed.`;
-  };
-  const compare = formulas["no links"] && formulas["no links"].shown && formulas.links
-    ? `<div class="rec-results-text rec-results-formulas">${perFormula("links", "With crowd links")} ${perFormula("no links", "Without crowd links")} A show counts for the first list that gave it.</div>`
-    : "";
+  if (formulas["no links"] && formulas["no links"].shown && formulas.links) {
+    const perFormula = (name, label) => `${label}: ${formulas[name].shown} shown, ${formulas[name].added} added, ${formulas[name].removed} removed.`;
+    about += ` ${perFormula("links", "With crowd links")} ${perFormula("no links", "Without crowd links")} A show counts for the first list that gave it.`;
+  }
   const shows = res.shows.slice(0, 6).map((show) => {
     const pill = show.tier ? `<span class="tier-pill tier-${show.tier.toLowerCase()}">${show.tier}</span> ` : "";
     return `<span class="rec-results-show">${pill}${esc(displayTitles(show).main)}</span>`;
   }).join("");
   box.innerHTML = `
-    <div class="tier-summary-title"><span>Results of the recommendations</span></div>
-    <div class="rec-results-text">Since ${since}, the list gave you ${res.shown} new franchises. ${added}${removed}</div>
-    ${compare}
+    <div class="tier-summary-title"><span>Recommendations${infoDot(about)}</span><span class="tier-summary-note">since ${since}</span></div>
+    <div class="tier-summary-row">${statItem(res.shown, "shown")}${statItem(res.added, "added")}${statItem(res.removed || 0, "removed")}${tiers.join("")}</div>
     ${shows ? `<div class="rec-results-shows">${shows}</div>` : ""}`;
 }
 
-// The results of the Discover deck: the answers of the user by the match of the shows
+// One number with its name, for the boxes of the Profile tab
+function statItem(count, label) {
+  return `<span class="tier-summary-item"><span class="tier-summary-count">${Number(count).toLocaleString("en-US")}</span> ${label}</span>`;
+}
+
+// The numbers of the Discover deck: the answers of the user, also by the match of the shows
 let interestResults = null;
 
 function renderInterestResults() {
@@ -607,16 +624,21 @@ function renderInterestResults() {
     return;
   }
   box.hidden = false;
-  const groups = (res.groups || []).filter((g) => g.answers).map((g) =>
-    `<span class="rec-results-show"><b>Match ${g.low} to ${g.high}:</b> ${g.interested} of ${g.answers} interested (${Math.round((100 * g.interested) / g.answers)}%)</span>`).join("");
-  const model = res.model
-    ? ` The taste model puts an interested show above a not-interested show in ${Math.round(100 * res.model.auc)}% of the pairs. In this test it did not know the answers of the two shows.`
-    : "";
+  // One item for each group of the match: the number of "interested" answers of all answers
+  const groups = (res.groups || []).filter((g) => g.answers).map((g) => {
+    const low = Math.round(g.low);
+    const high = Math.round(g.high);
+    const name = high >= 100 ? `${low}+` : low <= 0 ? `below ${high}` : `${low}–${high}`;
+    return `<span class="tier-summary-item"><span class="tier-summary-label">${name}</span> <span class="tier-summary-count">${g.interested}/${g.answers}</span></span>`;
+  }).join("");
+  // The box has only the numbers. The text is in the tooltip of the "i".
+  let about = "Your answers in the Discover deck.";
+  if (groups) about += " The second row has the \"interested\" answers of all answers, for each group of the match. If the match is good, a group with a higher match has a larger part of \"interested\".";
+  if (res.model) about += ` In a test, the taste model put an interested show above a not-interested show in ${Math.round(100 * res.model.auc)}% of the pairs. It did not know the answers of the two shows.`;
   box.innerHTML = `
-    <div class="tier-summary-title"><span>Results of the Discover deck</span></div>
-    <div class="rec-results-text">You gave ${res.answers} answers: ${res.interested} interested, ${res.not_interested} not interested.${model}</div>
-    ${groups ? `<div class="rec-results-shows">${groups}</div>
-    <div class="rec-results-text rec-results-formulas">A group has the answers of the deck for the shows that had this match at the time of the answer. If the match is good, a group with a higher match has a larger part of "interested".</div>` : ""}`;
+    <div class="tier-summary-title"><span>Discover${infoDot(about)}</span></div>
+    <div class="tier-summary-row">${statItem(res.answers, "answers")}${statItem(res.interested, "interested")}${statItem(res.not_interested, "not interested")}</div>
+    ${groups ? `<div class="tier-summary-row tier-summary-more"><span class="tier-summary-label">Interested, by match:</span>${groups}</div>` : ""}`;
 }
 
 function renderProfile() {
@@ -669,7 +691,6 @@ function buildProfile(el) {
       <div class="vector-map-header">
         <div class="vector-map-title">
           <span>Taste Map</span>
-          <span class="vector-map-sub">2D Vector Space</span>
         </div>
         <div class="vector-map-legend">
           <div class="vector-view-pills" data-canvas="profile-vector-canvas">
@@ -2514,8 +2535,8 @@ const LINKS_TEXT = {
   true: "<b>Crowd links: on.</b> The formula also uses the shows that the fans of your shows recommend on AniList.",
   false: "<b>Crowd links: off.</b> The formula uses only your ratings, and the tags and the text of the shows.",
 };
-// The match of a show is not a part of the formula of the list. The note above the list says so,
-// because a list with the crowd links can have a show with a lower match near its top.
+// The match of a show is not a part of the formula of the list. The tooltip "How this works" says
+// so, because a list with the crowd links can have a show with a lower match near its top.
 const MATCH_TEXT = "<b>Match:</b> how near a show is to your taste. Your predicted tier has a small part in it. The match does not use the formula, thus the list is not always in the order of the match.";
 let recsLinks = true;
 try {
@@ -2560,15 +2581,27 @@ function renderRecsSeedBar() {
   }
 }
 
-// Tell above the list which formula made it
-function renderRecsFormulaNote(applied, links) {
-  const note = $("#recs-formula-note");
-  const formula = FORMULAS[applied];
-  if (!note || !formula) return;
-  note.dataset.formula = applied;
-  note.dataset.links = applied === "seed" ? "" : String(links);
-  note.innerHTML = `<b>Formula: ${formula.name}.</b> ${formula.text}${applied === "seed" ? "" : ` ${LINKS_TEXT[links]} ${MATCH_TEXT}`}`;
+// The formula that made the list on the page. The tooltip of the button "How this works" tells it.
+let recsApplied = { formula: "usual", links: true };
+
+function setRecsApplied(applied, links) {
+  if (!FORMULAS[applied]) return;
+  recsApplied = { formula: applied, links };
+  const btn = $("#recs-how-btn");
+  if (!btn) return;
+  btn.dataset.formula = applied;
+  btn.dataset.links = applied === "seed" ? "" : String(links);
 }
+
+TIP_CONTENT.recs = () => {
+  const formula = FORMULAS[recsApplied.formula];
+  const parts = [`<p><b>${formula.name}.</b> ${formula.text}</p>`];
+  if (recsApplied.formula !== "seed") {
+    parts.push(`<p>${LINKS_TEXT[recsApplied.links]}</p>`, `<p>${MATCH_TEXT}</p>`,
+      "<p>The button <b>How the list is made</b>, above the map, shows each step on the map.</p>");
+  }
+  return `<div class="tip-text">${parts.join("")}</div>`;
+};
 
 function paintRecsFormulaPills() {
   document.querySelectorAll("#recs-formula-pills .pill").forEach((btn) => {
@@ -2771,10 +2804,10 @@ async function recs() {
   const request = ++recsRequest;
   const list = await (await fetch(`${base}&new_only=${!recsSequels}`)).json();
   // An older request that ends late must not replace the list of a newer request. Thus the
-  // note above the list always names the formula of the list that the user sees.
+  // tooltip "How this works" always names the formula of the list that the user sees.
   if (request !== recsRequest) return;
   rawRecs = list;
-  renderRecsFormulaNote(applied, appliedLinks);
+  setRecsApplied(applied, appliedLinks);
   renderRecsGrid();
   const ids = rawRecs.map((s) => s.id);
   const map = activeVectorMaps.get("recs-vector-canvas");
@@ -3795,16 +3828,63 @@ function initTierHelp() {
 // ---- Settings
 // Each setting is a choice between options. The first option is the default. The value of a
 // setting is an attribute of the root element (data-<key>), so that the style sheet can use it.
-// The browser keeps the values. To add a setting: add an entry to this list, and add its rules to
-// the style sheet. A setting that needs more than style rules has an `apply` function.
+// The browser keeps the values. To add a setting: add an entry to this list, with a picture for
+// each option, and add its rules to the style sheet. A setting that needs more than style rules
+// has an `apply` function.
+//
+// A setting has no text below its title. Its tooltip shows one picture for each option. The page
+// draws the pictures, thus they have the colors of the theme and the typefaces of the page.
 const SETTINGS_KEY = "rinrikun-settings";
+
+// The picture of a typeface option: a heading, the title of a show and a line of other text
+function fontPicture(kind, about) {
+  return `<div class="tip-picture tip-picture-font ${kind}" role="img" aria-label="${about}">
+      <span class="tpf-heading">Taste profile</span>
+      <span class="tpf-title" lang="ja">冴えない彼女の育てかた</span>
+      <span class="tpf-meta">2015 · Comedy, Romance</span>
+    </div>`;
+}
+
+// The picture of a petals option: the page header, with petals or without them
+function petalsPicture(on, about) {
+  // The position, the size and the angle of each petal
+  const petals = [[14, 14, 1, 20], [38, 42, 0.8, 110], [57, 9, 0.7, 200], [100, 44, 1, 60], [121, 16, 0.8, 300],
+    [141, 54, 0.9, 150], [129, 74, 0.6, 250], [22, 68, 0.7, 330]];
+  const shapes = on ? petals.map(([x, y, size, turn]) =>
+    `<path d="M0 0C5-1 9 2 10 7C4 8 0 5 0 0Z" transform="translate(${x} ${y}) rotate(${turn}) scale(${size})" fill="#f0a6ba" opacity="0.9"/>`).join("") : "";
+  const lobes = [0, 72, 144, 216, 288].map((turn) => `<circle cx="80" cy="18" r="7.5" transform="rotate(${turn} 80 26)"/>`).join("");
+  return `<svg class="tip-picture tip-picture-sky" viewBox="0 0 160 90" role="img" aria-label="${about}">
+      ${shapes}
+      <g fill="currentColor">${lobes}</g>
+      <text x="80" y="59" text-anchor="middle" font-size="13" font-weight="200" fill="currentColor" lang="ja">りんりくん</text>
+      <rect x="36" y="69" width="88" height="12" rx="6" fill="none" stroke="currentColor" stroke-opacity="0.28"/>
+    </svg>`;
+}
+
+// The picture of a match gradient option: posters on a map
+function gradientPicture(on, about) {
+  const colors = ["#d98a8a", "#8aa9d9", "#93c58d", "#d9b98a", "#b392c5", "#8ac5bf", "#c592ad", "#a9a9a9"];
+  let tiles = "";
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 7; col++) {
+      const place = `x="${8 + col * 21}" y="${7 + row * 26}" width="18" height="23" rx="2.5"`;
+      tiles += `<rect ${place} fill="${colors[(col * 3 + row * 5) % 8]}"/>`;
+      // With the gradient, a poster is darker if it is farther from the best match. The map
+      // makes a poster darker in the same way: with black above it.
+      const far = Math.hypot(col - 2, (row - 1) * 1.3);
+      if (on) tiles += `<rect ${place} fill="#000" opacity="${Math.min(1 - MATCH_DARK, far / 3.4).toFixed(2)}"/>`;
+    }
+  }
+  return `<svg class="tip-picture" viewBox="0 0 160 90" role="img" aria-label="${about}">${tiles}</svg>`;
+}
+
 const SETTINGS = [
   {
     key: "font",
     title: "Typeface",
     options: [
-      { value: "mixed", label: "Serif titles", text: "Titles and headings use Noto Serif JP. The other text uses Noto Sans JP." },
-      { value: "sans", label: "Noto Sans JP everywhere", text: "All text uses Noto Sans JP." },
+      { value: "mixed", label: "Serif titles", picture: () => fontPicture("serif", "Titles and headings in a serif typeface") },
+      { value: "sans", label: "Noto Sans JP everywhere", picture: () => fontPicture("sans", "All text in Noto Sans JP") },
     ],
     apply: applyFontSetting,
   },
@@ -3812,21 +3892,33 @@ const SETTINGS = [
     key: "petals",
     title: "Cherry blossom petals",
     options: [
-      { value: "on", label: "On", text: "Petals fall behind the page header." },
-      { value: "off", label: "Off", text: "The page header has no petals." },
+      { value: "on", label: "On", picture: () => petalsPicture(true, "Petals fall behind the page header") },
+      { value: "off", label: "Off", picture: () => petalsPicture(false, "A page header without petals") },
     ],
   },
   {
     key: "gradient",
     title: "Match gradient on the maps",
     options: [
-      { value: "off", label: "Off", text: "All posters on the maps have their full brightness." },
-      { value: "on", label: "On", text: "A poster on a map is brighter for a higher match: your best matches are bright, and the shows with a low match are dark. Each map also has a button for this setting." },
+      { value: "off", label: "Off", picture: () => gradientPicture(false, "All posters have their full brightness") },
+      { value: "on", label: "On", picture: () => gradientPicture(true, "A poster is brighter for a higher match") },
     ],
     apply: applyGradientSetting,
   },
 ];
 const settings = {};
+
+// The tooltip of a setting: one picture for each option, with a frame around the selected option
+TIP_CONTENT.setting = (el) => {
+  const setting = SETTINGS.find((x) => x.key === el.dataset.setting);
+  if (!setting) return "";
+  return `<div class="tip-previews">${setting.options.map((o) => `
+      <figure class="tip-preview${o.value === settings[setting.key] ? " current" : ""}">
+        ${o.picture()}
+        <figcaption>${esc(o.label)}</figcaption>
+      </figure>`).join("")}
+    </div>`;
+};
 
 // The page loads Noto Sans JP in the weights 400, 500 and 700. Titles and headings have the weight
 // 600, thus "Noto Sans JP everywhere" also needs this weight. The style sheet for it is in the page
@@ -3871,23 +3963,39 @@ function setSetting(key, value) {
 function renderSettings() {
   const list = $("#settings-list");
   if (!list) return;
+  // The tooltip of a setting that is open now. The new elements replace its element.
+  const open = tipTarget && tipTarget.dataset.tipRich === "setting" && list.contains(tipTarget)
+    ? { key: tipTarget.dataset.setting, part: tipTarget.classList.contains("info-dot") ? ".info-dot" : ".setting-options" }
+    : null;
+  // The option that has the keyboard focus now
+  const focused = list.contains(document.activeElement) ? document.activeElement.dataset : null;
   list.innerHTML = SETTINGS.map((setting) => {
     const current = setting.options.find((o) => o.value === settings[setting.key]);
     const pills = setting.options.map((o) => `
           <button class="pill ${o === current ? "active" : ""}" data-key="${setting.key}" data-value="${o.value}" aria-pressed="${o === current}">${esc(o.label)}</button>`).join("");
+    // The "i" and the options show the pictures of the options. A click on an option selects it.
     return `
       <div class="setting-row" data-setting="${setting.key}">
         <div class="setting-info">
-          <div class="setting-title">${esc(setting.title)}</div>
-          <div class="setting-text">${esc(current.text)}</div>
+          <span class="setting-title">${esc(setting.title)}</span><button type="button" class="info-dot" data-tip-rich="setting" data-setting="${setting.key}" aria-label="Show a picture of each option">i</button>
         </div>
-        <div class="filter-pills setting-options" role="group" aria-label="${esc(setting.title)}">${pills}
+        <div class="filter-pills setting-options" role="group" aria-label="${esc(setting.title)}" data-tip-rich="setting" data-setting="${setting.key}" data-tip-pass>${pills}
         </div>
       </div>`;
   }).join("");
   list.querySelectorAll(".pill").forEach((btn) => {
     btn.onclick = () => setSetting(btn.dataset.key, btn.dataset.value);
   });
+  if (focused && focused.key) {
+    const btn = list.querySelector(`.pill[data-key="${focused.key}"][data-value="${focused.value}"]`);
+    if (btn) btn.focus();
+  }
+  if (open) {
+    // Show the tooltip again, with the frame around the new selection
+    const el = list.querySelector(`.setting-row[data-setting="${open.key}"] ${open.part}`);
+    if (el) showTip(el);
+    else hideTip();
+  }
 }
 
 function initSettings() {
