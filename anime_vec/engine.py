@@ -30,10 +30,6 @@ LINK_WEIGHT = 0.5
 # weight 1.0. In the hidden franchise test this weight moved the S-tier and A-tier shows up.
 # The same shows as examples for the content score did not help.
 UNRATED_LINK_WEIGHT = 0.75
-# Weight of the similarity to the C-tier and D-tier shows, which decreases the hybrid score
-DISLIKE_WEIGHT = 0.5
-# Number of nearest disliked shows that give the dislike score of a candidate
-DISLIKED_K = 3
 # The tier model predicts the tier that the user will give to a show, as a number
 TIER_VALUES = {"S": 4.0, "A": 3.0, "B": 2.0, "C": 1.0, "D": 0.0}
 # Strength of the ridge regression of the tier model. A larger value gives a smoother model.
@@ -586,13 +582,19 @@ class Engine:
         If `links` is false, the score has no part from the crowd links.
 
         `stages` in the result has the score of the candidates after each part of the formula:
-        "content", "links", "dislikes" and "kind". A part that the formula does not use, or that
+        "content", "links", "tier" and "kind". A part that the formula does not use, or that
         changes no score, has no stage.
+
+        The score has no part for the similarity to the C-tier and D-tier shows of the user.
+        Until November 2026 it had one, and a test with 113 answers of the Discover deck showed
+        that it worked against the user: a show near these shows was more frequently a show that
+        the user wanted. The user selected these shows too, thus they are in the area of the
+        taste of the user. Without this part the formula predicted the answers better, and the
+        result of the hidden franchise test was equal or better. The taste model and the tier
+        model still learn from the low tiers.
 
         Return the scores and the data for the results.
         """
-        cand_M = self.eff_M[cand_indices]
-        cand_T = self.tag_M[cand_indices]
         cand_fr = self.row_fr[cand_indices]
         content = self._content(cand_indices)
         scores, best, liked, liked_w = content["scores"], content["best"], content["liked"], content["liked_w"]
@@ -608,24 +610,14 @@ class Engine:
             scores = scores + LINK_WEIGHT * _zscore(cand_links)
             stages.append(("links", scores.copy()))
 
-        # Shows that are similar to the C-tier and D-tier shows of the user, or to the shows that
-        # the user removed from the recommendations, get a lower score
-        disliked = [i for i in self.owned_idx if self.rows[i].get("tier") in ("C", "D")] + self._dismissed_rows()
-        if disliked:
-            ones = np.ones(len(disliked), dtype=np.float32)
-            bad_text, _, _ = _knn_score(cand_M, self.eff_M[disliked], ones, DISLIKED_K)
-            bad_tag, _, _ = _knn_score(cand_T, self.tag_M[disliked], ones, DISLIKED_K)
-            bad = 0.5 * _zscore(bad_text) + 0.5 * _zscore(bad_tag)
-            scores = scores - DISLIKE_WEIGHT * _zscore(bad)
-
         # A candidate that the tier model puts clearly below the other candidates gets a lower score.
         # A high prediction gives no bonus: in the hidden franchise test a bonus made the list worse,
         # and the penalty moved the S-tier and A-tier shows up.
         predicted = self._predicted_tier(cand_indices)
         low = np.maximum(0.0, -_zscore(predicted) - TIER_MARGIN)
         scores = scores - TIER_PENALTY * low
-        if disliked or low.any():
-            stages.append(("dislikes", scores.copy()))
+        if low.any():
+            stages.append(("tier", scores.copy()))
 
         # The "usual kinds" formula: a candidate of a kind that the library has many of moves up.
         # In the hidden franchise test this part moves the S-tier and A-tier shows up in the full
@@ -646,7 +638,7 @@ class Engine:
         positions in the points of get_vector_map, the best show first.
           catalog   All shows. This step has no points.
           new       The candidates: the shows that the list can have.
-          content, links, dislikes, kind
+          content, links, tier, kind
                     One step for each part of the formula. The shows that stay are the best
                     shows by the sum of the parts up to this step.
           list      The first k shows by the full formula.
@@ -666,9 +658,9 @@ class Engine:
                 and (self.franchise[r["id"]] in owned or self.entry_row[self.franchise[r["id"]]] == j)]
         point_of = {j: n for n, j in enumerate(j for j, r in enumerate(self.rows) if r["id"] not in self.duplicate_of)}
         liked, liked_w = self._liked()
-        disliked = [i for i in self.owned_idx if self.rows[i].get("tier") in ("C", "D")]
+        rated = [i for i in self.owned_idx if self.rows[i].get("tier") in TIER_VALUES]
         info = {"shows": len(self.owned_idx), "franchises": len(owned), "removed": len(self._refused_ids()),
-                "liked": len(liked) if self.owned_idx else 0, "disliked": len(disliked),
+                "liked": len(liked) if self.owned_idx else 0, "rated": len(rated),
                 "sources": len({int(self.row_fr[i]) for i in self._link_sources(liked, liked_w)[0]}) if self.owned_idx else 0}
         steps = [{"key": "catalog", "count": len(point_of), "points": None},
                  {"key": "new", "count": len(cand), "points": [point_of[j] for j in cand]}]
@@ -1231,9 +1223,10 @@ class Engine:
     def set_dismissed(self, show_id: str, dismissed: bool):
         """Remove a show from the recommendations, or put it back.
 
-        A removed show is never a recommendation. It also counts as a dislike: shows that are
-        similar to it get a lower score. A removed show has no answer of the Discover deck: to
-        remove a show replaces the answer, and to put a show back deletes the answer "not interested".
+        A removed show is never a recommendation. It is also an example of a show that the user
+        does not want, for the taste model and for the tier model: shows with the same tags get
+        a lower score. A removed show has no answer of the Discover deck: to remove a show
+        replaces the answer, and to put a show back deletes the answer "not interested".
         """
         if show_id not in self.by_id:
             raise KeyError(f"unknown show id {show_id}")

@@ -2804,11 +2804,9 @@ const STORY_STEPS = {
     name: "Fans of your shows",
     text: (step, info) => `AniList users who like your shows also recommend other shows. A show moves up if it has many of these links from your ${storyNumber(info.sources)} franchises.`,
   },
-  dislikes: {
-    name: "Your dislikes",
-    text: (step, info) => (info.disliked || info.removed
-      ? `A show moves down if it is like your ${storyNumber(info.disliked)} C and D shows${info.removed ? " or like a show that you removed" : ""}. `
-      : "") + "A show moves down if the model of your tiers predicts a low tier for it.",
+  tier: {
+    name: "Your tiers",
+    text: (step, info) => `A small model learns from the tags of your ${storyNumber(info.rated)} rated shows which tier you will give. A show moves down if the model predicts a low tier for it.`,
   },
   kind: {
     name: "Your usual kinds",

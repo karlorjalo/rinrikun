@@ -401,15 +401,19 @@ def test_hybrid_uses_the_user_recommendations(tmp_path):
     assert "linked_favorite" not in by_id["al:11"]
 
 
-def test_hybrid_moves_shows_like_the_disliked_shows_down(tmp_path):
-    # al:2 is owned and gets tier C. al:12 has the same embedding as al:2.
+def test_list_score_has_no_part_for_the_similarity_to_the_low_tiers(tmp_path):
+    # al:2 is owned and gets tier C. al:12 has the same embedding as al:2. The shows have no tags,
+    # thus the taste model cannot learn from the tier.
     e = _link_engine(tmp_path, extra=[("al:2", [0, 0, 1, 0], 1, [])])
     e.set_show_tier("al:1", "S")
-    before = [r["id"] for r in e.recommend(k=4, mode="hybrid")]
+    cand = [e.pos[i] for i in ("al:10", "al:11", "al:12", "al:13")]
+    owned = e.owned_franchises()
+    before = e._hybrid(cand, "all", owned)["scores"]
     e.set_show_tier("al:2", "C")
-    after = [r["id"] for r in e.recommend(k=4, mode="hybrid")]
-    assert after.index("al:12") > before.index("al:12") or after[-1] == "al:12"
-    assert after[-1] == "al:12"
+    after = e._hybrid(cand, "all", owned)
+    # A show that is like a C-tier show does not move down for this reason
+    assert np.allclose(before, after["scores"])
+    assert [key for key, _ in after["stages"]] == ["content", "links"]
 
 
 def test_new_franchise_appears_as_its_first_tv_season(tmp_path):
@@ -604,8 +608,7 @@ def test_tier_model_needs_enough_ratings(tmp_path):
 def test_tier_penalty_moves_a_low_prediction_down_and_gives_no_bonus(tmp_path, monkeypatch):
     import anime_vec.engine as engine_module
     e = _tier_engine(tmp_path, monkeypatch)
-    # Without the other terms that use the low tiers, only the tier penalty can change the order
-    monkeypatch.setattr(engine_module, "DISLIKE_WEIGHT", 0.0)
+    # Only the tier penalty is different between the two lists
     monkeypatch.setattr(engine_module, "TIER_PENALTY", 0.0)
     before = [r["id"] for r in e.recommend(k=4)]
     monkeypatch.setattr(engine_module, "TIER_PENALTY", 5.0)
@@ -646,16 +649,13 @@ def test_dismissed_show_is_not_recommended(tmp_path):
         e.set_dismissed("al:999", True)
 
 
-def test_dismissed_show_counts_as_a_dislike(tmp_path, monkeypatch):
-    import anime_vec.engine as engine_module
-    monkeypatch.setattr(engine_module, "DISLIKE_WEIGHT", 5.0)
+def test_dismissed_show_is_an_example_for_the_taste_model(tmp_path):
     e = _dismiss_engine(tmp_path)
-    before = [r["id"] for r in e.recommend(k=10)]
-    assert before.index("al:11") < before.index("al:12")
+    same_tags, one_tag = _taste_of(e, "al:11"), _taste_of(e, "al:12")
     e.set_dismissed("al:10", True)
-    after = [r["id"] for r in e.recommend(k=10)]
-    # al:11 is almost the same show as the removed al:10, thus it is below al:12 now
-    assert after.index("al:12") < after.index("al:11")
+    # al:11 has the two tags of the removed al:10, and al:12 has one of them
+    assert same_tags - _taste_of(e, "al:11") > one_tag - _taste_of(e, "al:12")
+    assert _taste_of(e, "al:11") < same_tags
 
 
 def test_dismissed_show_is_a_low_tier_example_for_the_tier_model(tmp_path, monkeypatch):
@@ -1371,7 +1371,7 @@ def test_steps_go_from_the_catalog_to_the_list(tmp_path):
     e = _steps_engine(tmp_path)
     out = e.recommendation_steps(k=3, kinds="usual")
     steps = out["steps"]
-    assert [s["key"] for s in steps] == ["catalog", "new", "content", "links", "dislikes", "kind", "list"]
+    assert [s["key"] for s in steps] == ["catalog", "new", "content", "links", "kind", "list"]
     counts = [s["count"] for s in steps]
     assert counts[0] == 34 and counts[1] == 30 and counts[-1] == 3
     assert counts == sorted(counts, reverse=True) and len(set(counts)) > 4
@@ -1382,17 +1382,21 @@ def test_steps_go_from_the_catalog_to_the_list(tmp_path):
     listed = [points[p]["id"] for p in steps[-1]["points"]]
     assert listed == [r["id"] for r in e.recommend(k=3, kinds="usual", new_only=True)]
     assert all(not points[p]["owned"] for s in steps[1:] for p in s["points"])
-    assert out["info"] == {"shows": 4, "franchises": 4, "removed": 0, "liked": 3, "disliked": 1, "sources": 3}
+    assert out["info"] == {"shows": 4, "franchises": 4, "removed": 0, "liked": 3, "rated": 4, "sources": 3}
 
 
-def test_steps_have_only_the_parts_of_the_formula(tmp_path):
+def test_steps_have_only_the_parts_of_the_formula(tmp_path, monkeypatch):
+    import anime_vec.engine as engine_module
     e = _steps_engine(tmp_path)
     keys = lambda **kw: [s["key"] for s in e.recommendation_steps(k=3, **kw)["steps"]]
-    assert keys(kinds="all") == ["catalog", "new", "content", "links", "dislikes", "list"]
-    assert keys(kinds="usual", links=False) == ["catalog", "new", "content", "dislikes", "kind", "list"]
-    # Without a low tier and without a removed show, the dislikes change no score
-    e.set_show_tier("al:4", "B")
+    # Four rated shows are too few for the tier model, thus the tier penalty changes no score
+    assert keys(kinds="all") == ["catalog", "new", "content", "links", "list"]
+    assert keys(kinds="usual", links=False) == ["catalog", "new", "content", "kind", "list"]
     assert keys(kinds="all", links=False) == ["catalog", "new", "content", "list"]
+    # With a tier model, the candidates with the tag of the C-tier show get the tier penalty
+    monkeypatch.setattr(engine_module, "TIER_MODEL_MIN_RATED", 3)
+    assert keys(kinds="all", links=False) == ["catalog", "new", "content", "tier", "list"]
+    assert keys(kinds="usual") == ["catalog", "new", "content", "links", "tier", "kind", "list"]
     with pytest.raises(ValueError):
         e.recommendation_steps(kinds="other")
 
