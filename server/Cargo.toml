@@ -16,3 +16,8 @@ tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "s
 tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.1", features = ["compression-gzip", "fs", "set-header"] }
 ureq = { version = "3.5.2", default-features = false, features = ["rustls"] }
+regex = "1.13.2"
+unicode-normalization = "0.1.26"
+sha1_smol = "1.0.1"
+ort = { version = "=2.0.0-rc.13" }
+tokenizers = { version = "0.22.2", default-features = false, features = ["fancy-regex"] }

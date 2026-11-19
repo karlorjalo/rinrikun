@@ -10,3 +10,4 @@ secrets.json
 .superpowers/
 scratch/
 idmap_cache/
+model_cache/

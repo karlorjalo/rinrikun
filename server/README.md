@@ -1,8 +1,9 @@
 # rinrikun server (Rust)
 
-The Rust version of the server. It reads the same database as the Python server and computes the
-same results. With `--write` it also changes the data of the user, as the Python server does. The
-Python server stays the live server until the switch.
+The Rust version of the server and of the build. It reads the same database as the Python server and
+computes the same results. With `--write` it also changes the data of the user, as the Python server
+does. `rinrikun build` is the weekly rebuild of `build.py`. The Python server stays the live server
+until the switch.
 
 ## Build
 
@@ -11,7 +12,52 @@ cargo build --release
 ```
 
 The program is `target/release/rinrikun.exe`. The PC of the live server has no Rust: build here,
-and copy the program.
+and copy the program to `server\target\release\rinrikun.exe` on the PC (the scripts look for it
+there). The build of the program downloads ONNX Runtime one time (the crate `ort` 2.0.0-rc.13: the
+newer versions need Rust 1.92) and links it into the program.
+
+## The weekly rebuild
+
+```sh
+rinrikun build [--root <project folder>] [--db <file>] [--refresh-anilist] [--pool-only]
+```
+
+The command has the steps of `build.py` (`src/build/`):
+
+1. The shows of the Jellyfin library (`secrets.json` in the project folder, or `JELLYFIN_API_KEY`
+   and `JELLYFIN_USER_ID`).
+2. The 5000 most popular anime of AniList, the anime of the id map of Fribb/anime-lists, and the
+   anime that the catalog points to. The answers stay in `anilist_cache/` and `idmap_cache/`, the
+   same files as the files of the Python build.
+3. The connection of the AniList rows to the library rows: the id map, then the titles (the ratio
+   of `difflib.SequenceMatcher`, with the same algorithm).
+4. The rows in the database. The tiers and the other data of the user stay.
+5. The embeddings of the rows whose text changed: EmbeddingGemma 2 (ONNX) on the CPU, with the
+   model files from the cache of Hugging Face (or a download to `model_cache/`). One text takes
+   about 0.2 seconds; a weekly build has a few texts.
+6. The map: t-SNE with the steps of sklearn, the grid of the close view, and the named areas.
+
+`--root` is the project folder (default: the folder of now); `--db` is the database (default:
+`anime_vec.db` in the project folder). `scripts\weekly_rebuild.ps1 -Builder rust` runs the command.
+
+The signature of the map (`layout_signature` in the table `meta`) is a hash of the ids of the rows
+and of the stored embedding bytes. The Python engine computes the same value, thus each program uses
+the map of the other, and a build without a change keeps the map.
+
+Compared with `build.py` on two copies of the dev database (21,240 shows):
+
+- The shows table was equal in all columns and in the types of the values, also after changes
+  (changed rows, deleted rows, rows without a hash, an old library row). The tables of the user
+  were equal.
+- The text hash of each row was equal, thus the two builds embed the same rows. The Rust
+  embeddings had the cosine 1.000000 to the embeddings of Python.
+- The map is a different t-SNE result, of the same quality: 34.7% of the 10 nearest neighbours of
+  each show are also its neighbours on the map (sklearn: 34.8%). The areas get other names.
+- The Rust build took 32 seconds with a new map (t-SNE: 21 seconds), the Python build 105 seconds.
+
+`rinrikun build-check <database> [--embed N] [--tsne]` reads a database and shows the rows whose
+text hash differs, the signature of the map, and with the options the cosine of N new embeddings to
+the stored embeddings and the quality of the stored map and of a new map.
 
 ## Run
 

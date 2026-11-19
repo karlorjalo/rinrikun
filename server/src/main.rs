@@ -1,11 +1,15 @@
 //! The rinrikun server in Rust. It reads the database of the Python server and computes the same
-//! results. With --write it also changes the data of the user, as the Python server does.
+//! results. With --write it also changes the data of the user, as the Python server does. The
+//! command `build` is the weekly rebuild of the catalog (build.py).
 //!
 //!   rinrikun serve <database> [--listen address]... [--root folder] [--web address] [--write]   the HTTP server
+//!   rinrikun build [--root folder] [--db file] [--refresh-anilist] [--pool-only]   the rebuild of the catalog
+//!   rinrikun build-check <database>   compare the text hashes and show the layout signature (reads only)
 //!   rinrikun reference <database> <out.json>   write the results of the engine as JSON
 
 mod anilist;
 mod api;
+mod build;
 mod changes;
 mod engine;
 mod frames;
@@ -20,9 +24,15 @@ fn main() {
     let result = match args.first().map(String::as_str) {
         Some("reference") => reference::run(&args[1..]),
         Some("serve") => server::run(&args[1..]),
+        Some("build") => build::run(&args[1..]),
+        Some("build-check") => build::check(&args[1..]),
         _ => {
-            eprintln!("usage: rinrikun serve <database> [--listen address]... [--root folder] [--web address] [--write]
-       rinrikun reference <database> <out.json>");
+            eprintln!(
+                "usage: rinrikun serve <database> [--listen address]... [--root folder] [--web address] [--write]
+       rinrikun build [--root folder] [--db file] [--refresh-anilist] [--pool-only]
+       rinrikun build-check <database>
+       rinrikun reference <database> <out.json>"
+            );
             std::process::exit(2);
         }
     };
