@@ -86,8 +86,8 @@ function card(r, why) {
 
   const quick = document.createElement("button");
   quick.className = "card-quick-seed";
-  quick.title = "Recommend like this";
-  quick.setAttribute("aria-label", "Recommend like this");
+  quick.title = "Use as seed";
+  quick.setAttribute("aria-label", "Use as seed");
   quick.innerHTML = '<i class="petal-mark"></i>';
   quick.onclick = (e) => {
     e.stopPropagation();
@@ -102,7 +102,7 @@ function card(r, why) {
 let currentModalShow = null;
 
 function formatOverview(text) {
-  if (!text) return '<p style="color:var(--muted);font-style:italic;">No synopsis available.</p>';
+  if (!text) return '<p style="color:var(--muted);font-style:italic;">No synopsis.</p>';
   return esc(text)
     .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
     .replace(/&lt;i&gt;/gi, "<i>")
@@ -333,14 +333,14 @@ async function openModal(r) {
   const watchedBtn = isLibrary
     ? ""
     : `<button class="btn-action btn-watched ${r.manual_watched ? 'active' : ''}" id="modal-toggle-watched" aria-pressed="${r.manual_watched ? 'true' : 'false'}">
-         ${r.manual_watched ? 'Watched' : '+ Add to watched'}
+         ${r.manual_watched ? 'Watched' : '+ Watched'}
        </button>`;
 
   // A show that the user does not own can go out of the recommendations
   const dismissBtn = r.owned
     ? ""
     : `<button class="btn-action btn-dismiss ${r.dismissed ? 'active' : ''}" id="modal-toggle-dismiss"
-         title="${r.dismissed ? 'Put this show back in the recommendations' : 'Remove this show from the recommendations. Shows like it get a lower score.'}">
+         title="${r.dismissed ? 'Put back in the recommendations' : 'Remove from the recommendations. Shows like it move down.'}">
          ${r.dismissed ? '✕ Not interested · Undo' : '✕ Not interested'}
        </button>`;
 
@@ -348,7 +348,7 @@ async function openModal(r) {
   const interestBtn = r.owned
     ? ""
     : `<button class="btn-action btn-interest ${r.interest === 1 ? 'active' : ''}" id="modal-toggle-interest" aria-pressed="${r.interest === 1}"
-         title="${r.interest === 1 ? 'Take this show off your watch list' : 'Put this show on your watch list. Shows like it get a higher score.'}">
+         title="${r.interest === 1 ? 'Take off the watch list' : 'Put on the watch list. Shows like it move up.'}">
          ${r.interest === 1 ? '♥ Interested · Undo' : '♥ Interested'}
        </button>`;
 
@@ -363,7 +363,7 @@ async function openModal(r) {
 
   const tierSection = `
     <div class="modal-tier-section">
-      <span class="modal-tier-label">Your tier:</span>
+      <span class="modal-tier-label">Tier:</span>
       <div class="modal-tier-pills">
         ${tierPills}
         ${clearTierBtn}
@@ -372,7 +372,7 @@ async function openModal(r) {
 
   modal.innerHTML = `
     <div class="modal-inner">
-      <button class="modal-close" onclick="closeModal()" aria-label="Close dialog">✕</button>
+      <button class="modal-close" onclick="closeModal()" aria-label="Close">✕</button>
       <div class="modal-head">
         <div class="modal-poster poster-box">${posterHtml}</div>
         <div class="modal-info">
@@ -383,7 +383,7 @@ async function openModal(r) {
           <div class="modal-score-row">${modalStatsHtml(r)}</div>
           <div class="modal-actions">
             <button class="btn-action primary" id="modal-find-sim">Find similar</button>
-            <button class="btn-action" id="modal-seed-rec">Recommend like this</button>
+            <button class="btn-action" id="modal-seed-rec" title="Recommend shows like this show">As seed</button>
             ${watchedBtn}
             ${interestBtn}${dismissBtn}
             ${anilistLink}
@@ -587,9 +587,9 @@ function renderRecResults() {
   const since = new Date(res.since + "T00:00:00").toLocaleDateString("en-GB", { year: "numeric", month: "short", day: "numeric" });
   const tiers = ["S", "A", "B", "C", "D"].filter((t) => res.tiers[t])
     .map((t) => `<span class="tier-summary-item"><span class="tier-pill tier-${t.toLowerCase()}">${t}</span> <span class="tier-summary-count">${res.tiers[t]}</span></span>`);
-  if (res.unrated) tiers.push(statItem(res.unrated, "without a tier"));
+  if (res.unrated) tiers.push(statItem(res.unrated, "unrated"));
   // The box has only the numbers. The text is in the tooltip of the "i".
-  let about = "The new franchises that the Recommendations tab showed you, and how many of them you added or removed later.";
+  let about = "New franchises that the lists showed you, and how many you added or removed later.";
   // The comparison of the two formulas has a use only after the user saw lists of the two
   const formulas = res.formulas || {};
   if (formulas["no links"] && formulas["no links"].shown && formulas.links) {
@@ -632,13 +632,13 @@ function renderInterestResults() {
   }).join("");
   // The box has only the numbers. The text is in the tooltip of the "i".
   let about = "Your answers in the Discover deck.";
-  if (groups) about += " The second row has the \"interested\" answers of all answers, for each group of the match. If the match is good, a group with a higher match has a larger part of \"interested\".";
-  if (groups && res.popular) about += ` This row counts only the cards from the ${Number(res.popular).toLocaleString("en-US")} most popular anime, which are the cards that the deck draws.`;
-  if (res.model) about += ` In a test, the taste model put an interested show above a not-interested show in ${Math.round(100 * res.model.auc)}% of the pairs. It did not know the answers of the two shows.`;
+  if (groups) about += " The second row has the \"interested\" answers of all answers, by match. With a good match, a higher group has a larger part.";
+  if (groups && res.popular) about += ` It counts only cards from the ${Number(res.popular).toLocaleString("en-US")} most popular anime.`;
+  if (res.model) about += ` The taste model puts an interested show above a not-interested show in ${Math.round(100 * res.model.auc)}% of the pairs, for answers that it does not know.`;
   box.innerHTML = `
     <div class="tier-summary-title"><span>Discover${infoDot(about)}</span></div>
     <div class="tier-summary-row">${statItem(res.answers, "answers")}${statItem(res.interested, "interested")}${statItem(res.not_interested, "not interested")}</div>
-    ${groups ? `<div class="tier-summary-row tier-summary-more"><span class="tier-summary-label">Interested, by match:</span>${groups}</div>` : ""}`;
+    ${groups ? `<div class="tier-summary-row tier-summary-more"><span class="tier-summary-label">By match:</span>${groups}</div>` : ""}`;
 }
 
 function renderProfile() {
@@ -654,9 +654,9 @@ function renderProfile() {
   // A show in the library is not always a show that the user watched. Thus the text does not say "watched" for it.
   const inLibrary = p.library_count ?? p.owned_count;
   const marked = p.owned_count - inLibrary;
-  const counts = [`${inLibrary} in your library`];
-  if (marked > 0) counts.push(`${marked} marked as watched`);
-  counts.push(`${p.total_count.toLocaleString()} in the catalog`);
+  const counts = [`${inLibrary} in library`];
+  if (marked > 0) counts.push(`${marked} watched`);
+  counts.push(`${p.total_count.toLocaleString()} in catalog`);
   $("#profile-counts").textContent = counts.join(" · ");
   el.querySelectorAll("[data-tier-count]").forEach((node) => {
     node.textContent = tiers[node.dataset.tierCount] || 0;
@@ -677,7 +677,7 @@ function buildProfile(el) {
       </div>
       <div class="tier-summary-box">
         <div class="tier-summary-title">
-          <span>Your ratings</span>
+          <span>Ratings</span>
         </div>
         <div class="tier-summary-row">${["S", "A", "B", "C", "D"].map(tierItem).join("")}
           <div class="tier-summary-item" style="color:var(--muted);"><span style="font-size:11.5px;">Unrated:</span> <span class="tier-summary-count" data-tier-count="unrated"></span></div>
@@ -826,7 +826,7 @@ function setGradientState(state) {
   document.querySelectorAll(".vector-gradient-toggle").forEach((btn) => {
     btn.title = state === "error"
       ? "The server did not give the match values. Click two times to try again."
-      : "The brightness of a poster shows its match. A show with a high match is bright.";
+      : "A brighter poster has a higher match.";
   });
 }
 
@@ -1172,7 +1172,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   if (!hintPill) {
     hintPill = document.createElement("div");
     hintPill.className = "vector-hint-pill";
-    hintPill.textContent = "Scroll to zoom · Drag to pan · Zoom in to see the posters";
+    hintPill.textContent = "Scroll to zoom · Drag to pan";
     box.appendChild(hintPill);
   }
 
@@ -1220,7 +1220,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "pill vector-gradient-toggle";
-    btn.title = "The brightness of a poster shows its match. A show with a high match is bright.";
+    btn.title = "A brighter poster has a higher match.";
     btn.innerHTML = '<i class="gradient-swatch" aria-hidden="true"></i>Match gradient';
     btn.classList.toggle("active", gradientOn());
     btn.setAttribute("aria-pressed", String(gradientOn()));
@@ -1239,7 +1239,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     searchBox.className = "vector-search";
     searchBox.innerHTML = `
       <svg class="vector-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-      <input class="vector-search-input" type="text" placeholder="Find a show on the map" aria-label="Find a show on the map" autocomplete="off" spellcheck="false" enterkeyhint="search">
+      <input class="vector-search-input" type="text" placeholder="Find a show" aria-label="Find a show on the map" autocomplete="off" spellcheck="false" enterkeyhint="search">
       <span class="vector-search-count" aria-live="polite" hidden></span>
       <button class="vector-search-btn vector-search-prev" type="button" title="Go to the show before (Shift+Enter)" aria-label="Go to the show before" hidden>‹</button>
       <button class="vector-search-btn vector-search-next" type="button" title="Go to the next show (Enter)" aria-label="Go to the next show" hidden>›</button>
@@ -2290,7 +2290,7 @@ async function initSearch() {
     qlist.innerHTML = "";
     searchSelectedIndex = -1;
     if (!matches.length) {
-      qlist.innerHTML = `<div class="qitem" style="color:var(--muted);cursor:default;">No titles found</div>`;
+      qlist.innerHTML = `<div class="qitem" style="color:var(--muted);cursor:default;">No titles</div>`;
       qlist.hidden = false;
       return;
     }
@@ -2427,7 +2427,7 @@ function renderSimilarGrid() {
   });
 
   if (!filtered.length) {
-    box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 0;">No similar titles match the selected filter.</p>`;
+    box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 0;">No match for this filter.</p>`;
     return;
   }
 
@@ -2467,7 +2467,7 @@ async function runSimilar(t) {
         <div class="seed-actions" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <div class="filter-pills" id="similar-filter-pills">
             <button class="pill ${similarFilter === 'all' ? 'active' : ''}" data-filter="all">All (${rawSimilar.length})</button>
-            <button class="pill ${similarFilter === 'unowned' ? 'active' : ''}" data-filter="unowned">Unowned only</button>
+            <button class="pill ${similarFilter === 'unowned' ? 'active' : ''}" data-filter="unowned">Unowned</button>
           </div>
           <div class="filter-pills" id="similar-limit-pills">
             <button class="pill ${similarCount === 24 ? 'active' : ''}" data-count="24">24</button>
@@ -2524,16 +2524,16 @@ let recsSequels = false;
 const FORMULA_KEY = "rinrikun-formula";
 const FORMULAS = {
   usual: {
-    name: "My usual kinds",
-    text: "Shows of the kinds that your library has many of move up. The kind of a show is its year, its format and its length. A show with an AniList score below 6.5 moves down. A higher AniList score gives no advantage.",
+    name: "Usual kinds",
+    text: "The kinds that your library has many of move up. A kind is the year, the format and the length. An AniList score below 6.5 moves a show down. A higher score gives no advantage.",
   },
   all: {
     name: "All kinds",
-    text: "The year, the format, the length and the AniList score of a show do not change its position.",
+    text: "The year, the format, the length and the AniList score change nothing.",
   },
   seed: {
-    name: "Similar to the seed",
-    text: "The list has the shows that are most similar to the seed show. The formula and the crowd links have no effect on this list.",
+    name: "Near the seed",
+    text: "The shows that are most similar to the seed. The formula and the crowd links have no effect.",
   },
 };
 let recsKinds = "usual";
@@ -2548,7 +2548,7 @@ const LINKS_TEXT = {
   true: "<b>Crowd links: on.</b> The formula also uses the shows that the fans of your shows recommend on AniList.",
   false: "<b>Crowd links: off.</b> The formula uses only your ratings, and the tags and the text of the shows.",
 };
-// The match of a show is not a part of the formula of the list. The tooltip "How this works" says
+// The match of a show is not a part of the formula of the list. The tooltip of the button "About" says
 // so, because a list with the crowd links can have a show with a lower match near its top.
 const MATCH_TEXT = "<b>Match:</b> how near a show is to your taste. Your predicted tier has a small part in it. The match does not use the formula, thus the list is not always in the order of the match.";
 let recsLinks = true;
@@ -2583,7 +2583,7 @@ function renderRecsSeedBar() {
           <span class="seed-badge">Seed</span>
           <span class="seed-text"><b>${esc(main)}</b></span>
         </div>
-        <button id="recenter-btn" class="btn-action">Clear seed ✕</button>
+        <button id="recenter-btn" class="btn-action">✕ Clear</button>
       </div>`;
     $("#recenter-btn").onclick = () => {
       seed = null;
@@ -2594,7 +2594,7 @@ function renderRecsSeedBar() {
   }
 }
 
-// The formula that made the list on the page. The tooltip of the button "How this works" tells it.
+// The formula that made the list on the page. The tooltip of the button "About" tells it.
 let recsApplied = { formula: "usual", links: true };
 
 function setRecsApplied(applied, links) {
@@ -2611,7 +2611,7 @@ TIP_CONTENT.recs = () => {
   const parts = [`<p><b>${formula.name}.</b> ${formula.text}</p>`];
   if (recsApplied.formula !== "seed") {
     parts.push(`<p>${LINKS_TEXT[recsApplied.links]}</p>`, `<p>${MATCH_TEXT}</p>`,
-      "<p>The button <b>How the list is made</b>, above the map, shows each step on the map.</p>");
+      "<p>The button <b>Steps</b>, above the map, shows each step.</p>");
   }
   return `<div class="tip-text">${parts.join("")}</div>`;
 };
@@ -2758,7 +2758,7 @@ function renderRecsUndoBar() {
   const { main } = displayTitles(lastDismissed.show);
   bar.innerHTML = `
     <div class="recs-undo-card">
-      <span>Removed from your recommendations: <b>${esc(main)}</b>. Shows like it get a lower score.</span>
+      <span>Removed: <b>${esc(main)}</b></span>
       <button id="recs-undo-btn" class="btn-action">Undo</button>
     </div>`;
   $("#recs-undo-btn").onclick = () => restoreRecommendation(lastDismissed.show);
@@ -2783,7 +2783,7 @@ function renderRecsGrid() {
   });
 
   if (!filtered.length) {
-    box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 0;">No recommendations match the selected filters. Try lowering the score threshold or selecting All Formats.</p>`;
+    box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 0;">No match for these filters.</p>`;
     return;
   }
 
@@ -2791,7 +2791,7 @@ function renderRecsGrid() {
     const el = card(r);
     const dismiss = document.createElement("button");
     dismiss.className = "card-dismiss";
-    dismiss.title = "Not interested: remove from the recommendations";
+    dismiss.title = "Not interested";
     dismiss.setAttribute("aria-label", "Not interested");
     dismiss.textContent = "✕";
     dismiss.onclick = (e) => {
@@ -2817,7 +2817,7 @@ async function recs() {
   const request = ++recsRequest;
   const list = await (await fetch(`${base}&new_only=${!recsSequels}`)).json();
   // An older request that ends late must not replace the list of a newer request. Thus the
-  // tooltip "How this works" always names the formula of the list that the user sees.
+  // tooltip of the button "About" always names the formula of the list that the user sees.
   if (request !== recsRequest) return;
   rawRecs = list;
   setRecsApplied(applied, appliedLinks);
@@ -2847,33 +2847,33 @@ const STORY_PANEL_SPACE = 288;
 const storyNumber = (value) => Number(value).toLocaleString("en-US");
 const STORY_STEPS = {
   catalog: {
-    name: "The catalog",
+    name: "Catalog",
     text: (step) => `Each dot is one show. The catalog has ${storyNumber(step.count)} shows.`,
   },
   new: {
-    name: "New for you",
+    name: "New",
     text: (step, info) => `The ${storyNumber(info.shows)} shows that you have go out, with the other shows of their ${storyNumber(info.franchises)} franchises. `
       + `Shows that are not released go out too${info.removed ? `, and the ${storyNumber(info.removed)} shows that you removed` : ""}. One show stays for each franchise.`,
   },
   content: {
-    name: "Your taste",
+    name: "Taste",
     text: (step, info) => `The formula learns from the tags and the text of your ${storyNumber(info.liked)} liked shows. `
       + "A show stays if it is like some of them, or if it has what they have and the catalog does not have.",
   },
   links: {
-    name: "Fans of your shows",
+    name: "Crowd links",
     text: (step, info) => `AniList users who like your shows also recommend other shows. A show moves up if it has many of these links from your ${storyNumber(info.sources)} franchises.`,
   },
   tier: {
-    name: "Your tiers",
+    name: "Tiers",
     text: (step, info) => `A small model learns from the tags of your ${storyNumber(info.rated)} rated shows which tier you will give. A show moves down if the model predicts a low tier for it.`,
   },
   kind: {
-    name: "Your usual kinds",
+    name: "Usual kinds",
     text: () => "A show moves up if its year, its format and its length are usual for your library.",
   },
   list: {
-    name: "Your list",
+    name: "List",
     text: (step) => `The formula adds all the parts. The ${storyNumber(step.count)} best shows are your list${recsVariety ? ", with more variety" : ""}.`,
   },
 };
@@ -2993,14 +2993,14 @@ function renderStoryPanel() {
   }).join("");
   st.panel.innerHTML = `
     <div class="story-head">
-      <span class="story-title">How the list is made</span>
+      <span class="story-title">List steps</span>
       <span class="story-progress"></span>
       <button type="button" class="story-close" aria-label="Close" title="Close">✕</button>
     </div>
     <div class="story-rows">${rows}</div>
     <p class="story-text" aria-live="polite"></p>
     <div class="story-controls"><button type="button" class="pill story-play"></button></div>
-    <p class="story-note">Each step keeps the best shows by the score up to that step. A later step can bring a show back.</p>`;
+    <p class="story-note">Each step keeps the best shows so far. A later step can bring a show back.</p>`;
   st.panel.hidden = false;
   st.panel.querySelector(".story-close").onclick = closeStory;
   st.panel.querySelectorAll(".story-row").forEach((row) => {
@@ -3037,7 +3037,7 @@ function paintStoryPanel() {
   st.panel.querySelector(".story-progress").textContent = `${st.index + 1} / ${st.steps.length}`;
   st.panel.querySelector(".story-text").textContent = STORY_STEPS[step.key].text(step, st.info);
   const ended = st.index === st.steps.length - 1;
-  st.panel.querySelector(".story-play").textContent = st.playing ? "⏸ Pause" : ended ? "▶ Play again" : "▶ Play";
+  st.panel.querySelector(".story-play").textContent = st.playing ? "⏸ Pause" : ended ? "▶ Replay" : "▶ Play";
   // The state of the story, for the tests of the interface
   st.panel.dataset.step = step.key;
   st.panel.dataset.playing = String(st.playing);
@@ -3193,7 +3193,7 @@ function paintDeckFrames() {
   }
   const note = (text) => { box.innerHTML = `<p class="deck-frames-note">${text}</p>`; };
   if (!pictures) {
-    if (pictureMisses.has(show.id)) note("The frames of this show did not load.");
+    if (pictureMisses.has(show.id)) note("Frames did not load.");
     else box.innerHTML = '<div class="deck-frame empty"></div>'.repeat(3);
     return;
   }
@@ -3201,14 +3201,14 @@ function paintDeckFrames() {
   if (!frames.length) {
     if (pictures.banner) {
       box.innerHTML = `<div class="deck-banner"><img src="${esc(pictures.banner)}" alt="Banner of the show" referrerpolicy="no-referrer"></div>`;
-      box.querySelector("img").onerror = () => note("AniList has no frames of this show.");
+      box.querySelector("img").onerror = () => note("No frames.");
     } else {
-      note("AniList has no frames of this show.");
+      note("No frames.");
     }
     return;
   }
   box.innerHTML = frames.map((frame, n) => `
-    <button type="button" class="deck-frame" data-frame="${n}" title="${esc(frame.label)}: show this frame larger">
+    <button type="button" class="deck-frame" data-frame="${n}" title="${esc(frame.label)}: enlarge">
       <img src="${esc(frame.small)}" alt="${esc(frame.label)}: a frame of the show" referrerpolicy="no-referrer" decoding="async">
       <span class="deck-frame-label">${esc(frame.label)}</span>
     </button>`).join("");
@@ -3318,7 +3318,7 @@ async function loadReviewQueue() {
     if (!Array.isArray(res)) {
       console.error("Failed to load review queue:", res);
       const wrap = $("#deck-wrap");
-      if (wrap) wrap.innerHTML = `<p style="text-align:center;color:var(--muted);padding:40px 0;">Failed to load review queue. Please ensure the server is updated and running.</p>`;
+      if (wrap) wrap.innerHTML = `<p style="text-align:center;color:var(--muted);padding:40px 0;">The queue did not load. Is the server running?</p>`;
       return;
     }
     reviewQueue = res;
@@ -3371,7 +3371,7 @@ function renderDeckCard() {
   if (reviewFilter === "discover" && reviewIndex >= reviewQueue.length) {
     wrap.innerHTML = `
       <div class="deck-card" style="align-items:center;justify-content:center;text-align:center;padding:48px 24px;">
-        <p style="color:var(--muted);font-size:14px;margin:0;">${discoverLoading ? "Getting shows…" : "The Discover deck has no more shows."}</p>
+        <p style="color:var(--muted);font-size:14px;margin:0;">${discoverLoading ? "Loading…" : "No more shows."}</p>
       </div>`;
     updateActiveTierButton(null);
     return;
@@ -3384,13 +3384,13 @@ function renderDeckCard() {
           ${vnWindow(reviewFilter === "unrated"
             ? "あら、もう全部に評価をつけたの？ 倫理君にしては仕事が早いじゃない。"
             : "これで最後よ。お疲れさま、倫理君。")}
-          <h3 style="font-family:var(--serif);font-size:20px;margin:0 0 8px;">All caught up</h3>
+          <h3 style="font-family:var(--serif);font-size:20px;margin:0 0 8px;">All done</h3>
           <p style="color:var(--muted);font-size:14px;margin:0 0 20px;">
-            ${reviewFilter === "unrated" ? "All your shows have a tier." : "You have reached the end of the review queue."}
+            ${reviewFilter === "unrated" ? "Every show has a tier." : "End of the queue."}
           </p>
           <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
-            ${reviewFilter === "unrated" ? '<button class="btn-action" id="deck-review-all-btn">Review all your shows</button>' : ''}
-            <button class="btn-action primary" id="deck-view-profile-btn">View taste profile</button>
+            ${reviewFilter === "unrated" ? '<button class="btn-action" id="deck-review-all-btn">Review all</button>' : ''}
+            <button class="btn-action primary" id="deck-view-profile-btn">Profile</button>
           </div>
         </div>
       </div>`;
@@ -3438,7 +3438,7 @@ function renderDeckCard() {
       </div>
       <div class="deck-info">
         <div class="deck-meta-top">
-          <span>${reviewFilter === "discover" ? "You do not have this show" : show.source === "library" ? "Local library" : "Watched"}</span>
+          <span>${reviewFilter === "discover" ? "New" : show.source === "library" ? "Library" : "Watched"}</span>
           <div style="display:flex;align-items:center;gap:6px;">
             ${tierBadge}
             ${reviewFilter === "discover" ? "" : `<span style="font-size:11.5px;color:var(--muted);">${reviewIndex + 1} / ${reviewQueue.length}</span>`}
@@ -3586,8 +3586,8 @@ function paintDeckControls() {
   if (hint) {
     hint.hidden = !discover;
     hint.textContent = discoverSeen
-      ? "You saw this show: give it a tier, or press Skip for no tier. Esc goes back."
-      : "Keys: N not interested · I interested · W seen it · Space skip · Backspace undo";
+      ? "Give a tier, or Skip for none. Esc goes back."
+      : "N no · I yes · W seen · Space skip · Backspace undo";
   }
   if ($("#deck-skip")) $("#deck-skip").title = discover ? "Space" : "Space or →";
   if ($("#deck-undo")) $("#deck-undo").title = discover ? "Backspace" : "Backspace or ←";
@@ -3751,7 +3751,7 @@ function renderWatchList() {
   $("#watch-total").textContent = `${count} ${count === 1 ? "show" : "shows"}`;
   const list = $("#watch-list");
   if (!watchList.length) {
-    list.innerHTML = '<li class="watch-empty">Your watch list is empty. Answer "Interested" for a show that you want to watch.</li>';
+    list.innerHTML = '<li class="watch-empty">Empty. Answer "Interested" to add a show.</li>';
     return;
   }
   list.innerHTML = watchList.map((show) => {
@@ -3766,7 +3766,7 @@ function renderWatchList() {
       : "";
     return `
       <li class="watch-row${gone ? " gone" : ""}" data-id="${esc(show.id)}">
-        <button type="button" class="watch-open" title="Show the details">
+        <button type="button" class="watch-open" title="Details">
           <span class="watch-poster">${poster}</span>
           <span class="watch-text">
             <span class="watch-title">${esc(main)}</span>
@@ -3774,7 +3774,7 @@ function renderWatchList() {
             <span class="watch-meta">${meta.join(" · ")}</span>
           </span>
         </button>
-        <button type="button" class="watch-remove" title="${gone ? "Put this show back on the watch list" : "Take this show off the watch list"}"
+        <button type="button" class="watch-remove" title="${gone ? "Put back" : "Remove"}"
           aria-label="${gone ? "Put" : "Take"} ${esc(main)} ${gone ? "back on" : "off"} the watch list">${gone ? "Undo" : "✕"}</button>
       </li>`;
   }).join("");
@@ -4061,23 +4061,23 @@ function renderRatingsGrid() {
     if (ratingsSource === "dismissed" && ratingsTierFilter === "all") {
       box.innerHTML = `<div style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 20px;">
           ${vnWindow("切り捨てた作品はまだ一つもないのね。優しいのか、優柔不断なのか……。")}
-          <p style="margin:0;">No removed recommendations. In the Recommendations tab, click ✕ on a show that you do not want.</p></div>`;
+          <p style="margin:0;">Nothing removed. Use ✕ on a recommendation.</p></div>`;
     } else if (ratingsSource === "manual" && ratingsTierFilter === "all") {
       box.innerHTML = `<div style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 20px;">
           ${vnWindow("ライブラリの外で観た作品があるなら、正直に白状なさい。")}
-          <p style="margin:0;">No manually added shows yet. When you watch a show outside your local library, find it and click "+ Add to watched".</p></div>`;
+          <p style="margin:0;">Nothing added by hand. Use "+ Watched" on a show.</p></div>`;
     } else if (!ratedShows.length) {
       box.innerHTML = `
         <div style="grid-column:1/-1;text-align:center;padding:48px 20px;color:var(--muted);">
           ${vnWindow("まだ何も評価していないのね。話はそれからよ、倫理君。")}
           <h3 style="font-family:var(--serif);font-size:18px;margin:0 0 6px;color:var(--text);">No ratings yet</h3>
-          <p style="font-size:13.5px;margin:0 0 16px;">Head over to the Review deck or click any show to assign a tier.</p>
-          <button class="btn-action primary" id="ratings-go-review">Go to Review</button>
+          <p style="font-size:13.5px;margin:0 0 16px;">Give a tier in Review, or on any show.</p>
+          <button class="btn-action primary" id="ratings-go-review">Review</button>
         </div>`;
       const btn = $("#ratings-go-review");
       if (btn) btn.onclick = () => $('[data-tab="review"]').click();
     } else {
-      box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 0;">No shows rated in Tier ${esc(ratingsTierFilter)}.</p>`;
+      box.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 0;">No shows in tier ${esc(ratingsTierFilter)}.</p>`;
     }
     return;
   }
@@ -4268,25 +4268,25 @@ const SETTINGS = [
     key: "font",
     title: "Typeface",
     options: [
-      { value: "mixed", label: "Serif titles", picture: () => fontPicture("serif", "Titles and headings in a serif typeface") },
-      { value: "sans", label: "Noto Sans JP everywhere", picture: () => fontPicture("sans", "All text in Noto Sans JP") },
+      { value: "mixed", label: "Serif titles", picture: () => fontPicture("serif", "Serif headings") },
+      { value: "sans", label: "Sans only", picture: () => fontPicture("sans", "Noto Sans JP only") },
     ],
     apply: applyFontSetting,
   },
   {
     key: "petals",
-    title: "Cherry blossom petals",
+    title: "Petals",
     options: [
-      { value: "on", label: "On", picture: () => petalsPicture(true, "Petals fall behind the page header") },
-      { value: "off", label: "Off", picture: () => petalsPicture(false, "A page header without petals") },
+      { value: "on", label: "On", picture: () => petalsPicture(true, "Petals fall") },
+      { value: "off", label: "Off", picture: () => petalsPicture(false, "No petals") },
     ],
   },
   {
     key: "gradient",
-    title: "Match gradient on the maps",
+    title: "Match gradient",
     options: [
-      { value: "off", label: "Off", picture: () => gradientPicture(false, "All posters have their full brightness") },
-      { value: "on", label: "On", picture: () => gradientPicture(true, "A poster is brighter for a higher match") },
+      { value: "off", label: "Off", picture: () => gradientPicture(false, "Full brightness") },
+      { value: "on", label: "On", picture: () => gradientPicture(true, "Brighter for a higher match") },
     ],
     apply: applyGradientSetting,
   },

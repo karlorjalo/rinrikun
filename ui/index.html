@@ -71,8 +71,8 @@
         <div class="deck-progress" id="deck-progress">0 rated</div>
       </div>
       <div class="deck-filter-row">
-        <button class="pill active" id="deck-filter-unrated" data-filter="unrated">Unrated only</button>
-        <button class="pill" id="deck-filter-all" data-filter="all">All your shows</button>
+        <button class="pill active" id="deck-filter-unrated" data-filter="unrated">Unrated</button>
+        <button class="pill" id="deck-filter-all" data-filter="all">All</button>
       </div>
     </div>
 
@@ -136,7 +136,7 @@
           <span class="filter-label">Show:</span>
           <div class="filter-pills" id="ratings-source-pills">
             <button class="pill active" data-source="rated">Rated</button>
-            <button class="pill" data-source="manual" title="Shows that you marked as watched and that are not in the library">Manually added <span class="pill-count" id="count-manual">0</span></button>
+            <button class="pill" data-source="manual" title="Shows that you marked as watched and that are not in the library">Manual <span class="pill-count" id="count-manual">0</span></button>
             <button class="pill" data-source="dismissed" title="Shows that you removed from the recommendations">Not interested <span class="pill-count" id="count-dismissed">0</span></button>
           </div>
         </div>
@@ -158,7 +158,7 @@
     <div class="search-wrap">
       <div class="search-bar">
         <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
-        <input id="q" placeholder="Search by title to find similar shows…" autocomplete="off" spellcheck="false">
+        <input id="q" placeholder="Search a title…" autocomplete="off" spellcheck="false">
         <button id="q-clear" class="search-clear" aria-label="Clear search" hidden>✕</button>
       </div>
       <div id="qlist" hidden></div>
@@ -175,7 +175,7 @@
       <div class="vector-map-header">
         <div class="vector-map-title">
           <span>Recommendation map</span>
-          <button type="button" class="pill story-btn" id="recs-story-btn" aria-pressed="false" title="An animation shows how the formula goes from the catalog to your list">▶ How the list is made</button>
+          <button type="button" class="pill story-btn" id="recs-story-btn" aria-pressed="false" title="An animation shows how the formula goes from the catalog to your list">▶ Steps</button>
         </div>
         <div class="vector-map-legend">
           <div class="vector-view-pills" data-canvas="recs-vector-canvas">
@@ -197,7 +197,7 @@
       <div class="filter-group" id="recs-formula-group">
         <span class="filter-label">Formula:</span>
         <div class="filter-pills" id="recs-formula-pills">
-          <button class="pill" data-kinds="usual" title="Shows of the kinds that your library has many of move up">My usual kinds</button>
+          <button class="pill" data-kinds="usual" title="Shows of the kinds that your library has many of move up">Usual kinds</button>
           <button class="pill" data-kinds="all" title="The kind of a show does not change its position">All kinds</button>
         </div>
       </div>
@@ -211,7 +211,7 @@
       <div class="filter-group">
         <div class="filter-pills" id="recs-switches">
           <button class="pill" id="recs-variety" aria-pressed="false" title="Give results that are less similar to each other">More variety</button>
-          <button class="pill" id="recs-sequels" aria-pressed="false" title="Also show sequels and side stories of shows that you own">Include sequels</button>
+          <button class="pill" id="recs-sequels" aria-pressed="false" title="Also show sequels and side stories of shows that you own">Sequels</button>
         </div>
       </div>
       <div class="filter-group">
@@ -232,7 +232,7 @@
           <button class="pill" data-score="8.0">★ 8.0+</button>
         </div>
       </div>
-      <button type="button" class="how-btn" id="recs-how-btn" data-tip-rich="recs"><span class="info-dot" aria-hidden="true">i</span>How this works</button>
+      <button type="button" class="how-btn" id="recs-how-btn" data-tip-rich="recs"><span class="info-dot" aria-hidden="true">i</span>About</button>
     </div>
     <div id="recs-undo-bar"></div>
     <div id="rresults" class="cards"></div>
