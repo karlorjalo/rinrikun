@@ -28,7 +28,8 @@
 		<span class="inline-block text-[10px] transition-transform duration-150 {tierHelp.open ? '' : '-rotate-90'}" aria-hidden="true">▼</span>
 		Which tier?
 	</Collapsible.Trigger>
-	<Collapsible.Content>
+	<!-- The card opens and closes with a fade and a change of its height ("fades-open" in layout.css) -->
+	<Collapsible.Content class="fades-open">
 		<dl class="mt-2.5 mb-0 grid gap-[7px]">
 			{#each QUESTIONS as [tier, question] (tier)}
 				<div class="flex items-baseline gap-2.5">

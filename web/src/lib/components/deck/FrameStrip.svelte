@@ -3,6 +3,7 @@
 	// The row has the same height in each state, thus the buttons below the card do not move when
 	// the pictures come. The row moves to the side when it has more frames than the card has
 	// space for. A click on a frame opens the viewer.
+	import { fadeOnLoad } from '#lib/motion.js';
 	import { isPlaceholder, pictures } from '#lib/state/pictures.svelte.js';
 	import FrameViewer from './FrameViewer.svelte';
 
@@ -60,6 +61,7 @@
 		{#each frames as frame, n (frame.small)}
 			<button type="button" class="{cell} cursor-zoom-in hover:border-rose focus-visible:border-rose" title="{frame.label}: enlarge" onclick={() => (viewing = n)}>
 				<img
+					use:fadeOnLoad
 					src={frame.small}
 					alt="{frame.label}: a frame of the show"
 					referrerpolicy="no-referrer"
@@ -75,7 +77,7 @@
 		{/each}
 	{:else if banner && !bannerFailed}
 		<div class="h-full min-w-0 flex-1 overflow-hidden rounded-md border bg-muted">
-			<img src={banner} alt="Banner of the show" referrerpolicy="no-referrer" class="block size-full object-cover" onerror={() => (bannerFailed = true)} />
+			<img use:fadeOnLoad src={banner} alt="Banner of the show" referrerpolicy="no-referrer" class="block size-full object-cover" onerror={() => (bannerFailed = true)} />
 		</div>
 	{:else}
 		<p class={note}>No frames.</p>

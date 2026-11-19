@@ -30,7 +30,7 @@
 		{side}
 		collisionPadding={8}
 		class={cn(
-			"z-[1000] w-fit rounded-md text-left font-sans text-[12px] leading-[1.55] font-normal",
+			"fades-fast z-[1000] w-fit rounded-md text-left font-sans text-[12px] leading-[1.55] font-normal",
 			rich
 				? "max-w-[min(372px,calc(100vw-16px))] border bg-card p-3 text-foreground shadow-float"
 				: "max-w-[290px] bg-foreground px-[11px] py-2 text-background shadow-control",

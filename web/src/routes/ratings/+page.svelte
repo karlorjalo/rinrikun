@@ -14,6 +14,7 @@
 	import VnWindow from '#lib/components/VnWindow.svelte';
 	import { TIERS, countOf, displayTitles } from '#lib/format.js';
 	import { FILTER_NAVIGATION, withQuery } from '#lib/links.js';
+	import { progressive } from '#lib/state/progressive.svelte.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -55,6 +56,8 @@
 				return displayTitles(a).main.localeCompare(displayTitles(b).main);
 			})
 	);
+	// After the change of a tab, the first cards come at once and the others in parts: see progressive.svelte.ts
+	const parts = progressive(() => shown.length);
 </script>
 
 <PageTitle title="Ratings">
@@ -97,7 +100,7 @@
 
 {#if shown.length}
 	<div class="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3.5 max-[680px]:grid-cols-[minmax(0,1fr)] max-[680px]:gap-2.5" data-testid="ratings-grid">
-		{#each shown as show (show.id)}
+		{#each shown.slice(0, parts.limit) as show (show.id)}
 			<ShowCard {show} ownedBadge={false} />
 		{/each}
 	</div>

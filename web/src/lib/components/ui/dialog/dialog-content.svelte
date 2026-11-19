@@ -1,6 +1,7 @@
 <script lang="ts">
 	// The window of a dialog: a card that floats above a dark page. It has no blur behind it and
-	// it does not grow or fade when it opens.
+	// it does not grow when it opens. The window and the dark page fade in and out ("fades" in
+	// layout.css): bits-ui removes them only after the fade.
 	import { Dialog as DialogPrimitive } from "bits-ui";
 	import { cn, type WithoutChildrenOrChild } from "#lib/utils.js";
 	import DialogOverlay from "./dialog-overlay.svelte";
@@ -30,7 +31,7 @@
 		bind:ref
 		data-slot="dialog-content"
 		class={cn(
-			"fixed top-1/2 left-1/2 z-[100] flex max-h-[85vh] w-[calc(100%-32px)] max-w-[640px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border bg-card text-foreground shadow-float outline-none",
+			"fades fixed top-1/2 left-1/2 z-[100] flex max-h-[85vh] w-[calc(100%-32px)] max-w-[640px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border bg-card text-foreground shadow-float outline-none",
 			className
 		)}
 		{...restProps}

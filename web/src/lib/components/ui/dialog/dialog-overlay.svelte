@@ -13,6 +13,6 @@
 	bind:ref
 	data-slot="dialog-overlay"
 	class={cn(
-			"fixed inset-0 z-[100] bg-[rgba(24,18,21,0.66)]", className)}
+			"fades fixed inset-0 z-[100] bg-[rgba(24,18,21,0.66)]", className)}
 	{...restProps}
 />

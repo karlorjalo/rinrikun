@@ -23,7 +23,7 @@
 		{sideOffset}
 		{align}
 		class={cn(
-			"z-[70] flex flex-col overflow-hidden rounded-lg border bg-card text-foreground shadow-float outline-hidden",
+			"fades z-[70] flex flex-col overflow-hidden rounded-lg border bg-card text-foreground shadow-float outline-hidden",
 			className
 		)}
 		{...restProps}

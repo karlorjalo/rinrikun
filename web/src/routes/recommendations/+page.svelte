@@ -22,6 +22,7 @@
 	import type { MapController } from '#lib/map/engine.js';
 	import { FORMULA_KEY, LINKS_KEY, loadPreference, savePreference } from '#lib/preferences.js';
 	import { library } from '#lib/state/library.svelte.js';
+	import { progress } from '#lib/state/progress.svelte.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -70,7 +71,7 @@
 	function setFormula(key: string, value: string) {
 		story?.close();
 		savePreference(key, value);
-		invalidate('rinrikun:formula');
+		progress.track(invalidate('rinrikun:formula'));
 	}
 
 	// A new list: the story of the list is for the list that the page showed
@@ -84,7 +85,7 @@
 		// formula: get the list again.
 		const kinds: Kinds = loadPreference(FORMULA_KEY) === 'all' ? 'all' : 'usual';
 		const links = loadPreference(LINKS_KEY) !== 'off';
-		if (kinds !== data.kinds || links !== data.links) invalidate('rinrikun:formula');
+		if (kinds !== data.kinds || links !== data.links) progress.track(invalidate('rinrikun:formula'));
 		wantsStory = !data.seed;
 		return () => story?.close();
 	});

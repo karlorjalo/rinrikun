@@ -2,9 +2,11 @@
 	// The card of a show in a list: the poster, the titles, the numbers and some tags. A click on
 	// the card opens the detail window. The button with the petal uses the show as the seed of a
 	// list of recommendations. A list of recommendations also has the button that removes the show.
+	// A card that comes into a list on the page fades in (the cards of a new page fade with it).
 	import { goto } from '$app/navigation';
 	import type { Show } from '#lib/api/types.js';
 	import { displayTitles, formatScore } from '#lib/format.js';
+	import { appear } from '#lib/motion.js';
 	import { detail } from '#lib/state/detail.svelte.js';
 	import { seedHref } from '#lib/links.js';
 	import Chip from './Chip.svelte';
@@ -42,6 +44,7 @@
 </script>
 
 <article
+	in:appear
 	class="group relative flex gap-3 rounded-md border bg-card p-3 transition-colors duration-150 hover:border-rose"
 	data-id={show.id}
 	data-testid="show-card"

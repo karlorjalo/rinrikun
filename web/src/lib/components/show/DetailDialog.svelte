@@ -14,7 +14,13 @@
 	import MatchText from './MatchText.svelte';
 	import Poster from './Poster.svelte';
 
-	const show = $derived(detail.show);
+	// The window fades out when it closes. In that time it still shows the last show: `last`
+	// keeps it until the fade ends (onOpenChangeComplete).
+	let last = $state<Show | null>(null);
+	$effect.pre(() => {
+		if (detail.show) last = detail.show;
+	});
+	const show = $derived(detail.show ?? last);
 	const titles = $derived(show ? displayTitles(show) : { main: '', sub: null });
 	const inLibrary = $derived(!!show && (show.source === 'library' || (!!show.owned && !show.manual_watched)));
 	let busy = $state(false);
@@ -28,9 +34,9 @@
 		D: 'var(--tier-d)'
 	};
 
-	/** Do one change. A second click in the time of the request does nothing. */
+	/** Do one change. A second click in the time of the request does nothing, and a closed window changes nothing. */
 	async function change(action: (show: Show) => Promise<void>) {
-		if (!show || busy) return;
+		if (!show || !detail.show || busy) return;
 		busy = true;
 		try {
 			await action(show);
@@ -69,7 +75,13 @@
 	}
 </script>
 
-<Dialog.Root open={!!show} onOpenChange={(open) => !open && detail.close()}>
+<Dialog.Root
+	open={!!detail.show}
+	onOpenChange={(open) => !open && detail.close()}
+	onOpenChangeComplete={(open) => {
+		if (!open) last = null;
+	}}
+>
 	{#if show}
 		<!-- The window itself gets the focus when it opens. The first control in it is the match
 		     text: the focus on that text would show its tooltip above the buttons. -->

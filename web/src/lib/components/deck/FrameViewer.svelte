@@ -3,6 +3,8 @@
 	// buttons go to the other frames.
 	import type { Frame } from '#lib/api/types.js';
 	import * as Dialog from '#lib/components/ui/dialog/index.js';
+	import { fadeOnLoad } from '#lib/motion.js';
+	import { onMount } from 'svelte';
 	import { isPlaceholder } from '#lib/state/pictures.svelte.js';
 
 	let {
@@ -11,6 +13,10 @@
 		onclose
 	}: { frames: Frame[]; index: number; onclose: () => void } = $props();
 
+	// The viewer fades in after it is on the page, and it fades out when it closes: `onclose`
+	// comes after the fade
+	let open = $state(false);
+	onMount(() => (open = true));
 	const frame = $derived(frames[index] ?? frames[0]);
 	// The large picture is not there for each frame. The small picture then takes its place.
 	let small = $state(false);
@@ -33,7 +39,12 @@
 		'absolute z-[1] flex size-10 cursor-pointer items-center justify-center rounded-full border border-white/35 bg-black/55 p-0 font-sans leading-none text-white hover:border-white hover:bg-black/80 focus-visible:border-white focus-visible:bg-black/80';
 </script>
 
-<Dialog.Root open onOpenChange={(open) => !open && onclose()}>
+<Dialog.Root
+	bind:open
+	onOpenChangeComplete={(isOpen) => {
+		if (!isOpen) onclose();
+	}}
+>
 	<Dialog.Content
 		aria-describedby={undefined}
 		showCloseButton={false}
@@ -48,13 +59,14 @@
 		data-testid="frame-viewer"
 	>
 		<Dialog.Title class="sr-only">Frames of the show</Dialog.Title>
-		<button bind:this={closeButton} type="button" class="{round} top-2.5 right-2.5 text-[16px]" aria-label="Close" onclick={onclose}>✕</button>
+		<button bind:this={closeButton} type="button" class="{round} top-2.5 right-2.5 text-[16px]" aria-label="Close" onclick={() => (open = false)}>✕</button>
 		{#if frames.length > 1}
 			<button type="button" class="{round} top-[calc(50%-36px)] left-2.5 text-[22px]" aria-label="The frame before" onclick={() => move(-1)}>‹</button>
 			<button bind:this={nextButton} type="button" class="{round} top-[calc(50%-36px)] right-2.5 text-[22px]" aria-label="The next frame" onclick={() => move(1)}>›</button>
 		{/if}
 		{#if frame}
 			<img
+				use:fadeOnLoad
 				src={small ? frame.small : frame.large}
 				alt="{frame.label}: a frame of the show"
 				referrerpolicy="no-referrer"

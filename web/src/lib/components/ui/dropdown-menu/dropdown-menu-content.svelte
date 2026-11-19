@@ -23,7 +23,7 @@
 		{sideOffset}
 		{align}
 		class={cn(
-			"bg-popover text-popover-foreground z-[80] flex outline-none max-h-(--bits-dropdown-menu-content-available-height) min-w-32 flex-col gap-0.5 overflow-x-hidden overflow-y-auto rounded-lg border p-1.5 shadow-float",
+			"fades bg-popover text-popover-foreground z-[80] flex outline-none max-h-(--bits-dropdown-menu-content-available-height) min-w-32 flex-col gap-0.5 overflow-x-hidden overflow-y-auto rounded-lg border p-1.5 shadow-float",
 			className
 		)}
 		{...restProps}

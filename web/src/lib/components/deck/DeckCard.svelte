@@ -10,6 +10,7 @@
 	import TierPill from '#lib/components/show/TierPill.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { displayTitles, formatScore, overviewHtml } from '#lib/format.js';
+	import { appear } from '#lib/motion.js';
 	import { detail } from '#lib/state/detail.svelte.js';
 
 	let {
@@ -34,7 +35,10 @@
 	const score = $derived(formatScore(show.score));
 </script>
 
+<!-- Each new card of the deck fades in, fast: the next answer does not wait for it -->
+{#key show.id}
 <article
+	in:appear={{ fast: true }}
 	class="relative mb-5 flex min-h-[230px] gap-5 rounded-lg border bg-card p-[22px] max-[680px]:flex-col max-[680px]:gap-3.5 max-[680px]:p-4 {below
 		? 'flex-wrap max-[680px]:flex-nowrap'
 		: ''}"
@@ -85,3 +89,4 @@
 	</div>
 	{@render below?.()}
 </article>
+{/key}

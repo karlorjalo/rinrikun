@@ -7,10 +7,13 @@
 //
 // Usage: node tests/mock/server.mjs [port]      (the default port is 8799)
 // POST /api/__reset puts the data back to its start. GET /api/__requests gives the requests since
-// then: a test can check a request that the server of the page sent.
+// then: a test can check a request that the server of the page sent. POST /api/__delay {"ms": n}
+// makes each next answer wait n milliseconds (a slow server, for the loading bar); a reset ends it.
 import http from 'node:http';
 
 const PORT = Number(process.argv[2] ?? process.env.MOCK_PORT ?? 8799);
+/** The time that each answer waits (POST /api/__delay) */
+let delay = 0;
 
 /** A random number generator that gives the same numbers each time */
 function generator(seed) {
@@ -343,7 +346,8 @@ function known(id) {
 /** Give the answer for one request. `body` is the JSON of a POST request. */
 function answer(method, path, query, body) {
 	const route = `${method} ${path}`;
-	if (route === 'POST /api/__reset') return makeData(), (requests = []), { ok: true };
+	if (route === 'POST /api/__reset') return makeData(), (requests = []), (delay = 0), { ok: true };
+	if (route === 'POST /api/__delay') return (delay = Number(body.ms) || 0), { ok: true };
 	if (route === 'GET /api/__requests') return requests;
 	if (route === 'GET /api/profile') {
 		const mine = rows.filter((row) => row.owned);
@@ -456,8 +460,12 @@ const server = http.createServer((request, response) => {
 			status = error instanceof Refusal ? error.status : 500;
 			result = { detail: String(error.message) };
 		}
-		response.writeHead(status, { 'Content-Type': 'application/json' });
-		response.end(JSON.stringify(result));
+		const send = () => {
+			response.writeHead(status, { 'Content-Type': 'application/json' });
+			response.end(JSON.stringify(result));
+		};
+		if (delay > 0 && !url.pathname.startsWith('/api/__')) setTimeout(send, delay);
+		else send();
 	});
 });
 server.listen(PORT, '127.0.0.1', () => console.log(`mock API on http://127.0.0.1:${PORT}`));
