@@ -111,6 +111,19 @@
         <h2>Discover</h2>
         <div class="deck-progress" id="discover-progress"></div>
       </div>
+      <!-- The watch list: the shows with the answer "Interested". The button has the name of the
+           list and the number of its shows. The list opens below the button. -->
+      <div class="watch-wrap">
+        <button type="button" class="btn-action watch-button" id="watch-button" aria-haspopup="dialog" aria-expanded="false" aria-controls="watch-panel">Watch list <span class="watch-count" id="watch-count">0</span></button>
+        <div class="watch-panel" id="watch-panel" role="dialog" aria-label="Watch list" hidden>
+          <div class="watch-head">
+            <span class="watch-heading">Watch list</span>
+            <span class="watch-total" id="watch-total"></span>
+            <button type="button" class="watch-close" id="watch-close" aria-label="Close the watch list" title="Close">✕</button>
+          </div>
+          <ul class="watch-list" id="watch-list" tabindex="-1"></ul>
+        </div>
+      </div>
     </div>
     <div class="deck-slot" id="discover-slot"></div>
   </section>
@@ -242,22 +255,6 @@
     <div id="settings-list" class="settings-list"></div>
   </section>
 </main>
-<!-- The watch list of the Discover tab: the shows with the answer "Interested". Its button floats
-     at the bottom right of the window, and the list opens above the button. The two elements are
-     not in the section of the tab: a section moves a little when its tab opens, and an element
-     with a fixed position inside it is then at a wrong place. -->
-<button type="button" class="watch-button" id="watch-button" aria-haspopup="dialog" aria-expanded="false" aria-controls="watch-panel" title="Watch list" hidden>
-  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 6.5h16M4 12h16M4 17.5h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-  <span class="watch-count" id="watch-count">0</span>
-</button>
-<div class="watch-panel" id="watch-panel" role="dialog" aria-label="Watch list" hidden>
-  <div class="watch-head">
-    <span class="watch-heading">Watch list</span>
-    <span class="watch-total" id="watch-total"></span>
-    <button type="button" class="watch-close" id="watch-close" aria-label="Close the watch list" title="Close">✕</button>
-  </div>
-  <ul class="watch-list" id="watch-list" tabindex="-1"></ul>
-</div>
 <dialog id="detail-modal"></dialog>
 <dialog id="frame-viewer" aria-label="Frames of the show"></dialog>
 <script src="/ui/app.js"></script>

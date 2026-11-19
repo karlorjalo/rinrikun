@@ -3698,8 +3698,8 @@ async function undoDiscover() {
 }
 
 // ---- The watch list: the shows with the answer "interested" that the user does not have ----
-// A round button floats at the bottom right of the window while the Discover tab is open. It
-// opens the list above it.
+// The title row of the Discover tab has a button with the name of the list and the number of
+// its shows. The list opens below the button.
 let watchList = [];
 let watchOpen = false;
 // The shows that the user took off the list while the list was open. Their rows stay in the
@@ -4137,9 +4137,7 @@ document.querySelectorAll("nav button").forEach((b) => {
     $(`#tab-${b.dataset.tab}`).hidden = false;
     // The story of the list plays only on the Recommendations tab
     closeStory();
-    // The button of the watch list is only on the Discover tab
     setWatchOpen(false);
-    $("#watch-button").hidden = b.dataset.tab !== "discover";
     if (b.dataset.tab === "review") setDeckMode(reviewMode);
     if (b.dataset.tab === "discover") setDeckMode("discover");
     if (b.dataset.tab === "ratings") loadRatings();

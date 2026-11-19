@@ -278,18 +278,15 @@ dialog#detail-modal::backdrop { background: rgba(24, 18, 21, 0.66); }
 }
 .deck-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
 .deck-bottom-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
-/* The watch list of the Discover tab: a round button that floats at the bottom right of the
-   window, and a list that opens above the button */
-#tab-discover { padding-bottom: 64px; }
-.watch-button { position: fixed; right: 24px; bottom: 24px; z-index: 70; display: flex; align-items: center; justify-content: center;
-  width: 54px; height: 54px; padding: 0; color: var(--accent-ink); cursor: pointer; background: var(--accent); border: 0; border-radius: 50%;
-  box-shadow: var(--shadow-control); transition: background-color .15s ease; }
-.watch-button:hover, .watch-button:focus-visible, .watch-button[aria-expanded="true"] { background: color-mix(in srgb, var(--accent) 86%, #000); }
-.watch-count { position: absolute; top: -5px; right: -5px; box-sizing: border-box; min-width: 23px; height: 23px; padding: 0 6px; font-family: var(--sans);
-  font-size: 11.5px; font-weight: 600; line-height: 21px; text-align: center; color: var(--text); background: var(--card); border: 1px solid var(--border);
-  border-radius: 999px; }
-.watch-panel { position: fixed; right: 24px; bottom: 92px; z-index: 70; display: flex; flex-direction: column; width: min(380px, calc(100vw - 24px));
-  max-height: min(72vh, 640px); overflow: hidden; font-family: var(--sans); background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-l);
+/* The watch list of the Discover tab: a button in the title row with the name of the list and
+   the number of its shows, and a list that opens below the button */
+.watch-wrap { position: relative; }
+.watch-button { gap: 8px; padding: 5px 8px 5px 12px; font-size: 13px; }
+.watch-button[aria-expanded="true"] { border-color: var(--accent); }
+.watch-count { box-sizing: border-box; min-width: 24px; height: 20px; padding: 0 7px; font-size: 11.5px; font-weight: 600; line-height: 20px;
+  text-align: center; color: var(--accent-ink); background: var(--accent); border-radius: 999px; }
+.watch-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 70; display: flex; flex-direction: column; width: min(380px, calc(100vw - 24px));
+  max-height: min(64vh, 600px); overflow: hidden; font-family: var(--sans); background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-l);
   box-shadow: var(--shadow-float); }
 .watch-head { display: flex; align-items: baseline; gap: 8px; padding: 12px 10px 10px 16px; border-bottom: 1px solid var(--border); }
 .watch-heading { font-family: var(--serif); font-size: 16px; font-weight: 600; color: var(--text); }
@@ -551,8 +548,8 @@ dialog#frame-viewer::backdrop { background: rgba(14, 11, 12, 0.86); }
   .deck-poster-wrap { width: 100px; height: 146px; margin: 0 auto; }
   .deck-card.with-frames { flex-wrap: nowrap; }
   .deck-frames { height: 92px; }
-  .watch-button { right: 14px; bottom: 14px; }
-  .watch-panel { right: 12px; left: 12px; bottom: 80px; width: auto; max-height: 68vh; }
+  /* On a small screen the list is as wide as the screen, and it is above the bottom of the window */
+  .watch-panel { position: fixed; top: auto; right: 12px; left: 12px; bottom: 80px; width: auto; max-height: 68vh; }
   .tier-buttons { grid-template-columns: repeat(5, 1fr); gap: 4px; }
   .btn-tier { padding: 8px 2px; }
   .btn-tier .tier-key { font-size: 13px; }
