@@ -14,6 +14,17 @@ The page is a single-page app. The Python server gives the data through `/api`. 
 The development server sends each `/api` request to `http://127.0.0.1:8765`. Set the environment
 variable `API_TARGET` to use a different server.
 
+## Mock API
+
+`node tests/mock/server.mjs` starts a small copy of the API on port 8799. Each show in it is
+invented. Use it to work on the page without the data of the real server:
+
+```sh
+API_TARGET=http://127.0.0.1:8799 npm run dev
+```
+
+`POST /api/__reset` puts the data of the mock back to its start.
+
 ## Check
 
 `npm run check` does the type check.
