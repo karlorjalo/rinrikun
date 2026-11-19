@@ -111,12 +111,15 @@ asset = found.group(0) if found else ""
 a, b = get(PYTHON, f"/next/{asset}"), get(RUST, f"/next/{asset}")
 check(f"page /next/{asset[:40]}", bool(asset) and a[0] == b[0] == 200 and a[1].get("cache-control") == b[1].get("cache-control") and "immutable" in (b[1].get("cache-control") or ""),
       f"{a[1].get('cache-control')} / {b[1].get('cache-control')}")
-status = urllib.request.Request(RUST + "/api/weights", data=b"{}", method="POST")
+# A change of an unknown show: 404, or 405 from a Rust server without --write. The script does
+# not change data: write_check.py compares the changes.
+request = urllib.request.Request(RUST + "/api/weights", data=b'{"id": "no-such-show", "tier": "S"}', method="POST",
+                                 headers={"content-type": "application/json"})
 try:
-    urllib.request.urlopen(status, timeout=10)
-    check("a change gets 405", False, "the Rust server accepted a change")
+    urllib.request.urlopen(request, timeout=10)
+    check("a change of an unknown show", False, "the Rust server accepted the change")
 except urllib.error.HTTPError as error:
-    check("a change gets 405", error.code == 405, str(error.code))
+    check("a change of an unknown show", error.code in (404, 405), f"{error.code} ({'reads only' if error.code == 405 else 'changes data'})")
 
 print("all equal within the tolerances" if not failed else f"{len(failed)} checks failed")
 sys.exit(1 if failed else 0)
