@@ -1,4 +1,13 @@
-import { expect, openTab, test } from './helpers.js';
+import { apiRequests, expect, openTab, test } from './helpers.js';
+
+test('the tab without a show gets its examples from the ratings, not from the list of all titles', async ({ page, request }) => {
+	await page.goto('/settings');
+	await request.post('/api/__reset');
+	await openTab(page, 'Similar');
+	await expect(page.getByTestId('similar-examples').getByRole('link')).toHaveCount(5);
+	expect(await apiRequests(request, '/api/shows')).toHaveLength(0);
+	expect(await apiRequests(request, '/api/ratings')).not.toHaveLength(0);
+});
 
 test('the search box finds a show, and Enter shows its similar shows', async ({ page }) => {
 	await page.goto('/similar');
