@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime};
 
@@ -35,6 +36,9 @@ const REQUEST_HEADERS: [&str; 6] = ["accept", "accept-language", "cookie", "if-n
 const ANSWER_HEADERS: [&str; 7] = ["content-type", "cache-control", "etag", "last-modified", "location", "set-cookie", "vary"];
 /// The largest number of shows in one request for pictures
 const FRAMES_MAX: usize = 50;
+/// After a change, the server waits this time without a new change, then it computes the match
+/// and the tier guess again. Thus a fast series of changes does not wait for these computations.
+const WARM_QUIET: Duration = Duration::from_millis(400);
 
 struct App {
     engine: RwLock<Engine>,
@@ -43,6 +47,8 @@ struct App {
     /// The time and the size of the database files after the last change of this server. The
     /// watcher does not load the data again for a change of this server.
     own_stamp: Mutex<Vec<Option<(SystemTime, u64)>>>,
+    /// The number of changes of this server (see warm_later)
+    changes: AtomicU64,
     random: Mutex<Random>,
     root: PathBuf,
     db: PathBuf,
@@ -123,21 +129,43 @@ fn read_only() -> ApiError {
 }
 
 /// Run a change of the data: one change at a time, while no request reads the engine. A server
-/// with --read-only gives 405.
+/// with --read-only gives 405. After the change, the match is computed again in the background.
 async fn change(app: &Shared, work: impl FnOnce(&mut Engine, &mut Store) -> Result<Value> + Send + 'static) -> Answer {
-    let app = app.clone();
-    tokio::task::spawn_blocking(move || {
-        let Some(store) = &app.store else {
+    let shared = app.clone();
+    let answer = tokio::task::spawn_blocking(move || {
+        let Some(store) = &shared.store else {
             return Err(read_only());
         };
         let mut store = store.lock().unwrap();
-        let mut engine = app.engine.write().unwrap();
+        let mut engine = shared.engine.write().unwrap();
         let result = work(&mut engine, &mut store);
-        *app.own_stamp.lock().unwrap() = stamp(&app.db);
+        *shared.own_stamp.lock().unwrap() = stamp(&shared.db);
+        shared.changes.fetch_add(1, Ordering::SeqCst);
         result.map(Json).map_err(change_error)
     })
     .await
-    .expect("the change of the data stopped")
+    .expect("the change of the data stopped");
+    warm_later(app);
+    answer
+}
+
+/// Compute the match and the tier guess again in the background, when no new change comes in
+/// WARM_QUIET. Almost each answer needs them, and the computation takes some hundred milliseconds:
+/// the next request of the page then finds them ready. A new change starts its own wait.
+fn warm_later(app: &Shared) {
+    let app = app.clone();
+    let seen = app.changes.load(Ordering::SeqCst);
+    tokio::spawn(async move {
+        tokio::time::sleep(WARM_QUIET).await;
+        if app.changes.load(Ordering::SeqCst) != seen {
+            return;
+        }
+        compute(&app, |engine| {
+            engine.match_percent();
+            engine.tier_guess();
+        })
+        .await;
+    });
 }
 
 /// The id of the show of a change. A missing id or an id that is not in the data gives 404. A
@@ -545,7 +573,18 @@ pub fn run(args: &[String]) -> Result<()> {
     eprintln!("{}", if write { "this server changes the data" } else { "this server only reads" });
     let own_stamp = Mutex::new(stamp(&db));
     let posters: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(15))).build().into();
-    let app = Arc::new(App { engine: RwLock::new(engine), store, own_stamp, random: Mutex::new(Random::from_time()), root, db, web, client, posters });
+    let app = Arc::new(App {
+        engine: RwLock::new(engine),
+        store,
+        own_stamp,
+        changes: AtomicU64::new(0),
+        random: Mutex::new(Random::from_time()),
+        root,
+        db,
+        web,
+        client,
+        posters,
+    });
     watch(app.clone());
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     runtime.block_on(async move {
