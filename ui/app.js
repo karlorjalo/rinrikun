@@ -634,6 +634,7 @@ function renderInterestResults() {
   // The box has only the numbers. The text is in the tooltip of the "i".
   let about = "Your answers in the Discover deck.";
   if (groups) about += " The second row has the \"interested\" answers of all answers, for each group of the match. If the match is good, a group with a higher match has a larger part of \"interested\".";
+  if (groups && res.popular) about += ` This row counts only the cards from the ${Number(res.popular).toLocaleString("en-US")} most popular anime, which are the cards that the deck draws.`;
   if (res.model) about += ` In a test, the taste model put an interested show above a not-interested show in ${Math.round(100 * res.model.auc)}% of the pairs. It did not know the answers of the two shows.`;
   box.innerHTML = `
     <div class="tier-summary-title"><span>Discover${infoDot(about)}</span></div>

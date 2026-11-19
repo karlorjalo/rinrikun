@@ -1498,9 +1498,47 @@ def test_discover_draws_shows_without_an_answer_from_the_groups(tmp_path, monkey
     assert len(e.discover(count=40, seed=1)) == len(later)
 
 
+def _engine_with_places(tmp_path, count=20):
+    """The engine of _discover_engine. The shows al:100 to al:(99 + count) have the popularity places 1 to count."""
+    e = _discover_engine(tmp_path)
+    assert not e.has_places
+    for n in range(count):
+        e.store.con.execute("UPDATE shows SET popularity_place=? WHERE id=?", (n + 1, f"al:{100 + n}"))
+    e.store.con.commit()
+    return Engine(e.store)
+
+
+def test_discover_draws_only_from_the_most_popular_anime(tmp_path, monkeypatch):
+    import anime_vec.engine as engine_module
+    (tmp_path / "old").mkdir()
+    # A database without places: each show is a possible card
+    assert len(_discover_engine(tmp_path / "old").discover(count=50, seed=1)) == 40
+    e = _engine_with_places(tmp_path)
+    assert e.has_places
+    cards = e.discover(count=50, seed=1)
+    assert sorted(c["id"] for c in cards) == sorted(f"al:{100 + n}" for n in range(20))
+    assert all(1 <= c["popularity_place"] <= 20 for c in cards)
+    # A show with a place after the limit is not a card
+    monkeypatch.setattr(engine_module, "DISCOVER_POPULAR", 8)
+    assert sorted(c["id"] for c in e.discover(count=50, seed=1)) == sorted(f"al:{100 + n}" for n in range(8))
+
+
+def test_interest_results_leave_out_the_shows_that_the_deck_does_not_draw(tmp_path):
+    import anime_vec.engine as engine_module
+    e = _engine_with_places(tmp_path)
+    e.set_interest("al:100", True)
+    e.set_interest("al:104", False)
+    # al:130 has no popularity place
+    e.set_interest("al:130", False)
+    res = e.interest_results()
+    assert (res["answers"], res["interested"], res["not_interested"]) == (3, 1, 2)
+    assert sum(g["answers"] for g in res["groups"]) == 2 and sum(g["interested"] for g in res["groups"]) == 1
+    assert res["popular"] == engine_module.DISCOVER_POPULAR
+
+
 def test_interest_results_have_the_answers_of_the_deck_by_match(tmp_path):
     e = _discover_engine(tmp_path)
-    assert e.interest_results() == {"answers": 0, "interested": 0, "not_interested": 0, "model": None,
+    assert e.interest_results() == {"answers": 0, "interested": 0, "not_interested": 0, "model": None, "popular": None,
                                     "groups": [{"low": low, "high": high, "answers": 0, "interested": 0}
                                                for low, high in ((99.0, 100.0), (95.0, 99.0), (80.0, 95.0), (0.0, 80.0))]}
     band = [f"al:{100 + n}" for n in range(0, 40, 4)]

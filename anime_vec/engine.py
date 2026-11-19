@@ -71,6 +71,12 @@ TASTE_NOT_INTERESTED = -0.5
 # model orders the rated shows of the user a little, but it does not predict the interest of the
 # user in a new show: see Engine.match_percent for the test.
 MATCH_TIER_WEIGHT = 0.25
+# The Discover deck draws only from this number of the most popular anime on AniList. In the
+# first 110 answers of the user, the popularity of a show predicted the answer better than the
+# match did: the answer was "interested" for 38 of 43 cards from these anime, and for 8 of 67
+# other cards. Most of the other cards were specials, short entries and anime that few people
+# know. A "not interested" answer for such a card tells little about the taste of the user.
+DISCOVER_POPULAR = 5000
 # The Discover deck draws its shows at random in groups of the match: (lowest match of the group,
 # part of the cards that come from the group). In one group each show has the same chance, thus
 # the answers of a group are a fair sample of the group. Most cards come from the groups between
@@ -187,6 +193,8 @@ class Engine:
         self.interest = {i: v["value"] for i, v in store.get_interest().items() if i in self.by_id}
         # The match of each card that the Discover deck gave, until the user answers it
         self._deck_match: dict[str, float] = {}
+        # A database from before the popularity places has no places. The Discover deck then draws from all shows.
+        self.has_places = any(r.get("popularity_place") for r in self.rows)
         for r in self.rows:
             # For the interface, a show with the answer "not interested" is a removed show
             r["dismissed"] = 1 if self._refused(r["id"]) else 0
@@ -1299,19 +1307,30 @@ class Engine:
                                if value and not self.by_id[i]["owned"]])
         return sorted(out, key=lambda r: -(r.get("match") or 0.0))
 
+    def _well_known(self, j: int) -> bool:
+        """Tell if row j is one of the DISCOVER_POPULAR most popular anime on AniList.
+
+        If the database has no popularity places, each row counts as well known.
+        """
+        if not self.has_places:
+            return True
+        place = self.rows[j].get("popularity_place")
+        return place is not None and place <= DISCOVER_POPULAR
+
     def discover(self, count: int = 12, seed: int | None = None) -> list[dict]:
         """Return random shows for the Discover deck.
 
         A card is the entry point of a franchise that the user does not have. It has no answer,
-        and the user did not remove it. The draw is random in the groups of DISCOVER_GROUPS.
-        `seed` makes the draw the same each time, for the tests.
+        and the user did not remove it. It is one of the most popular anime: see DISCOVER_POPULAR.
+        The draw is random in the groups of DISCOVER_GROUPS. `seed` makes the draw the same each
+        time, for the tests.
         """
         owned = self.owned_franchises()
         match = self.match_percent()
         groups: list[list[int]] = [[] for _ in DISCOVER_GROUPS]
         for j, r in enumerate(self.rows):
             if (r["owned"] or r["id"] in self.duplicate_of or self.franchise[r["id"]] in owned or not _watchable(r)
-                    or self._refused(r["id"]) or r["id"] in self.interest
+                    or self._refused(r["id"]) or r["id"] in self.interest or not self._well_known(j)
                     or self.entry_row[self.franchise[r["id"]]] != j or np.isnan(match[j])):
                 continue
             groups[next(n for n, (low, _) in enumerate(DISCOVER_GROUPS) if match[j] >= low)].append(j)
@@ -1334,18 +1353,23 @@ class Engine:
         `groups` has the answers of the deck in the groups of DISCOVER_GROUPS, by the match of
         the show. This match does not know the answer of the show: see match_percent. If the
         match is good, a group with a higher match has a larger part of "interested". An answer
-        from a page is not in the groups, because the user selected its show.
+        from a page is not in the groups, because the user selected its show. An answer for a
+        show that the deck does not draw now is not in the groups: see DISCOVER_POPULAR. The
+        popularity of such a show decided most of these answers, not the match.
 
         `model` tells how well the taste model predicts an answer that it does not know: the
         part of the pairs (interested show, not-interested show) in which the interested show
         has the higher score. 0.5 is the result of a random order. It is None for fewer than 3
         answers of one kind.
+
+        `popular` is DISCOVER_POPULAR if the groups have only the answers for the most popular
+        anime. It is None if the database has no popularity places.
         """
         stored = self.store.get_interest()
         match = self.match_percent()
         deck = [(float(match[self.pos[i]]), value) for i, value in self.interest.items()
                 if stored.get(i, {}).get("source") == "deck" and not self.by_id[i]["owned"]
-                and not np.isnan(match[self.pos[i]])]
+                and self._well_known(self.pos[i]) and not np.isnan(match[self.pos[i]])]
         groups = []
         high = None
         for low, _ in DISCOVER_GROUPS:
@@ -1361,7 +1385,8 @@ class Engine:
             above = scores[yes][:, None] - scores[no][None, :]
             model = {"pairs": len(yes) * len(no), "auc": round(float(((above > 0).sum() + 0.5 * (above == 0).sum()) / above.size), 3)}
         counts = self.interest_counts()
-        return {"answers": len(self.interest), **counts, "groups": groups, "model": model}
+        return {"answers": len(self.interest), **counts, "groups": groups, "model": model,
+                "popular": DISCOVER_POPULAR if self.has_places else None}
 
     def manual_shows(self) -> list[dict]:
         manual_ids = self.store.get_manual_watched_ids()
