@@ -297,3 +297,27 @@ def test_old_database_gets_the_popularity_place_column(tmp_path):
     assert s.load_rows()[0]["popularity_place"] is None
     s.upsert_rows([make_row(1, popularity_place=3)])
     assert s.load_rows()[0]["popularity_place"] == 3
+
+
+def test_many_threads_use_the_store_at_the_same_time(tmp_path):
+    import threading
+    s = Store(tmp_path / "threads.db")
+    s.upsert_rows([make_row(i) for i in range(1, 41)])
+    errors = []
+
+    def work(n):
+        try:
+            for turn in range(60):
+                s.log_recommendations([(f"al:{i}", (i + n + turn) % 40) for i in range(1, 41)], "usual", "2026-11-19")
+                s.get_rec_log()
+        except Exception as err:
+            errors.append(repr(err))
+
+    threads = [threading.Thread(target=work, args=(n,)) for n in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    # Without a lock, SQLite gives "bad parameter or other API misuse" to some of the threads
+    assert errors == []
+    assert len(s.get_rec_log()) == 40

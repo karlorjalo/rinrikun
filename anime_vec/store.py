@@ -1,5 +1,7 @@
+import functools
 import json
 import sqlite3
+import threading
 from pathlib import Path
 
 SCHEMA = """
@@ -74,8 +76,22 @@ TIER_WEIGHTS = {
 }
 
 
+def _one_at_a_time(method):
+    """Let only one thread at a time run this method of the store."""
+    @functools.wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return locked
+
+
 class Store:
     def __init__(self, path, read_only: bool = False):
+        # The server answers its requests in more than one thread, and all threads use the one
+        # connection of the store. If two threads run the same statement at the same time,
+        # SQLite gives the error "bad parameter or other API misuse" to one of them. Thus each
+        # method of the store waits for this lock: see the end of this file.
+        self._lock = threading.RLock()
         self.read_only = read_only
         if read_only:
             # A test or a report must not change the database
@@ -293,3 +309,9 @@ class Store:
     def get_hash(self, row_id: str):
         t = self.con.execute("SELECT text_hash FROM shows WHERE id=?", (row_id,)).fetchone()
         return t[0] if t else None
+
+
+# Each public method of the store waits for the lock of the store
+for _name, _method in list(vars(Store).items()):
+    if callable(_method) and not _name.startswith("_"):
+        setattr(Store, _name, _one_at_a_time(_method))
