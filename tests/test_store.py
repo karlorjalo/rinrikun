@@ -145,6 +145,7 @@ def test_read_only_store_reads_an_old_database(tmp_path):
     row = Store(path, read_only=True).load_rows()[0]
     assert row["title"] == "Old" and row["genres"] == ["Drama"]
     assert row["relations"] == [] and row["status"] is None and row["library_id"] is None
+    assert row["popularity_place"] is None
 
 
 def test_copy_weight(tmp_path):
@@ -268,3 +269,31 @@ def test_interest_roundtrip(tmp_path):
     con.commit()
     con.close()
     assert Store(old, read_only=True).get_interest() == {}
+
+
+def test_popularity_place_roundtrip(tmp_path):
+    s = Store(tmp_path / "place.db")
+    s.upsert_rows([make_row(1, popularity_place=7), make_row(2)])
+    rows = s.load_rows()
+    assert rows[0]["popularity_place"] == 7 and rows[1]["popularity_place"] is None
+    # An anime that is not one of the most popular anime now loses its place
+    s.upsert_rows([make_row(1)])
+    assert s.load_rows()[0]["popularity_place"] is None
+
+
+def test_old_database_gets_the_popularity_place_column(tmp_path):
+    import sqlite3
+    path = tmp_path / "old_place.db"
+    con = sqlite3.connect(str(path))
+    con.execute("CREATE TABLE shows (id TEXT PRIMARY KEY, source TEXT, title TEXT, title_native TEXT, "
+                "year INTEGER, format TEXT, genres TEXT, tags TEXT, tag_ranks TEXT, studios TEXT, "
+                "overview TEXT, score REAL, owned INTEGER, tmdbid TEXT, anilist_id INTEGER, "
+                "poster TEXT, text_hash TEXT, embedding BLOB)")
+    con.execute("INSERT INTO shows (id, source, title, genres, tags, tag_ranks, studios, owned) "
+                "VALUES ('al:1', 'anilist', 'Old', '[]', '[]', '[]', '[]', 0)")
+    con.commit()
+    con.close()
+    s = Store(path)
+    assert s.load_rows()[0]["popularity_place"] is None
+    s.upsert_rows([make_row(1, popularity_place=3)])
+    assert s.load_rows()[0]["popularity_place"] == 3

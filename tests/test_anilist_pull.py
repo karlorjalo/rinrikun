@@ -293,3 +293,19 @@ def test_row_from_media_keeps_the_english_title():
     assert r["title"] == "Saenai Heroine no Sodatekata"
     assert r["title_english"] == "Saekano: How to Raise a Boring Girlfriend"
     assert row_from_media(MEDIA)["title_english"] == ""
+
+
+def test_fetch_pool_gives_each_row_its_place_in_the_popularity_order(tmp_path, monkeypatch):
+    monkeypatch.setattr(anilist_pull, "CACHE_DIR", tmp_path)
+    _fake_time(monkeypatch)
+    pages = {1: [_media(30), _media(10)], 2: [_media(10), _media(20)]}
+
+    def fake(page_no, timeout=60):
+        return {"data": {"Page": {"pageInfo": {"lastPage": 2}, "media": pages[page_no]}}}
+
+    monkeypatch.setattr(anilist_pull, "_graphql", fake)
+    rows = anilist_pull.fetch_pool()
+    # al:10 is on two pages: its two rows have its first place
+    assert [(r["id"], r["popularity_place"]) for r in rows] == [("al:30", 1), ("al:10", 2), ("al:10", 2), ("al:20", 4)]
+    # A row that does not come from the pages has no place
+    assert "popularity_place" not in row_from_media(_media(5))

@@ -57,7 +57,10 @@ CREATE TABLE IF NOT EXISTS rec_log (
 # The columns of the shows table that the build writes
 COLUMNS = ("id", "source", "title", "title_native", "year", "format", "genres", "tags", "tag_ranks", "studios",
            "overview", "score", "owned", "tmdbid", "anilist_id", "poster", "relations", "recommendations",
-           "library_id", "provider_ids", "seasons", "added_at", "status", "episodes", "title_english")
+           "library_id", "provider_ids", "seasons", "added_at", "status", "episodes", "title_english",
+           # The place of the anime in the popularity order of AniList: 1 = the most popular anime.
+           # It is empty for an anime that is not one of the most popular anime (see fetch_pool).
+           "popularity_place")
 # The columns that hold JSON, with the value for a row that has no data
 JSON_COLUMNS = {"genres": [], "tags": [], "tag_ranks": [], "studios": [], "relations": [], "recommendations": [],
                 "provider_ids": {}, "seasons": []}
@@ -83,9 +86,9 @@ class Store:
         # Older databases do not have the columns that later features added
         columns = {r[1] for r in self.con.execute("PRAGMA table_info(shows)")}
         for column in ("relations", "recommendations", "library_id", "provider_ids", "seasons", "added_at",
-                       "status", "episodes", "title_english"):
+                       "status", "episodes", "title_english", "popularity_place"):
             if column not in columns:
-                kind = "INTEGER" if column == "episodes" else "TEXT"
+                kind = "INTEGER" if column in ("episodes", "popularity_place") else "TEXT"
                 self.con.execute(f"ALTER TABLE shows ADD COLUMN {column} {kind}")
         self.con.commit()
 

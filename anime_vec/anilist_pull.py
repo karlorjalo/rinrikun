@@ -126,6 +126,11 @@ def _read_cache(cache: Path) -> dict | None:
 
 
 def fetch_pool(max_pages: int = MAX_PAGES, force: bool = False) -> list[dict]:
+    """Return the rows of the most popular anime on AniList, the most popular anime first.
+
+    Each row gets its place in this order as `popularity_place`: 1 is the most popular anime.
+    A row from fetch_by_ids has no place.
+    """
     CACHE_DIR.mkdir(exist_ok=True)
     rows: list[dict] = []
     page = 1
@@ -140,6 +145,11 @@ def fetch_pool(max_pages: int = MAX_PAGES, force: bool = False) -> list[dict]:
         if page >= page_data["pageInfo"]["lastPage"]:
             break
         page += 1
+    # The popularity order can change between two pages, thus one anime can be on two pages.
+    # Each of its rows gets the first place of the anime.
+    places: dict[str, int] = {}
+    for n, r in enumerate(rows, start=1):
+        r["popularity_place"] = places.setdefault(r["id"], n)
     return rows
 
 
