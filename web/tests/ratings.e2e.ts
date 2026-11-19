@@ -1,0 +1,42 @@
+import { expect, numbers, test } from './helpers.js';
+
+test('the tier filter shows only the shows of the tier', async ({ page }) => {
+	await page.goto('/ratings');
+	const cards = page.getByTestId('show-card');
+	await expect(cards.first()).toBeVisible();
+	const [total] = numbers(await page.getByTestId('ratings-count').textContent());
+	await expect(cards).toHaveCount(total);
+
+	const tierA = page.getByRole('radio', { name: /^A \d+$/ });
+	const [inTier] = numbers(await tierA.textContent());
+	await tierA.click();
+	await expect(cards).toHaveCount(inTier);
+	for (const card of await cards.all()) await expect(card.getByTitle('Tier A')).toBeVisible();
+});
+
+test('the detail window changes the tier of a show', async ({ page }) => {
+	await page.goto('/ratings');
+	// The list changes its order after the change, thus the test finds the card by the id of its show
+	const id = await page.getByTestId('show-card').first().getAttribute('data-id');
+	const card = page.locator(`[data-testid=show-card][data-id="${id}"]`);
+	await expect(card.getByTitle('Tier S')).toBeVisible();
+	await card.getByRole('heading').getByRole('button').click();
+
+	const detail = page.getByTestId('detail');
+	// The window opens without an open tooltip above its buttons
+	await expect(page.getByRole('tooltip')).toHaveCount(0);
+	await detail.getByRole('group', { name: 'Tier' }).getByRole('button', { name: 'C', exact: true }).click();
+	await expect(detail.getByRole('group', { name: 'Tier' }).getByRole('button', { name: 'C', exact: true })).toHaveAttribute('aria-pressed', 'true');
+	await page.keyboard.press('Escape');
+	await expect(detail).toBeHidden();
+	await expect(card.getByTitle('Tier C')).toBeVisible();
+});
+
+test('"Not interested" has the shows that the user removed', async ({ page }) => {
+	await page.goto('/ratings');
+	const option = page.getByRole('radio', { name: /Not interested/ });
+	await expect(option).toContainText(/\d/);
+	const [removed] = numbers(await option.textContent());
+	await option.click();
+	await expect(page.getByTestId('show-card')).toHaveCount(removed);
+});

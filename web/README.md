@@ -25,9 +25,13 @@ API_TARGET=http://127.0.0.1:8799 npm run dev
 
 `POST /api/__reset` puts the data of the mock back to its start.
 
-## Check
+## Check and test
 
-`npm run check` does the type check.
+- `npm run check` does the type check.
+- `npm run test:unit` runs the unit tests (Vitest).
+- `npm run test:e2e` runs the browser tests (Playwright). They build the page, and they use the
+  mock API, not the real server. Before the first run, get the browser:
+  `npx playwright install chromium`.
 
 ## Build
 

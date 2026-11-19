@@ -5,6 +5,7 @@
 	},
 	"include": [
 		"src",
+		"tests/**/*.ts",
 		"vite.config.ts",
 		"playwright.config.ts"
 	]
