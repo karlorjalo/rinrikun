@@ -3124,8 +3124,12 @@ async function loadReviewQueue() {
       await loadDiscoverCards();
       return;
     }
-    const unratedOnly = reviewFilter === "unrated";
+    const filter = reviewFilter;
+    const unratedOnly = filter === "unrated";
     const res = await (await fetch(`/api/review-queue?unrated_only=${unratedOnly}`)).json();
+    // The user went to a different mode in the time of the request. The shows of this answer
+    // are not the shows of the mode of now.
+    if (reviewFilter !== filter) return;
     if (!Array.isArray(res)) {
       console.error("Failed to load review queue:", res);
       const wrap = $("#deck-wrap");
