@@ -55,6 +55,7 @@
   <nav>
     <button data-tab="profile" class="on">Profile</button>
     <button data-tab="review">Review</button>
+    <button data-tab="discover">Discover</button>
     <button data-tab="ratings">Ratings</button>
     <button data-tab="similar">Similar</button>
     <button data-tab="recs">Recommendations</button>
@@ -72,10 +73,13 @@
       <div class="deck-filter-row">
         <button class="pill active" id="deck-filter-unrated" data-filter="unrated">Unrated only</button>
         <button class="pill" id="deck-filter-all" data-filter="all">All your shows</button>
-        <button class="pill" id="deck-filter-discover" data-filter="discover" title="Random shows that you do not have: say if you are interested">Discover</button>
       </div>
     </div>
 
+    <!-- The deck: the card and the buttons below it. The Review tab and the Discover tab use this
+         one deck. It is in the slot of the tab that is open. -->
+    <div class="deck-slot" id="review-slot">
+    <div id="deck-host">
     <div id="deck-wrap"></div>
 
     <div class="deck-controls">
@@ -97,7 +101,18 @@
         <button class="btn-action" id="deck-skip" title="Space or →">Skip →</button>
       </div>
     </div>
+    </div>
+    </div>
     <div class="tier-help-slot"></div>
+  </section>
+  <section id="tab-discover" hidden>
+    <div class="deck-top">
+      <div class="deck-title-row">
+        <h2>Discover</h2>
+        <div class="deck-progress" id="discover-progress"></div>
+      </div>
+    </div>
+    <div class="deck-slot" id="discover-slot"></div>
   </section>
   <section id="tab-ratings" hidden>
     <div class="ratings-head">

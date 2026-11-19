@@ -3101,10 +3101,13 @@ let reviewFilter = "unrated";
 let reviewUndoStack = [];
 let totalWatchedCount = 0;
 let totalRatedCount = 0;
-// The Discover deck is a mode of the Review tab. It shows random shows that the user does not
-// have, and the user says "interested", "not interested" or "seen it" for each show. The answers
-// are weak examples for the taste model: the library has only shows that the user selected,
-// thus it has few shows that the user does not like. See /api/discover.
+// The Review tab and the Discover tab use one deck: the card and the buttons below it. The mode
+// of the deck is `reviewFilter`: "unrated" or "all" for the Review tab, and "discover" for the
+// Discover tab. The deck is in the tab that is open: see setDeckMode.
+// The Discover deck shows random shows that the user does not have, and the user says
+// "interested", "not interested" or "seen it" for each show. The answers are weak examples for
+// the taste model: the library has only shows that the user selected, thus it has few shows
+// that the user does not like. See /api/discover.
 let discoverCounts = { interested: 0, not_interested: 0 };
 // The user pressed "Seen it" for the card of now, and selects a tier
 let discoverSeen = false;
@@ -3324,7 +3327,7 @@ async function loadReviewQueue() {
 }
 
 function updateDeckProgress() {
-  const p = $("#deck-progress");
+  const p = $(reviewFilter === "discover" ? "#discover-progress" : "#deck-progress");
   if (!p) return;
   if (reviewFilter === "discover") {
     const answers = discoverCounts.interested + discoverCounts.not_interested;
@@ -3381,7 +3384,7 @@ function renderDeckCard() {
       </div>`;
 
     if ($("#deck-review-all-btn")) {
-      $("#deck-review-all-btn").onclick = () => setReviewFilter("all");
+      $("#deck-review-all-btn").onclick = () => setDeckMode("all");
     }
     if ($("#deck-view-profile-btn")) {
       $("#deck-view-profile-btn").onclick = () => $('[data-tab="profile"]').click();
@@ -3423,7 +3426,7 @@ function renderDeckCard() {
       </div>
       <div class="deck-info">
         <div class="deck-meta-top">
-          <span>${reviewFilter === "discover" ? "Discover · you do not have this show" : show.source === "library" ? "Local library" : "Watched"}</span>
+          <span>${reviewFilter === "discover" ? "You do not have this show" : show.source === "library" ? "Local library" : "Watched"}</span>
           <div style="display:flex;align-items:center;gap:6px;">
             ${tierBadge}
             ${reviewFilter === "discover" ? "" : `<span style="font-size:11.5px;color:var(--muted);">${reviewIndex + 1} / ${reviewQueue.length}</span>`}
@@ -3681,19 +3684,47 @@ async function undoDiscover() {
   renderDeckCard();
 }
 
-function setReviewFilter(filter) {
-  reviewFilter = filter;
+// The mode of the Review tab that the user selected last: "unrated" or "all"
+let reviewMode = "unrated";
+// The cards of the Discover deck, in the time that the deck shows the shows of the user
+let discoverStash = null;
+
+// Put the deck in the tab of the mode, and show the cards of the mode. `mode` is "unrated" or
+// "all" for the Review tab, and "discover" for the Discover tab.
+function setDeckMode(mode) {
+  const before = reviewFilter;
+  if (before === "discover" && mode !== "discover") {
+    discoverStash = { queue: reviewQueue, index: reviewIndex, undo: reviewUndoStack };
+  }
+  if (mode !== "discover") reviewMode = mode;
+  reviewFilter = mode;
   discoverSeen = false;
-  $("#deck-filter-unrated").classList.toggle("active", filter === "unrated");
-  $("#deck-filter-all").classList.toggle("active", filter === "all");
-  $("#deck-filter-discover").classList.toggle("active", filter === "discover");
+  $(mode === "discover" ? "#discover-slot" : "#review-slot").appendChild($("#deck-host"));
+  $("#deck-filter-unrated").classList.toggle("active", reviewMode === "unrated");
+  $("#deck-filter-all").classList.toggle("active", reviewMode === "all");
+  if (mode === "discover") {
+    // The Discover deck keeps its cards when the user opens a different tab. Thus the user
+    // comes back to the same card, and the deck does not draw a card that the user did not answer.
+    let kept = before === "discover";
+    if (!kept && discoverStash) {
+      reviewQueue = discoverStash.queue;
+      reviewIndex = discoverStash.index;
+      reviewUndoStack = discoverStash.undo;
+      discoverStash = null;
+      kept = true;
+    }
+    if (kept && reviewIndex < reviewQueue.length) {
+      updateDeckProgress();
+      renderDeckCard();
+      return;
+    }
+  }
   loadReviewQueue();
 }
 
 function initReviewDeck() {
-  $("#deck-filter-unrated").onclick = () => setReviewFilter("unrated");
-  $("#deck-filter-all").onclick = () => setReviewFilter("all");
-  $("#deck-filter-discover").onclick = () => setReviewFilter("discover");
+  $("#deck-filter-unrated").onclick = () => setDeckMode("unrated");
+  $("#deck-filter-all").onclick = () => setDeckMode("all");
   $("#discover-no").onclick = () => answerDiscover(false);
   $("#discover-yes").onclick = () => answerDiscover(true);
   $("#discover-seen").onclick = () => {
@@ -3715,7 +3746,7 @@ function initReviewDeck() {
   initViewer();
 
   document.addEventListener("keydown", (e) => {
-    if ($("#tab-review").hidden) return;
+    if ($("#tab-review").hidden && $("#tab-discover").hidden) return;
     if ($("#detail-modal").open || $("#frame-viewer").open) return;
     const tag = (document.activeElement && document.activeElement.tagName) || "";
     if (tag === "INPUT" || tag === "TEXTAREA") return;
@@ -3875,7 +3906,7 @@ function renderRatingsGrid() {
   if (!filtered.length) {
     if (ratingsSource === "interested") {
       box.innerHTML = `<div style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 20px;">
-          <p style="margin:0;">Your watch list is empty. In the Review tab, open Discover and answer "Interested" for a show that you want to watch.</p></div>`;
+          <p style="margin:0;">Your watch list is empty. In the Discover tab, answer "Interested" for a show that you want to watch.</p></div>`;
     } else if (ratingsSource === "dismissed" && ratingsTierFilter === "all") {
       box.innerHTML = `<div style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 20px;">
           ${vnWindow("切り捨てた作品はまだ一つもないのね。優しいのか、優柔不断なのか……。")}
@@ -3949,7 +3980,8 @@ document.querySelectorAll("nav button").forEach((b) => {
     $(`#tab-${b.dataset.tab}`).hidden = false;
     // The story of the list plays only on the Recommendations tab
     closeStory();
-    if (b.dataset.tab === "review") loadReviewQueue();
+    if (b.dataset.tab === "review") setDeckMode(reviewMode);
+    if (b.dataset.tab === "discover") setDeckMode("discover");
     if (b.dataset.tab === "ratings") loadRatings();
     if (b.dataset.tab === "recs") recs();
     if (b.dataset.tab === "profile") profile();

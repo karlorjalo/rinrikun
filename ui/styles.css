@@ -249,7 +249,7 @@ dialog#detail-modal::backdrop { background: rgba(20, 18, 16, 0.6); backdrop-filt
 .btn-modal-tier.tier-clear:hover { color: var(--text); text-decoration: underline; }
 
 /* Review Deck */
-#tab-review { max-width: 680px; margin: 0 auto; }
+#tab-review, #tab-discover { max-width: 680px; margin: 0 auto; }
 .deck-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
 .deck-title-row { display: flex; align-items: baseline; gap: 12px; }
 .deck-title-row h2 { margin: 0; }
