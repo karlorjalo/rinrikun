@@ -244,6 +244,26 @@ class Store:
         width, height = (float(v) for v in meta["layout_cell"].split(","))
         return {"coords": coords, "grid": grid, "cell": (width, height)}
 
+    def rename_layout_signature(self, old: str, new: str) -> bool:
+        """Give the kept layout (and its areas) the signature `new` if its signature is `old`.
+
+        Return True if the layout had the signature `old`. A read-only store changes nothing and
+        returns False.
+        """
+        if self.read_only:
+            return False
+        try:
+            meta = dict(self.con.execute("SELECT key, value FROM meta WHERE key IN ('layout_signature', 'regions_signature')"))
+        except sqlite3.OperationalError:
+            return False
+        if meta.get("layout_signature") != old:
+            return False
+        for key in ("layout_signature", "regions_signature"):
+            if meta.get(key) == old:
+                self.con.execute("UPDATE meta SET value=? WHERE key=?", (new, key))
+        self.con.commit()
+        return True
+
     def save_layout(self, signature: str, coords: dict, grid: dict, cell: tuple[float, float]):
         if self.read_only:
             return

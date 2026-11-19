@@ -248,11 +248,16 @@ class Engine:
         # Effective embedding matrix: bridge library rows to the vectors of their AniList counterparts
         self.pos = {rid: i for i, rid in enumerate(self.ids)}
         bridged = np.array(self.M, copy=True)
+        # The row whose stored embedding each row uses, and the stored embeddings: the signature
+        # of the map layout uses them (see _layout_signature). They are deleted after the layout.
+        self._bridge = list(range(len(self.rows)))
+        self._raw_M = M
         for i, r in enumerate(self.rows):
             if r["source"] == "library" and r["id"] in self.counterparts:
                 for cp_id in self.counterparts[r["id"]]:
                     if cp_id in self.by_id:
                         bridged[i] = self.M[self.pos[cp_id]]
+                        self._bridge[i] = self.pos[cp_id]
                         break
 
         # Text embeddings share one large common direction, which hides the differences between shows.
@@ -278,6 +283,7 @@ class Engine:
         # The signature of the layout in the database, or None for a layout that the database does not keep
         self.layout_signature: str | None = None
         self.coords_2d, self.grid_2d, self.cell = self._build_layout(unique)
+        del self._raw_M, self._bridge
         self.regions = self._build_regions(unique)
         if self.layout_signature is not None:
             # The Rust server reads the areas from the database: see Store.get_regions
@@ -363,6 +369,18 @@ class Engine:
         regions.sort(key=lambda r: (r["level"], -r["count"]))
         return regions
 
+    def _layout_signature(self, unique: list[int], ids: list[str]) -> str:
+        """Return the signature of the map layout: the method, the ids of the rows of the map, and
+        the bytes of the stored embedding that each row uses (a library row uses the embedding of
+        its first AniList row).
+
+        The rows and these embeddings give the effective vectors of the map. The Rust build
+        (server/src/build/layout.rs) computes the same value from the same bytes, thus each
+        program uses the layout of the other.
+        """
+        raw = np.ascontiguousarray(self._raw_M[[self._bridge[i] for i in unique]], dtype="<f4")
+        return hashlib.sha1(b"layout v2\n" + layout.VERSION.encode() + "\n".join(ids).encode() + raw.tobytes()).hexdigest()
+
     def _build_layout(self, unique: list[int]) -> tuple[np.ndarray, np.ndarray, tuple[float, float]]:
         """Return the map position of each row, the grid cell of each row, and the size of a cell.
 
@@ -386,11 +404,17 @@ class Engine:
             ))
             if layout.can_use_tsne(len(unique)):
                 # t-SNE is slow, thus keep the result in the database until the embeddings change
-                signature = hashlib.sha1(
-                    layout.VERSION.encode() + "\n".join(ids).encode() + np.ascontiguousarray(X).tobytes()
-                ).hexdigest()
+                signature = self._layout_signature(unique, ids)
                 self.layout_signature = signature
                 cached = self.store.get_layout(signature)
+                if cached is None:
+                    # A layout from before the signature of version 2 has the old signature. It is
+                    # correct if the old signature is the signature of these rows.
+                    old = hashlib.sha1(
+                        layout.VERSION.encode() + "\n".join(ids).encode() + np.ascontiguousarray(X).tobytes()
+                    ).hexdigest()
+                    if self.store.rename_layout_signature(old, signature):
+                        cached = self.store.get_layout(signature)
                 if cached is not None and all(i in cached["coords"] and i in cached["grid"] for i in ids):
                     points = np.array([cached["coords"][i] for i in ids], dtype=np.float32)
                     cells = np.array([cached["grid"][i] for i in ids], dtype=np.float32)

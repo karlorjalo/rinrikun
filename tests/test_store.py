@@ -209,6 +209,22 @@ def test_layout_cache_keeps_the_map_and_the_grid(tmp_path):
     assert s.get_layout("sig") is not None
 
 
+def test_a_layout_with_the_old_signature_gets_the_new_signature(tmp_path):
+    s = Store(tmp_path / "rename.db")
+    s.save_layout("old", {"al:1": (0.1, 0.2)}, {"al:1": (0.11, 0.21)}, (0.01, 0.014))
+    s.save_regions("old", [{"label": "A"}])
+    # A different old signature changes nothing
+    assert not s.rename_layout_signature("other", "new")
+    assert s.get_layout("old") is not None
+    assert s.rename_layout_signature("old", "new")
+    assert s.get_layout("old") is None
+    assert s.get_layout("new")["coords"] == {"al:1": (0.1, 0.2)}
+    assert s.get_regions("new") == [{"label": "A"}]
+    # A read-only store changes nothing
+    assert not Store(tmp_path / "rename.db", read_only=True).rename_layout_signature("new", "newer")
+    assert s.get_layout("new") is not None
+
+
 def test_the_areas_of_the_map_are_kept_for_one_layout(tmp_path):
     s = Store(tmp_path / "regions.db")
     assert s.get_regions("sig") is None
