@@ -249,6 +249,18 @@
 	}
 }
 
+/* A card that comes into a list on the page fades in (ShowCard). A CSS animation costs the
+   script nothing: a Svelte transition reads the style of each new card, and with hundreds of
+   cards that doubled the time to make them. */
+.appear {
+	animation: appear var(--fade) var(--ease-out);
+}
+@keyframes appear {
+	from {
+		opacity: 0;
+	}
+}
+
 /* A window, a list that opens, a menu and a tooltip fade in and out. The component library
    (bits-ui) sets data-starting-style when the element opens and data-ending-style when it
    closes, and it removes the element only after the transition. */

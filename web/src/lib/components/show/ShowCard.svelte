@@ -2,12 +2,15 @@
 	// The card of a show in a list: the poster, the titles, the numbers and some tags. A click on
 	// the card opens the detail window. The button with the petal uses the show as the seed of a
 	// list of recommendations. A list of recommendations also has the button that removes the show.
-	// A card that comes into a list on the page fades in (the cards of a new page fade with it).
+	// A card that the browser makes after the first page fades in (the class "appear" of
+	// layout.css). The cards of the first page come from the server, and they do not fade.
+	// `content-visibility: auto`: the browser does not lay out a card below the screen. A list of
+	// some hundred cards then takes less than a third of the layout time.
 	import { goto } from '$app/navigation';
 	import type { Show } from '#lib/api/types.js';
 	import { displayTitles, formatScore } from '#lib/format.js';
-	import { appear } from '#lib/motion.js';
 	import { detail } from '#lib/state/detail.svelte.js';
+	import { app } from '#lib/state/progressive.svelte.js';
 	import { seedHref } from '#lib/links.js';
 	import Chip from './Chip.svelte';
 	import GuessText from './GuessText.svelte';
@@ -30,6 +33,8 @@
 		ondismiss?: (show: Show) => void;
 	} = $props();
 
+	/** The card fades in: it comes after the first page (the value at the start of the card) */
+	const fades = app.started;
 	const titles = $derived(displayTitles(show));
 	const meta = $derived([titles.sub, show.year, show.genres?.slice(0, 2).join(', ')].filter(Boolean).join(' · '));
 	const score = $derived(formatScore(show.score));
@@ -44,8 +49,9 @@
 </script>
 
 <article
-	in:appear
-	class="group relative flex gap-3 rounded-md border bg-card p-3 transition-colors duration-150 hover:border-rose"
+	class="group relative flex gap-3 rounded-md border bg-card p-3 transition-colors duration-150 [contain-intrinsic-size:auto_130px] [content-visibility:auto] hover:border-rose {fades
+		? 'appear'
+		: ''}"
 	data-id={show.id}
 	data-testid="show-card"
 >
