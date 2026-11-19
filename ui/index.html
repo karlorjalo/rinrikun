@@ -255,6 +255,13 @@
     <div id="settings-list" class="settings-list"></div>
   </section>
 </main>
+<!-- The menu of a small screen: a round button that floats at the bottom right of the window
+     opens the list of the tabs. A large screen has the tab bar in the page header, and it does
+     not show this button. The page makes the items of the menu from the buttons of the tab bar. -->
+<button type="button" class="menu-button" id="menu-button" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-panel" aria-label="Menu" title="Menu">
+  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 6.5h16M4 12h16M4 17.5h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+</button>
+<div class="menu-panel" id="menu-panel" role="menu" aria-label="Tabs" hidden></div>
 <dialog id="detail-modal"></dialog>
 <dialog id="frame-viewer" aria-label="Frames of the show"></dialog>
 <script src="/ui/app.js"></script>

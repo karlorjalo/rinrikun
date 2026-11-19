@@ -278,6 +278,25 @@ dialog#detail-modal::backdrop { background: rgba(24, 18, 21, 0.66); }
 }
 .deck-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
 .deck-bottom-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+/* The menu of a small screen. The seven tabs are wider than a phone screen, thus a small screen
+   has no tab bar: a round button floats at the bottom right of the window, and it opens the
+   list of the tabs above it. A large screen does not show the button. */
+.menu-button { display: none; position: fixed; right: 16px; bottom: 16px; z-index: 80; align-items: center; justify-content: center;
+  width: 54px; height: 54px; padding: 0; color: var(--accent-ink); cursor: pointer; background: var(--accent); border: 0; border-radius: 50%;
+  box-shadow: var(--shadow-control); transition: background-color .15s ease; }
+.menu-button:hover, .menu-button:focus-visible, .menu-button[aria-expanded="true"] { background: color-mix(in srgb, var(--accent) 86%, #000); }
+.menu-panel { position: fixed; right: 16px; bottom: 82px; z-index: 80; display: flex; flex-direction: column; gap: 2px; min-width: 216px; padding: 6px;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-l); box-shadow: var(--shadow-float); }
+.menu-item { padding: 11px 14px; font-family: var(--sans); font-size: 15px; font-weight: 500; text-align: left; color: var(--text); cursor: pointer;
+  background: none; border: 0; border-radius: var(--radius-m); }
+.menu-item:hover, .menu-item:focus-visible { background: var(--hover); }
+.menu-item[aria-current="page"] { font-weight: 600; color: var(--accent); background: var(--hover); }
+@media (max-width: 760px) {
+  nav { display: none; }
+  .menu-button { display: flex; }
+  /* The last element of a page is not below the button */
+  main { padding-bottom: 88px; }
+}
 /* The watch list of the Discover tab: a button in the title row with the name of the list and
    the number of its shows, and a list that opens below the button */
 .watch-wrap { position: relative; }
@@ -530,11 +549,6 @@ dialog#frame-viewer::backdrop { background: rgba(14, 11, 12, 0.86); }
   header { padding: 24px 14px 8px; }
   header h1 { font-size: 28px; }
   header .sub { font-size: 12px; margin: 4px 0 0; }
-  /* The seven tabs are wider than a phone screen. The tab bar stays in the screen, and the user
-     moves it to the side. Without this, the phone makes the full page smaller. */
-  nav { box-sizing: border-box; max-width: 100%; justify-content: flex-start; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
-  nav::-webkit-scrollbar { display: none; }
-  nav button { flex: none; padding: 5px 12px; font-size: 13px; white-space: nowrap; }
   main { padding: 16px 12px 48px; }
   /* One column that is not wider than the screen. A column of "1fr" gets as wide as the longest
      line of a card that does not break, and the page was then two to three screens wide. */

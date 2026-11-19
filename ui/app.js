@@ -3832,6 +3832,57 @@ function initWatchList() {
   $("#detail-modal").addEventListener("close", syncWatchList);
 }
 
+// ---- The menu of a small screen ----
+// A small screen has no tab bar: the seven tabs are wider than a phone screen. A round button at
+// the bottom right of the window opens the list of the tabs. The items come from the buttons of
+// the tab bar, thus the menu and the tab bar always have the same tabs.
+let menuOpen = false;
+
+// Mark the item of the tab that is open
+function paintMenu() {
+  const now = document.querySelector("nav button.on");
+  document.querySelectorAll("#menu-panel .menu-item").forEach((item) => {
+    if (now && item.dataset.tab === now.dataset.tab) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
+  });
+}
+
+function setMenuOpen(open) {
+  if (menuOpen === open) return;
+  menuOpen = open;
+  $("#menu-panel").hidden = !open;
+  $("#menu-button").setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    paintMenu();
+    const item = $("#menu-panel .menu-item[aria-current]") || $("#menu-panel .menu-item");
+    if (item) item.focus({ preventScroll: true });
+  }
+}
+
+function initMenu() {
+  const panel = $("#menu-panel");
+  panel.innerHTML = [...document.querySelectorAll("nav button")].map((b) =>
+    `<button type="button" class="menu-item" role="menuitem" data-tab="${esc(b.dataset.tab)}">${esc(b.textContent.trim())}</button>`).join("");
+  panel.onclick = (e) => {
+    const item = e.target.closest(".menu-item");
+    if (!item) return;
+    document.querySelector(`nav button[data-tab="${item.dataset.tab}"]`).click();
+    // The user opened the menu from some place of a long page. The new tab starts at its top.
+    window.scrollTo(0, 0);
+  };
+  $("#menu-button").onclick = () => setMenuOpen(!menuOpen);
+  // A click outside the menu closes it, and Escape closes it
+  document.addEventListener("pointerdown", (e) => {
+    if (menuOpen && e.target.closest && !e.target.closest("#menu-panel, #menu-button")) setMenuOpen(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (menuOpen && e.key === "Escape") {
+      setMenuOpen(false);
+      $("#menu-button").focus({ preventScroll: true });
+    }
+  });
+}
+
 // The mode of the Review tab that the user selected last: "unrated" or "all"
 let reviewMode = "unrated";
 // The cards of the Discover deck, in the time that the deck shows the shows of the user
@@ -3899,6 +3950,8 @@ function initReviewDeck() {
   document.addEventListener("keydown", (e) => {
     if ($("#tab-review").hidden && $("#tab-discover").hidden) return;
     if ($("#detail-modal").open || $("#frame-viewer").open) return;
+    // While the menu of a small screen is open, the keys of the deck do nothing
+    if (menuOpen) return;
     // While the watch list is open, the keys of the deck do nothing, and Escape closes the list
     if (watchOpen) {
       if (e.key === "Escape") {
@@ -4127,17 +4180,13 @@ document.querySelectorAll("nav button").forEach((b) => {
   b.onclick = () => {
     document.querySelectorAll("nav button").forEach((x) => x.classList.remove("on"));
     b.classList.add("on");
-    // On a small screen the tab bar is wider than the screen: move it so that the tab of now is in the middle
-    const bar = b.parentElement;
-    if (bar.scrollWidth > bar.clientWidth) {
-      const left = bar.scrollLeft + b.getBoundingClientRect().left - bar.getBoundingClientRect().left - (bar.clientWidth - b.offsetWidth) / 2;
-      bar.scrollTo({ left, behavior: "smooth" });
-    }
     for (const s of document.querySelectorAll("main section")) s.hidden = true;
     $(`#tab-${b.dataset.tab}`).hidden = false;
     // The story of the list plays only on the Recommendations tab
     closeStory();
     setWatchOpen(false);
+    setMenuOpen(false);
+    paintMenu();
     if (b.dataset.tab === "review") setDeckMode(reviewMode);
     if (b.dataset.tab === "discover") setDeckMode("discover");
     if (b.dataset.tab === "ratings") loadRatings();
@@ -4400,6 +4449,7 @@ initSearch();
 initRecsFilters();
 initReviewDeck();
 initRatingsControls();
+initMenu();
 
 const THEME_KEY = "rinrikun-theme";
 const SUN = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
