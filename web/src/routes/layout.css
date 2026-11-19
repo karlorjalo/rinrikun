@@ -33,6 +33,13 @@
 	--find: #0e8177;
 	--sans-face: 'Noto Sans JP', 'Yu Gothic', sans-serif;
 	--serif-face: 'Noto Serif JP', 'Yu Mincho', serif;
+	/* The corner sizes and the shadows. The theme of Tailwind below uses these values. A style
+	   sheet without Tailwind classes (the map) uses the variables. */
+	--radius-s: 4px;
+	--radius-m: 8px;
+	--radius-l: 12px;
+	--control-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+	--float-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
 }
 @media (prefers-color-scheme: dark) {
 	:root:not([data-theme='light']) {
@@ -114,15 +121,15 @@
 	   picture and a bar, large for a card and a window. A fully round shape ("rounded-full") is
 	   only for the tab bar, for a counter and for a round button. */
 	--radius-*: initial;
-	--radius-sm: 4px;
-	--radius-md: 8px;
-	--radius-lg: 12px;
+	--radius-sm: var(--radius-s);
+	--radius-md: var(--radius-m);
+	--radius-lg: var(--radius-l);
 
 	/* A shadow is only for an element that floats above the page: a window, a list that opens,
 	   a tooltip and a control on a map. A card of the page has a border and no shadow. */
 	--shadow-*: initial;
-	--shadow-control: 0 2px 8px rgba(0, 0, 0, 0.14);
-	--shadow-float: 0 10px 30px rgba(0, 0, 0, 0.18);
+	--shadow-control: var(--control-shadow);
+	--shadow-float: var(--float-shadow);
 
 	--font-sans: var(--sans-face);
 	--font-serif: var(--serif-face);

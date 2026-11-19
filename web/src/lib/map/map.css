@@ -1,0 +1,113 @@
+/* The style of the map: the box of the canvas, the controls that the map code makes in it (the
+   zoom buttons, the hint and the search box), and the tooltip of a show. The map code makes
+   these elements itself, thus they cannot have Tailwind classes. The rules are the rules of the
+   old page. --find is the color of the shows that a search found. */
+.vector-canvas-box {
+  position: relative; width: 100%; height: 520px; border-radius: var(--radius-l);
+  background: var(--card);
+  border: 1px solid var(--border); overflow: hidden;
+}
+.vector-canvas-box canvas {
+  display: block; width: 100%; height: 100%; cursor: grab;
+  touch-action: none;
+}
+.vector-canvas-box canvas.is-dragging {
+  cursor: grabbing;
+}
+.vector-zoom-controls {
+  position: absolute; right: 12px; bottom: 12px;
+  display: flex; flex-direction: column; gap: 3px; z-index: 50;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius-m); padding: 3px; box-shadow: var(--control-shadow);
+  user-select: none;
+}
+.vector-zoom-btn {
+  width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: var(--radius-s);
+  color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background 0.12s ease;
+}
+.vector-zoom-btn:hover {
+  background: var(--hover);
+}
+.vector-zoom-level {
+  font-size: 10px; color: var(--muted); text-align: center; padding: 2px 0;
+  font-variant-numeric: tabular-nums;
+}
+.vector-hint-pill {
+  position: absolute; left: 12px; bottom: 12px;
+  background: var(--card);
+  border: 1px solid var(--border); border-radius: var(--radius-m);
+  padding: 4px 10px; font-size: 11px; color: var(--muted);
+  pointer-events: none; transition: opacity 0.5s ease; z-index: 40;
+}
+.vector-hint-pill.fade-out {
+  opacity: 0;
+}
+.vector-view-pills {
+  display: inline-flex; gap: 2px; margin-right: 6px;
+  background: color-mix(in srgb, var(--hover) 80%, transparent);
+  padding: 2px; border-radius: var(--radius-m); border: 1px solid var(--border);
+}
+.vector-view-pills .pill { padding: 2px 7px; font-size: 11px; }
+.vector-map-tooltip {
+  position: absolute; pointer-events: none; background: var(--card);
+  border: 1px solid var(--border); border-radius: var(--radius-m); padding: 8px 10px;
+  box-shadow: var(--float-shadow); font-size: 12px; z-index: 60;
+  max-width: 290px; line-height: 1.35; white-space: normal;
+  display: flex; gap: 10px; align-items: flex-start;
+}
+.vector-map-tooltip[hidden] {
+  display: none !important;
+}
+.tt-poster-box {
+  width: 38px; height: 52px; border-radius: var(--radius-s); overflow: hidden; flex: none;
+  background: var(--hover); border: 1px solid var(--border); position: relative;
+}
+.tt-poster-box img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.tt-poster-box .tt-poster-fallback {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  font-family: var(--serif-face); font-size: 14px; font-weight: 600; color: var(--muted);
+}
+.tt-content { min-width: 0; flex: 1; }
+.vector-map-tooltip .tt-title {
+  font-family: var(--serif-face); font-size: 13.5px; font-weight: 600; color: var(--text); margin-bottom: 2px;
+}
+.vector-map-tooltip .tt-sub {
+  font-size: 11px; color: var(--muted); margin-bottom: 4px;
+}
+.vector-map-tooltip .tt-meta {
+  font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.vector-map-tooltip .tt-badge {
+  display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px;
+  border-radius: var(--radius-s);
+}
+.vector-map-tooltip .tt-badge-highlight {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.vector-map-tooltip .tt-badge-library {
+  background: var(--hover); color: var(--text); border: 1px solid var(--border);
+}
+.vector-map-tooltip .tt-badge-catalog {
+  background: transparent; color: var(--muted);
+}
+/* The search box of a map: see "The search box of the map" in app.js. --find is the color of the found shows. */
+.vector-search { position: absolute; left: 12px; top: 12px; z-index: 50; display: flex; align-items: center; gap: 4px;
+  width: 310px; max-width: calc(100% - 24px); padding: 3px 5px 3px 9px; background: var(--card);
+  border: 1px solid var(--border); border-radius: var(--radius-m); box-shadow: var(--control-shadow);
+  transition: border-color .15s ease, box-shadow .15s ease; }
+.vector-search:focus-within { border-color: var(--find); box-shadow: 0 0 0 3px color-mix(in srgb, var(--find) 22%, transparent); }
+.vector-search-icon { flex: none; color: var(--muted); }
+.vector-search-input { flex: 1; min-width: 0; padding: 5px 4px; font-family: var(--sans-face); font-size: 13px; border: 0;
+  background: transparent; color: var(--text); outline: none; }
+.vector-search-count { flex: none; font-size: 11px; font-weight: 600; color: var(--find); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vector-search.is-empty .vector-search-count { color: var(--muted); font-weight: 400; }
+.vector-search-btn { flex: none; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
+  background: transparent; border: 0; border-radius: var(--radius-s); color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; }
+.vector-search-btn:hover { background: var(--hover); color: var(--text); }
+/* A phone makes the page larger when an input has small text. Text of 16 pixels prevents this. */
+@media (pointer: coarse) { .vector-search-input { font-size: 16px; } }

@@ -144,7 +144,9 @@ export interface MapPoint {
 	owned: number;
 	tier: Tier | null;
 	score: number | null;
-	aka: string[];
+	aka?: string[];
+	/** The match in percent. The page adds it when the match gradient is on: see state/map.svelte.ts. */
+	match?: number | null;
 }
 
 export interface MapRegion {

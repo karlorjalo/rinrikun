@@ -4,9 +4,12 @@
 //
 // A change of one show changes the match of other shows a little, and it can move a show from
 // one list to a different list. Thus each change adds one to `version`. A page that shows a list
-// reads `version` and gets its list again a short time after the last change.
+// reads `version` and gets its list again a short time after the last change: see reload.svelte.ts.
+//
+// The maps show the tiers and the shows of the user, thus they get each change at once.
 import { api } from '#lib/api/client.js';
 import type { InterestCounts, Show, Tier } from '#lib/api/types.js';
+import { mapStore } from './map.svelte.js';
 import { watchList } from './watchlist.svelte.js';
 
 class Library {
@@ -22,6 +25,8 @@ class Library {
 		const result = await api.setTier(show.id, tier);
 		show.tier = result.tier;
 		show.weight = result.weight;
+		// `ids` has the show and its other entries. The map has only one of them as a point.
+		mapStore.change({ ids: result.ids ?? [show.id], tier: result.tier });
 		this.changed();
 	}
 
@@ -31,6 +36,7 @@ class Library {
 		show.manual_watched = watched ? 1 : 0;
 		show.owned = result.owned;
 		if (!watched) show.tier = null;
+		mapStore.change({ ids: [show.id], owned: result.owned });
 		watchList.note(show);
 		this.changed();
 	}
@@ -40,6 +46,7 @@ class Library {
 		await api.setDismissed(show.id, dismissed);
 		show.dismissed = dismissed ? 1 : 0;
 		if (dismissed || show.interest === 0) show.interest = null;
+		mapStore.matchChanged();
 		watchList.note(show);
 		this.changed();
 	}
@@ -53,6 +60,8 @@ class Library {
 		show.interest = result.interest;
 		show.dismissed = result.dismissed;
 		this.counts = result.counts;
+		// An answer changes the taste model, thus the match of the other shows changes
+		mapStore.matchChanged();
 		watchList.note(show);
 		this.changed();
 	}
