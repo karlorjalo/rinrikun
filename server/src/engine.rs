@@ -10,6 +10,7 @@ use nalgebra::{DMatrix, DVector};
 use rayon::prelude::*;
 
 use crate::math::{self, Sparse, dot};
+use crate::memo::Memo;
 use crate::store::{LogEntry, Row, Store};
 
 /// Centered cosine similarity at which the D-tier penalty starts
@@ -99,11 +100,12 @@ pub struct Content {
     pub liked_w: Vec<f32>,
 }
 
-/// The results that the engine keeps until the data of the user changes
+/// The results that the engine keeps until the data of the user changes. Requests at the same
+/// time wait for one computation of a value (see memo.rs).
 #[derive(Default)]
 struct Cache {
-    matches: Option<Vec<f32>>,
-    guesses: Option<Vec<f32>>,
+    matches: Memo<Vec<f32>>,
+    guesses: Memo<Vec<f32>>,
 }
 
 pub struct Engine {
@@ -154,7 +156,7 @@ pub struct Engine {
     pub entry_row: Vec<Option<usize>>,
     /// The group of each row for the year, the format, the number of episodes and the crowd score. -1 = not known.
     pub kind_codes: Vec<[i64; 4]>,
-    cache: Mutex<Cache>,
+    cache: Cache,
     /// The match of each card that the Discover deck gave, until the user answers it
     pub deck_match: Mutex<HashMap<String, f32>>,
 }
@@ -292,7 +294,7 @@ impl Engine {
             links: Vec::new(),
             entry_row: Vec::new(),
             kind_codes: Vec::new(),
-            cache: Mutex::new(Cache::default()),
+            cache: Cache::default(),
             deck_match: Mutex::new(HashMap::new()),
         };
         engine.build_tag_matrix();
@@ -334,7 +336,8 @@ impl Engine {
 
     /// Forget the match and the tier guess: the data of the user changed
     pub fn clear_cache(&self) {
-        *self.cache.lock().unwrap() = Cache::default();
+        self.cache.matches.clear();
+        self.cache.guesses.clear();
     }
 
     pub fn len(&self) -> usize {
@@ -872,12 +875,7 @@ impl Engine {
 
     /// `match_percent`: the match of each row in percent, NaN for a row without a match
     pub fn match_percent(&self) -> Vec<f32> {
-        if let Some(m) = &self.cache.lock().unwrap().matches {
-            return m.clone();
-        }
-        let out = self.compute_match();
-        self.cache.lock().unwrap().matches = Some(out.clone());
-        out
+        self.cache.matches.get_or_compute(|| self.compute_match())
     }
 
     fn compute_match(&self) -> Vec<f32> {
@@ -932,9 +930,10 @@ impl Engine {
 
     /// `tier_guess`: the tier that the tier model predicts for each row, NaN if the user has too few ratings
     pub fn tier_guess(&self) -> Vec<f32> {
-        if let Some(g) = &self.cache.lock().unwrap().guesses {
-            return g.clone();
-        }
+        self.cache.guesses.get_or_compute(|| self.compute_guess())
+    }
+
+    fn compute_guess(&self) -> Vec<f32> {
         let n = self.len();
         let mut out = vec![f32::NAN; n];
         let rated: Vec<&str> = self.owned_idx.iter().filter_map(|&i| self.rows[i].tier.as_deref()).filter(|t| tier_value(Some(t)).is_some()).collect();
@@ -951,7 +950,6 @@ impl Engine {
                 }
             }
         }
-        self.cache.lock().unwrap().guesses = Some(out.clone());
         out
     }
 

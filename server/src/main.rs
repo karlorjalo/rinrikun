@@ -18,6 +18,7 @@ mod evaluate;
 mod frames;
 mod lists;
 mod math;
+mod memo;
 mod server;
 mod store;
 
