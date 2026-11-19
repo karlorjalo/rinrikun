@@ -22,19 +22,28 @@
 
 	let { data }: PageProps = $props();
 
-	/** The deck of the page: the kept deck of the browser, or a new deck with the cards of the data */
-	function deckFor(cards: Show[] | null): DiscoverDeck {
-		if (!browser) return new DiscoverDeck(cards ?? []);
-		if (cards === null && kept.deck) return kept.deck;
-		kept.deck = new DiscoverDeck(cards ?? []);
+	/**
+	 * The deck of the page: the kept deck of the browser while it has a card, else a new deck with
+	 * the cards of the data. The answers of the user do not make a new deck: the check of the kept
+	 * deck is not a dependency.
+	 */
+	function deckFor(cards: Show[]): DiscoverDeck {
+		if (!browser) return new DiscoverDeck(cards);
+		if (untrack(() => kept.deck?.show)) return kept.deck!;
+		kept.deck = new DiscoverDeck(cards);
 		return kept.deck;
 	}
 	const deck = $derived(deckFor(data.cards));
 
-	// In the browser: the pictures of the cards, and new cards if the deck is empty
+	// In the browser: the new cards of the data go to the end of a kept deck. Then the pictures
+	// of the cards, and new cards if the deck is empty.
 	$effect(() => {
 		const current = deck;
-		untrack(() => current.prepare());
+		const cards = data.cards;
+		untrack(() => {
+			current.add(cards);
+			current.prepare();
+		});
 	});
 	$effect(() => {
 		if (data.counts) library.counts = data.counts;

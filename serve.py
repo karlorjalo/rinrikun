@@ -269,7 +269,7 @@ def index():
 
 app.mount("/ui", PageFiles(directory=ROOT / "ui"), name="ui")
 
-# The new page is at /next while it replaces the old page. A Node server renders it (web/server.js),
+# The new page is at /next while it replaces the old page. A Node server renders it (node web/build),
 # and this server passes the requests on to it: see web/README.md and scripts/restart_servers.ps1.
 WEB_SERVER = os.environ.get("RINRIKUN_WEB", "http://127.0.0.1:8780")
 

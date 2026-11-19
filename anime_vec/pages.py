@@ -2,7 +2,7 @@
 
 The server has two pages while the new page replaces the old page:
   PageFiles     The old page in ui/: a few files without a build.
-  forward_page  The new page at /next. A Node server renders it (web/server.js): this server
+  forward_page  The new page at /next. A Node server renders it (node web/build): this server
                 passes the requests for /next on to it, thus the browser sees one address.
 """
 import urllib.error

@@ -2,15 +2,19 @@
 
 The new page of rinrikun. It uses SvelteKit, Tailwind CSS and components from shadcn-svelte (Bits UI).
 
-The server renders each page with its data, and the page then runs in the browser. A small Node
-server does the rendering (`server.js`, with the build of `@sveltejs/adapter-node`). It gets the
-data from the API server (the Python server; later the Rust server). The API server passes the
-requests for `/next` on to the Node server, thus the browser sees one address. The old page in
-`ui/` stays in use until the user approves the new page.
+The server renders each page with its data, and the page then runs in the browser. The load
+function of each tab is in its `+page.server.ts`: it gets the data from the API server (the Python
+server or the Rust server). The Node server of the build of `@sveltejs/adapter-node` (`node build`)
+runs the load functions and renders the pages. The API server passes the requests for `/next` on
+to the Node server, thus the browser sees one address. The old page in `ui/` stays in use until
+the user approves the new page.
 
 How the state of a tab works:
 
-- The data of a tab comes from its load function (`+page.server.ts`, or `+page.ts` for Discover).
+- The data of a tab comes from its load function (`+page.server.ts`). On the first visit the
+  server renders the page with it. On a later visit the browser gets only the data from the server.
+- The Discover deck stays in the browser when the user opens a different tab. When the user comes
+  back, the page shows the same card, and the new cards of the load go to the end of the deck.
 - The filters, the seed of a list and the show of the Similar tab are in the query of the address,
   thus the server renders them. A link of the tab bar adds the last query of its tab again.
 - The theme, the settings, the help card of the tiers and the formula of the recommendations are
@@ -50,8 +54,14 @@ API_TARGET=http://127.0.0.1:8799 npm run dev
 
 ## Build
 
-`npm run build` writes the page to `build/`. `node server.js` starts the server of the page: see the
-comment at its start for its environment variables (`HOST`, `PORT`, `API_TARGET`).
+`npm run build` writes the page to `build/`. `node build` starts the server of the page. Its
+environment variables:
+
+- `HOST` and `PORT`: the address of the server (the default of adapter-node is `0.0.0.0:3000`;
+  `scripts/restart_servers.ps1` gives `127.0.0.1:8780`).
+- `API_TARGET`: the API server (default `http://127.0.0.1:8765`). The load functions get their data
+  there. A request for `/api/...` that comes to this server goes on to it too: see
+  `src/hooks.server.ts`.
 
 If the page is below a path of the API server, set the environment variable `BASE_PATH` before the
 build. For example: `BASE_PATH=/next`. `scripts/build_web.ps1` does this.
@@ -59,7 +69,8 @@ build. For example: `BASE_PATH=/next`. `scripts/build_web.ps1` does this.
 ## Structure
 
 - `src/routes/`: one folder for each tab. The address of a tab is the name of its folder.
-- `src/hooks.server.ts`: the preferences from the cookies, and the address of the API for the load functions.
+- `src/hooks.server.ts`: the preferences from the cookies, the address of the API for the load
+  functions, and the requests for `/api/...` that come to the page server.
 - `src/lib/api/`: the requests to the server, and the types of the answers.
 - `src/lib/state/`: the state of the browser that more than one tab uses.
 - `src/lib/components/ui/`: the components from shadcn-svelte, with the look of the app.

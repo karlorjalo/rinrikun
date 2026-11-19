@@ -3,7 +3,7 @@
 //! the answer 405. When a different program (the Python server) changes the database, this server
 //! loads the data again.
 //!
-//! A Node server renders the new page (web/server.js). This server passes the requests for /next
+//! A Node server renders the new page (node web/build). This server passes the requests for /next
 //! on to it, as the Python server does (forward_page in anime_vec/pages.py).
 
 use std::collections::HashMap;

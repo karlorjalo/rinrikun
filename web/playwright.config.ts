@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// The browser tests use the page as the build makes it, with its Node server (server.js), and the
+// The browser tests use the page as the build makes it, with the server of the build (node build), and the
 // mock of the API. They never use the real server: it has the data of the user, and a test that
 // gives an answer would change it.
 const MOCK_PORT = 8798;
@@ -17,7 +17,7 @@ export default defineConfig({
 	webServer: [
 		{ command: `node tests/mock/server.mjs ${MOCK_PORT}`, port: MOCK_PORT, reuseExistingServer: false },
 		{
-			command: 'npm run build && node server.js',
+			command: 'npm run build && node build',
 			port: PAGE_PORT,
 			env: { API_TARGET: `http://127.0.0.1:${MOCK_PORT}`, HOST: '127.0.0.1', PORT: String(PAGE_PORT) },
 			reuseExistingServer: false,

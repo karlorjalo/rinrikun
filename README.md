@@ -75,7 +75,7 @@ powershell -ExecutionPolicy Bypass -File scripts\restart_servers.ps1        # on
 
 The folder `web/` has a new page for the same server: SvelteKit, Tailwind CSS and components. It has all tabs of the page in `ui/`, and each tab has its own address. The two pages use the same API and the same settings of the browser, thus you can use the two at the same time. `web/README.md` tells how to work on the new page.
 
-The new page is at `/next` (for example `http://localhost:8765/next/`). A small Node server renders its pages with the data (`web/server.js`, on `127.0.0.1:8780`), and the Python server passes the requests for `/next` on to it. Thus the browser sees one address. The new page needs Node.js:
+The new page is at `/next` (for example `http://localhost:8765/next/`). The Node server of its build renders its pages with the data (`node web/build`, on `127.0.0.1:8780`), and the Python server passes the requests for `/next` on to it. Thus the browser sees one address. The new page needs Node.js:
 
 ```
 powershell -ExecutionPolicy Bypass -File scripts\build_web.ps1                # install the packages and build the page to web\build

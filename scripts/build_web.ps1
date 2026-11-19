@@ -2,7 +2,7 @@
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\build_web.ps1
 #
-# The build is in web\build. A Node server renders the pages from it (web\server.js), and it
+# The build is in web\build. Its Node server renders the pages (node web\build), and it
 # reads the build when it starts. Thus start it again after a build:
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\restart_servers.ps1 -WebOnly

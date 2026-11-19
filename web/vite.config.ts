@@ -18,7 +18,8 @@ export default defineConfig({
 				runes: ({ filename }) =>
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
-			// A Node server renders the pages: see server.js. It gets the data from the API server.
+			// The Node server of the build renders the pages (node build). The load functions in
+			// the +page.server.ts files get the data from the API server: see src/hooks.server.ts.
 			adapter: adapter(),
 			paths: { base }
 		})
