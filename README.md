@@ -24,11 +24,11 @@ The name is the nickname 倫理君 (rinri-kun) that Utaha Kasumigaoka gives to T
 
 ## Setup
 
-- Rust (for `cargo build --release` in `server/`). The build of the program downloads ONNX Runtime one time and links it into the program. A computer without Rust can use the program from a different computer: copy it to `server\target\release\rinrikun.exe`.
+- Rust (for `cargo build --release` in `server/`). The build of the program downloads ONNX Runtime one time and links it into the program. A computer without Rust can use the program from a different computer: copy `rinrikun.exe` and `DirectML.dll` to `server\target\release\`.
 - Node.js (for the page).
 - `secrets.json` in the project folder (gitignored): `{"jellyfin_api_key": "...", "jellyfin_user_id": "..."}`, or the environment variables `JELLYFIN_API_KEY` and `JELLYFIN_USER_ID`. The Jellyfin server is `http://localhost:8096` (`server/src/build/jellyfin.rs`).
 
-The first build downloads the embedding model of about 1.1 GB (EmbeddingGemma 2, the ONNX build `onnx-community/embeddinggemma-2-ONNX`, with ONNX Runtime: no API keys, and the text stays on the computer). It uses the cache of Hugging Face if the model is there. The model is multilingual, because the Jellyfin rows are in Japanese and the AniList rows are in English. The build embeds on the CPU, about 0.2 seconds for each text: a weekly build has a few new texts, but the first build of about 21 000 titles takes more than one hour.
+The first build downloads the embedding model of about 1.1 GB (EmbeddingGemma 2, the ONNX build `onnx-community/embeddinggemma-2-ONNX`, with ONNX Runtime: no API keys, and the text stays on the computer). It uses the cache of Hugging Face if the model is there. The model is multilingual, because the Jellyfin rows are in Japanese and the AniList rows are in English. The build embeds on the GPU with DirectML (DirectX 12: an NVIDIA, AMD or Intel card), about 0.04 seconds for each text on an RTX 3070: a weekly build has a few new texts, and the first build of about 21 000 titles takes about 15 minutes. Without a usable GPU (or without `DirectML.dll` next to the program) the build uses the CPU, about 4 times slower. `RINRIKUN_EMBED=cpu` selects the CPU.
 
 ## Run
 

@@ -10,9 +10,11 @@ cargo build --release
 ```
 
 The program is `target/release/rinrikun.exe`. The PC of the server has no Rust: build on a
-different computer, and copy the program to `server\target\release\rinrikun.exe` on the PC (the
-scripts look for it there). The build of the program downloads ONNX Runtime one time (the crate
-`ort` 2.0.0-rc.13: the newer versions need Rust 1.92) and links it into the program.
+different computer, and copy the program and `DirectML.dll` (also in `target/release`) to
+`server\target\release\` on the PC (the scripts look for the program there). The build of the
+program downloads ONNX Runtime one time (the crate `ort` 2.0.0-rc.13: the newer versions need Rust
+1.92) and links it into the program. That build of ONNX Runtime has the DirectML provider; it needs
+`DirectML.dll` next to the program at run time.
 
 ## The server
 
@@ -65,9 +67,11 @@ The steps (`src/build/`):
 3. The connection of the AniList rows to the library rows: the id map, then the titles (the ratio
    of `difflib.SequenceMatcher`, with the same algorithm).
 4. The rows in the database. The tiers and the other data of the user stay.
-5. The embeddings of the rows whose text changed: EmbeddingGemma 2 (ONNX) on the CPU, with the
-   model files from the cache of Hugging Face (or a download to `model_cache/`). One text takes
-   about 0.2 seconds; a weekly build has a few texts.
+5. The embeddings of the rows whose text changed: EmbeddingGemma 2 (ONNX) with the model files
+   from the cache of Hugging Face (or a download to `model_cache/`). The model runs on the GPU
+   with DirectML: about 0.04 seconds for each text on an RTX 3070 (the CPU: about 0.16 seconds).
+   Without a usable GPU the build uses the CPU and tells it in the log; `RINRIKUN_EMBED=cpu`
+   selects the CPU. The GPU vectors had the cosine 1.000000 to the stored vectors.
 6. The map: t-SNE with the steps of sklearn, the grid of the close view, and the named areas.
 
 `--root` is the project folder (default: the folder of now); `--db` is the database (default:

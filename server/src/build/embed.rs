@@ -3,7 +3,8 @@
 //! hashes of the first version of the app: a change makes all stored embeddings old.
 //!
 //! EmbeddingGemma 2 is multilingual: the library rows are in Japanese and the AniList rows in
-//! English. The model files come from the cache of Hugging Face, or the build downloads them.
+//! English. The model files come from the cache of Hugging Face, or the build downloads them. The
+//! model runs on the GPU with DirectML (see `gpu_session`), else on the CPU.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -118,8 +119,35 @@ pub struct Embedder {
     extra: Vec<(String, Vec<i64>)>,
 }
 
+/// A session of the model on the GPU with DirectML (DirectX 12): the NVIDIA card of the PC, or
+/// another GPU. ONNX Runtime needs DirectML.dll next to the program. DirectML does not permit
+/// the memory pattern and the parallel execution of ONNX Runtime.
+fn gpu_session(model: &Path) -> Result<Session> {
+    let provider = ort::ep::DirectML::default()
+        .with_device_filter(ort::ep::directml::DeviceFilter::Gpu)
+        .with_performance_preference(ort::ep::directml::PerformancePreference::HighPerformance)
+        .build()
+        .error_on_failure();
+    Session::builder()
+        .map_err(|e| anyhow!("{e}"))?
+        .with_memory_pattern(false)
+        .map_err(|e| anyhow!("{e}"))?
+        .with_parallel_execution(false)
+        .map_err(|e| anyhow!("{e}"))?
+        .with_execution_providers([provider])
+        .map_err(|e| anyhow!("{e}"))?
+        .commit_from_file(model)
+        .map_err(|e| anyhow!("cannot load the model: {e}"))
+}
+
+/// A session of the model on the CPU
+fn cpu_session(model: &Path) -> Result<Session> {
+    Session::builder().map_err(|e| anyhow!("{e}"))?.commit_from_file(model).map_err(|e| anyhow!("cannot load the model: {e}"))
+}
+
 impl Embedder {
     /// Load the model. `root/model_cache` keeps a download if the cache of Hugging Face does not have the model.
+    /// The model runs on the GPU (DirectML) if it can, else on the CPU. RINRIKUN_EMBED=cpu selects the CPU.
     pub fn load(root: &Path) -> Result<Embedder> {
         let folder = match cached_model() {
             Some(folder) => folder,
@@ -133,10 +161,19 @@ impl Embedder {
         tokenizer
             .with_truncation(Some(tokenizers::TruncationParams { max_length: MAX_TOKENS, ..Default::default() }))
             .map_err(|e| anyhow!("cannot set the truncation: {e}"))?;
-        let session = Session::builder()
-            .map_err(|e| anyhow!("{e}"))?
-            .commit_from_file(folder.join(MODEL_FILE))
-            .map_err(|e| anyhow!("cannot load the model: {e}"))?;
+        let model = folder.join(MODEL_FILE);
+        let (session, device) = if std::env::var("RINRIKUN_EMBED").is_ok_and(|v| v.eq_ignore_ascii_case("cpu")) {
+            (cpu_session(&model)?, "the CPU (RINRIKUN_EMBED=cpu)".to_string())
+        } else {
+            match gpu_session(&model) {
+                Ok(session) => (session, "the GPU (DirectML)".to_string()),
+                Err(error) => {
+                    eprintln!("WARNING the GPU is not usable for the embeddings ({error:#}): the CPU computes them");
+                    (cpu_session(&model)?, "the CPU".to_string())
+                }
+            }
+        };
+        println!("the embeddings run on {device}");
         let extra = session
             .inputs()
             .iter()

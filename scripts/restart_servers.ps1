@@ -17,7 +17,7 @@
 # -WebOnly starts only the page server again, for example after a new build of the page.
 #
 # The PC has no Rust: build the program on a different computer (cargo build --release in server\)
-# and copy it to server\target\release\rinrikun.exe.
+# and copy rinrikun.exe and DirectML.dll (the GPU of the embeddings) to server\target\release\.
 #
 # Start one Rust process for all addresses: the server keeps your data in memory, and two
 # processes would not agree after a change through one of them.
