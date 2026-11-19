@@ -5,7 +5,8 @@
 	//
 	// Keys: N or ← not interested, I or → interested, W seen it, Space next card, Backspace takes
 	// the last answer back. After "Seen it" the keys of the tiers give a tier, and Escape goes back.
-	import { onMount } from 'svelte';
+	import { untrack } from 'svelte';
+	import { browser } from '$app/env';
 	import DeckCard from '#lib/components/deck/DeckCard.svelte';
 	import FrameStrip from '#lib/components/deck/FrameStrip.svelte';
 	import TierButtons from '#lib/components/deck/TierButtons.svelte';
@@ -13,15 +14,33 @@
 	import PageTitle from '#lib/components/PageTitle.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { keysBusy, tierOfKey } from '#lib/keys.js';
-	import { discoverDeck as deck } from '#lib/state/discover.svelte.js';
+	import type { Show } from '#lib/api/types.js';
+	import { DiscoverDeck, kept } from '#lib/state/discover.svelte.js';
 	import { library } from '#lib/state/library.svelte.js';
 	import { pictures } from '#lib/state/pictures.svelte.js';
+	import type { PageProps } from './$types';
 
-	onMount(() => {
-		deck.start();
+	let { data }: PageProps = $props();
+
+	/** The deck of the page: the kept deck of the browser, or a new deck with the cards of the data */
+	function deckFor(cards: Show[] | null): DiscoverDeck {
+		if (!browser) return new DiscoverDeck(cards ?? []);
+		if (cards === null && kept.deck) return kept.deck;
+		kept.deck = new DiscoverDeck(cards ?? []);
+		return kept.deck;
+	}
+	const deck = $derived(deckFor(data.cards));
+
+	// In the browser: the pictures of the cards, and new cards if the deck is empty
+	$effect(() => {
+		const current = deck;
+		untrack(() => current.prepare());
+	});
+	$effect(() => {
+		if (data.counts) library.counts = data.counts;
 	});
 
-	const counts = $derived(library.counts);
+	const counts = $derived(library.counts ?? data.counts ?? { interested: 0, not_interested: 0 });
 	const progress = $derived(
 		`${counts.interested + counts.not_interested} answers · ${counts.interested} interested · ${counts.not_interested} not interested`
 	);
@@ -52,7 +71,7 @@
 
 <div class="mx-auto max-w-[680px]">
 	<PageTitle title="Discover" note={progress}>
-		<WatchList />
+		<WatchList initial={data.watch} />
 	</PageTitle>
 
 	{#if deck.show}

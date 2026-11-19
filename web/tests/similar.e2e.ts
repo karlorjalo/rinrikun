@@ -36,7 +36,7 @@ test('"Find similar" of the detail window opens the Similar tab for the show', a
 	await card.getByRole('heading').getByRole('button').click();
 	await page.getByTestId('detail').getByRole('button', { name: 'Find similar' }).click();
 
-	await expect(page).toHaveURL(/\/similar$/);
+	await expect(page).toHaveURL(/\/similar\?id=/);
 	await expect(page.getByTestId('similar-header')).toContainText(title!);
 	await expect(page.getByTestId('show-card').first()).toBeVisible();
 

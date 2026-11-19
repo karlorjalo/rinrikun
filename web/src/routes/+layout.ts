@@ -1,4 +1,3 @@
-// The page runs only in the browser. The server of the app is not a Node server: it gives the
-// files of the page and answers the "/api" requests.
-export const ssr = false;
+// The server renders each page with its data, and the page then runs in the browser. No page
+// is made at build time: the data changes all the time.
 export const prerender = false;

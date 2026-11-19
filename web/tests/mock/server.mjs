@@ -6,7 +6,8 @@
 // (see src/lib/api/types.ts), but the numbers come from simple rules, not from the real formulas.
 //
 // Usage: node tests/mock/server.mjs [port]      (the default port is 8799)
-// POST /api/__reset puts the data back to its start.
+// POST /api/__reset puts the data back to its start. GET /api/__requests gives the requests since
+// then: a test can check a request that the server of the page sent.
 import http from 'node:http';
 
 const PORT = Number(process.argv[2] ?? process.env.MOCK_PORT ?? 8799);
@@ -82,6 +83,8 @@ let points = [];
 let regions = [];
 let interestSource = {};
 let deckSeed = 1;
+/** The requests since the last reset: "GET /api/recommend?k=40..." */
+let requests = [];
 
 function makeData() {
 	const random = generator(20261119);
@@ -340,7 +343,8 @@ function known(id) {
 /** Give the answer for one request. `body` is the JSON of a POST request. */
 function answer(method, path, query, body) {
 	const route = `${method} ${path}`;
-	if (route === 'POST /api/__reset') return makeData(), { ok: true };
+	if (route === 'POST /api/__reset') return makeData(), (requests = []), { ok: true };
+	if (route === 'GET /api/__requests') return requests;
 	if (route === 'GET /api/profile') {
 		const mine = rows.filter((row) => row.owned);
 		const summary = { S: 0, A: 0, B: 0, C: 0, D: 0, unrated: 0 };
@@ -445,6 +449,7 @@ const server = http.createServer((request, response) => {
 	request.on('end', () => {
 		let status = 200;
 		let result;
+		if (!url.pathname.startsWith('/api/__')) requests.push(`${request.method} ${url.pathname}${url.search}`);
 		try {
 			result = answer(request.method, url.pathname, url.searchParams, text ? JSON.parse(text) : {});
 		} catch (error) {

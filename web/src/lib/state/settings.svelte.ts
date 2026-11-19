@@ -1,71 +1,70 @@
-// The theme and the settings of the look. The browser keeps them, with the keys of the old page.
-// Each value is also an attribute of the root element (data-theme, data-<key>), so that the
-// style sheet can use it: see src/app.html, which sets the attributes before the page shows.
+// The theme and the settings of the look. Each value is also an attribute of the root element
+// (data-theme, data-<key>), so that the style sheet can use it. The server sets the attributes
+// from the cookies (hooks.server.ts), and the browser keeps the values: see preferences.ts.
+//
+// The server renders a page with the values of the cookies. In the browser the page starts with
+// the same values, thus the first render in the browser is equal to the render of the server.
+// Then `start` reads the values of the browser.
+import { page } from '$app/state';
+import {
+	SETTINGS_KEY,
+	THEME_KEY,
+	defaultSettings,
+	loadPreference,
+	parseSettings,
+	parseTheme,
+	savePreference,
+	type SettingKey,
+	type SettingValues,
+	type Theme
+} from '#lib/preferences.js';
 
-const THEME_KEY = 'rinrikun-theme';
-const SETTINGS_KEY = 'rinrikun-settings';
-
-export type Theme = 'light' | 'dark';
-
-/** The settings of the Settings tab. The first option of a setting is its default. */
-export const SETTING_OPTIONS = {
-	font: ['mixed', 'sans'],
-	petals: ['on', 'off'],
-	gradient: ['off', 'on']
-} as const;
-
-export type SettingKey = keyof typeof SETTING_OPTIONS;
-export type SettingValues = { [K in SettingKey]: (typeof SETTING_OPTIONS)[K][number] };
-
-function systemTheme(): Theme {
-	return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-
-function savedValues(): SettingValues {
-	const values = { font: 'mixed', petals: 'on', gradient: 'off' } as SettingValues;
-	try {
-		const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') || {};
-		for (const key of Object.keys(SETTING_OPTIONS) as SettingKey[]) {
-			if ((SETTING_OPTIONS[key] as readonly string[]).includes(saved[key])) {
-				(values[key] as string) = saved[key];
-			}
-		}
-	} catch {
-		// The browser does not permit the storage: the settings have their defaults
-	}
-	return values;
-}
+export { SETTING_OPTIONS, type SettingKey, type SettingValues, type Theme } from '#lib/preferences.js';
 
 class Settings {
-	/** The theme that the page shows now */
-	theme = $state<Theme>((document.documentElement.dataset.theme as Theme) || systemTheme());
-	values = $state<SettingValues>(savedValues());
+	/** The values of the browser are there */
+	ready = $state(false);
+	private own = $state<SettingValues>(defaultSettings());
+	/** The theme that the user selected, or null: the page then follows the system */
+	private ownTheme = $state<Theme | null>(null);
+	private systemDark = $state(false);
 
-	constructor() {
-		// The page follows the system until the user selects a theme
-		matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-			if (!document.documentElement.dataset.theme) this.theme = systemTheme();
-		});
+	/** Read the values in the browser. The root layout calls it when the page starts. */
+	start() {
+		if (this.ready) return;
+		this.own = parseSettings(loadPreference(SETTINGS_KEY));
+		this.ownTheme = parseTheme(loadPreference(THEME_KEY));
+		const media = matchMedia('(prefers-color-scheme: dark)');
+		this.systemDark = media.matches;
+		media.addEventListener('change', () => (this.systemDark = media.matches));
+		const root = document.documentElement;
+		if (this.ownTheme) root.dataset.theme = this.ownTheme;
+		for (const [key, value] of Object.entries(this.own)) root.dataset[key] = value;
+		this.ready = true;
+	}
+
+	/** The values that the page shows */
+	get values(): SettingValues {
+		return this.ready ? this.own : (page.data.preferences?.settings ?? defaultSettings());
+	}
+
+	/** The theme that the page shows now */
+	get theme(): Theme {
+		if (!this.ready) return page.data.preferences?.theme ?? 'light';
+		return this.ownTheme ?? (this.systemDark ? 'dark' : 'light');
 	}
 
 	toggleTheme() {
-		this.theme = this.theme === 'dark' ? 'light' : 'dark';
-		document.documentElement.dataset.theme = this.theme;
-		try {
-			localStorage.setItem(THEME_KEY, this.theme);
-		} catch {
-			// The theme then stays only until the page closes
-		}
+		const next: Theme = this.theme === 'dark' ? 'light' : 'dark';
+		this.ownTheme = next;
+		document.documentElement.dataset.theme = next;
+		savePreference(THEME_KEY, next);
 	}
 
 	set<K extends SettingKey>(key: K, value: SettingValues[K]) {
-		this.values[key] = value;
+		this.own = { ...this.own, [key]: value };
 		document.documentElement.dataset[key] = value;
-		try {
-			localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.values));
-		} catch {
-			// The setting then stays only until the page closes
-		}
+		savePreference(SETTINGS_KEY, JSON.stringify(this.own));
 	}
 
 	/** The maps show the match of a show as the brightness of its poster */

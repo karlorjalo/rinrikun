@@ -1,10 +1,11 @@
 <script lang="ts">
 	// The Ratings tab: the shows that the user rated, by tier, the shows that the user marked as
-	// watched by hand, and the shows that the user removed from the recommendations.
+	// watched by hand, and the shows that the user removed from the recommendations. The server
+	// renders the lists (+page.server.ts). The filters are in the query of the address.
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { api } from '#lib/api/client.js';
-	import type { Show, Tier } from '#lib/api/types.js';
+	import { page } from '$app/state';
+	import type { Tier } from '#lib/api/types.js';
 	import FilterGroup from '#lib/components/FilterGroup.svelte';
 	import PageTitle from '#lib/components/PageTitle.svelte';
 	import ShowCard from '#lib/components/show/ShowCard.svelte';
@@ -12,25 +13,29 @@
 	import { Button } from '#lib/components/ui/button/index.js';
 	import VnWindow from '#lib/components/VnWindow.svelte';
 	import { TIERS, countOf, displayTitles } from '#lib/format.js';
-	import { ratingsView as view } from '#lib/state/ratings.svelte.js';
-	import { loadWithChanges } from '#lib/state/reload.svelte.js';
+	import { FILTER_NAVIGATION, withQuery } from '#lib/links.js';
+	import type { PageProps } from './$types';
 
-	let rated = $state<Show[]>([]);
-	let manual = $state<Show[]>([]);
-	let dismissed = $state<Show[]>([]);
-	let loaded = $state(false);
+	let { data }: PageProps = $props();
+	const { rated, manual, dismissed } = $derived(data);
 
-	async function load() {
-		try {
-			[rated, manual, dismissed] = await Promise.all([api.ratings(), api.watched(), api.dismissed()]);
-			loaded = true;
-		} catch (error) {
-			console.error('Failed to load the ratings', error);
-		}
+	type Source = 'rated' | 'manual' | 'dismissed';
+	type Sort = 'tier' | 'match' | 'score' | 'title';
+	const DEFAULTS = { tier: 'all', show: 'rated', sort: 'tier' };
+	/** The filters of the address. A value that is not an option gets its default. */
+	const query = (key: keyof typeof DEFAULTS, options: readonly string[]) => {
+		const value = page.url.searchParams.get(key) ?? DEFAULTS[key];
+		return options.includes(value) ? value : DEFAULTS[key];
+	};
+	const view = $derived({
+		tier: query('tier', ['all', ...TIERS]) as Tier | 'all',
+		source: query('show', ['rated', 'manual', 'dismissed']) as Source,
+		sort: query('sort', ['tier', 'match', 'score', 'title']) as Sort
+	});
+
+	function filter(key: keyof typeof DEFAULTS, value: string) {
+		goto(withQuery(page.url, { [key]: value }, DEFAULTS), FILTER_NAVIGATION);
 	}
-
-	// Get the lists when the tab opens, and a short time after the last change of a show
-	loadWithChanges(load);
 
 	const counts = $derived(
 		Object.fromEntries(TIERS.map((tier) => [tier, rated.filter((s) => s.tier === tier).length])) as Record<Tier, number>
@@ -61,12 +66,14 @@
 >
 	<FilterGroup
 		label="Tier"
-		bind:value={view.tier}
+		value={view.tier}
+		onchange={(value) => filter('tier', value)}
 		options={[{ value: 'all', label: 'All' }, ...TIERS.map((tier) => ({ value: tier, label: tier, count: counts[tier] }))]}
 	/>
 	<FilterGroup
 		label="Show"
-		bind:value={view.source}
+		value={view.source}
+		onchange={(value) => filter('show', value)}
 		options={[
 			{ value: 'rated', label: 'Rated' },
 			{ value: 'manual', label: 'Manual', count: manual.length, title: 'Shows that you marked as watched and that are not in the library' },
@@ -75,7 +82,8 @@
 	/>
 	<FilterGroup
 		label="Sort"
-		bind:value={view.sort}
+		value={view.sort}
+		onchange={(value) => filter('sort', value)}
 		options={[
 			{ value: 'tier', label: 'Tier' },
 			{ value: 'match', label: 'Match' },
@@ -93,7 +101,7 @@
 			<ShowCard {show} ownedBadge={false} />
 		{/each}
 	</div>
-{:else if loaded}
+{:else}
 	<div class="px-5 py-10 text-center text-muted-foreground" data-testid="ratings-empty">
 		{#if view.source === 'dismissed' && view.tier === 'all'}
 			<VnWindow line="切り捨てた作品はまだ一つもないのね。優しいのか、優柔不断なのか……。" />

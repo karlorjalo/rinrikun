@@ -10,7 +10,7 @@ test('the card has the numbers of the user, and a tier opens its ratings', async
 	await expect(tier).toHaveText(/A\s*\d+/);
 	const [inTier] = numbers(await tier.textContent());
 	await tier.click();
-	await expect(page).toHaveURL(/\/ratings$/);
+	await expect(page).toHaveURL(/\/ratings\?tier=A$/);
 	await expect(page.getByRole('radio', { name: /^A \d+$/ })).toHaveAttribute('data-state', 'on');
 	await expect(page.getByTestId('show-card')).toHaveCount(inTier);
 });

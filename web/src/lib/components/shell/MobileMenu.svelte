@@ -7,11 +7,12 @@
 	import { resolve } from '$app/paths';
 	import * as DropdownMenu from '#lib/components/ui/dropdown-menu/index.js';
 	import { TABS, type TabRoute } from '#lib/nav.js';
+	import { tabSearch } from '#lib/state/tab-search.svelte.js';
 
 	let open = $state(false);
 
 	async function show(route: TabRoute) {
-		await goto(resolve(route));
+		await goto(resolve(route) + tabSearch.of(route));
 		// The user opened the menu from some place of a long page. The new tab starts at its top.
 		window.scrollTo(0, 0);
 	}

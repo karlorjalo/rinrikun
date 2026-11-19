@@ -32,9 +32,6 @@
 	$effect(() => {
 		text = shown;
 	});
-	$effect(() => {
-		titles.load();
-	});
 
 	const valid = $derived(longEnough(text));
 	const found = $derived(valid && open ? titles.find(text, 10) : []);
@@ -76,6 +73,7 @@
 			aria-label="Search a title"
 			autocomplete="off"
 			spellcheck={false}
+			onfocus={() => titles.load()}
 			class="min-w-0 flex-1 border-0 bg-transparent py-3 pr-3.5 pl-2.5 font-sans text-[15px] text-foreground outline-none placeholder:text-muted-foreground"
 			oninput={(event) => {
 				text = event.currentTarget.value;

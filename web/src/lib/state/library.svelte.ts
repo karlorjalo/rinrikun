@@ -14,8 +14,8 @@ import { watchList } from './watchlist.svelte.js';
 
 class Library {
 	version = $state(0);
-	/** The numbers of the answers of the Discover deck */
-	counts = $state<InterestCounts>({ interested: 0, not_interested: 0 });
+	/** The numbers of the answers of the Discover deck, after the first answer in the browser. Before it, the page shows the numbers of its data. */
+	counts = $state<InterestCounts | null>(null);
 
 	private changed() {
 		this.version += 1;

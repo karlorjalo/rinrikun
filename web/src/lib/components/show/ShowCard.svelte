@@ -3,11 +3,10 @@
 	// the card opens the detail window. The button with the petal uses the show as the seed of a
 	// list of recommendations. A list of recommendations also has the button that removes the show.
 	import { goto } from '$app/navigation';
-	import { resolve } from '$app/paths';
 	import type { Show } from '#lib/api/types.js';
 	import { displayTitles, formatScore } from '#lib/format.js';
 	import { detail } from '#lib/state/detail.svelte.js';
-	import { seeds } from '#lib/state/seed.svelte.js';
+	import { seedHref } from '#lib/links.js';
 	import Chip from './Chip.svelte';
 	import GuessText from './GuessText.svelte';
 	import MatchText from './MatchText.svelte';
@@ -35,8 +34,7 @@
 	const similarity = $derived(show.similarity != null ? Math.round(show.similarity) : null);
 
 	function useAsSeed() {
-		seeds.recommend = show;
-		goto(resolve('/recommendations'));
+		goto(seedHref(show.id));
 	}
 
 	const round =

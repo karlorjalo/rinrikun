@@ -3,15 +3,13 @@
 	// with it: give a tier, mark it as watched, put it on the watch list, remove it from the
 	// recommendations, find similar shows, and use it as the seed of a list.
 	import { goto } from '$app/navigation';
-	import { resolve } from '$app/paths';
 	import type { Show, Tier } from '#lib/api/types.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Dialog from '#lib/components/ui/dialog/index.js';
 	import { TIERS, displayTitles, formatScore, overviewHtml } from '#lib/format.js';
 	import { detail } from '#lib/state/detail.svelte.js';
 	import { library } from '#lib/state/library.svelte.js';
-	import { seeds } from '#lib/state/seed.svelte.js';
-	import { similarView } from '#lib/state/similar.svelte.js';
+	import { seedHref, similarHref } from '#lib/links.js';
 	import GuessText from './GuessText.svelte';
 	import MatchText from './MatchText.svelte';
 	import Poster from './Poster.svelte';
@@ -58,16 +56,16 @@
 
 	function findSimilar() {
 		if (!show) return;
-		similarView.run(show);
+		const id = show.id;
 		detail.close();
-		goto(resolve('/similar'));
+		goto(similarHref(id));
 	}
 
 	function useAsSeed() {
 		if (!show) return;
-		seeds.recommend = show;
+		const id = show.id;
 		detail.close();
-		goto(resolve('/recommendations'));
+		goto(seedHref(id));
 	}
 </script>
 

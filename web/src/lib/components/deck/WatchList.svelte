@@ -13,11 +13,15 @@
 	import { library } from '#lib/state/library.svelte.js';
 	import { watchList } from '#lib/state/watchlist.svelte.js';
 
-	let open = $state(false);
+	let { initial }: { /** The list from the data of the page: the server renders its number */ initial?: Show[] } = $props();
 
-	// The button has the number of the shows before the list opens
+	let open = $state(false);
+	const count = $derived(watchList.loaded ? watchList.count : (initial?.length ?? 0));
+
+	// The list of the page data, or the list of the server if the page has none
 	$effect(() => {
-		watchList.load();
+		if (initial) watchList.set(initial);
+		else watchList.load();
 	});
 
 	function changed(next: boolean) {
@@ -54,12 +58,12 @@
 <Popover.Root bind:open onOpenChange={changed}>
 	<Popover.Trigger
 		class="{buttonVariants()} gap-2 py-[5px] pr-2 pl-3 text-[13px]"
-		aria-label="Watch list: {countOf(watchList.count, 'show')}"
+		aria-label="Watch list: {countOf(count, 'show')}"
 		data-testid="watch-button"
 	>
 		Watch list
 		<span class="box-border h-5 min-w-6 rounded-full bg-rose px-[7px] text-center text-[11.5px] leading-5 font-semibold text-rose-ink" data-testid="watch-count"
-			>{watchList.count}</span
+			>{count}</span
 		>
 	</Popover.Trigger>
 	<Popover.Content

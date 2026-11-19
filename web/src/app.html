@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" %rinrikun.root%>
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -20,8 +20,8 @@
 		/>
 		<script>
 			// The theme and the settings are attributes of the root element, for the style sheet.
-			// Set them here, before the page shows, so that the look does not change after the page
-			// shows. The keys are the keys of the old page: the user keeps the settings.
+			// The server sets them from the cookies. The old page keeps them in the local storage:
+			// a value that it changed after the last visit of this page wins. See preferences.ts.
 			try {
 				const t = localStorage.getItem('rinrikun-theme');
 				if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;

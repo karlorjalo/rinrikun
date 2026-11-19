@@ -3,10 +3,10 @@
 	// with a button or with a key. The shows without a tier come first.
 	//
 	// Keys: 1 to 5 or the letter of a tier give the tier. Backspace or ← takes the last tier back.
-	// Space or → goes to the next card.
-	import { onMount } from 'svelte';
+	// Space or → goes to the next card. The server renders the first card (+page.server.ts).
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import DeckCard from '#lib/components/deck/DeckCard.svelte';
 	import TierButtons from '#lib/components/deck/TierButtons.svelte';
 	import FilterGroup from '#lib/components/FilterGroup.svelte';
@@ -16,12 +16,17 @@
 	import VnWindow from '#lib/components/VnWindow.svelte';
 	import { countOf } from '#lib/format.js';
 	import { keysBusy, tierOfKey } from '#lib/keys.js';
-	import { reviewDeck as deck } from '#lib/state/review.svelte.js';
+	import { FILTER_NAVIGATION, withQuery } from '#lib/links.js';
+	import { ReviewDeck, type ReviewMode } from '#lib/state/review.svelte.js';
+	import type { PageProps } from './$types';
 
-	// The tab opens: the queue of now, from its first card
-	onMount(() => {
-		deck.load();
-	});
+	let { data }: PageProps = $props();
+	// A new deck for each visit of the tab and for each mode: the queue of now, from its first card
+	const deck = $derived(new ReviewDeck(data));
+
+	function setMode(mode: ReviewMode) {
+		goto(withQuery(page.url, { mode }, { mode: 'unrated' }), FILTER_NAVIGATION);
+	}
 
 	const progress = $derived(deck.total > 0 ? `${deck.rated} of ${deck.total} rated` : countOf(deck.queue.length, 'show'));
 
@@ -42,36 +47,30 @@
 	<PageTitle title="Library review" note={progress}>
 		<div class="rounded-md border bg-card p-[3px]">
 			<FilterGroup
-				value={deck.mode}
+				value={data.mode}
 				options={[
 					{ value: 'unrated', label: 'Unrated' },
 					{ value: 'all', label: 'All' }
 				]}
-				onchange={(mode) => deck.setMode(mode)}
+				onchange={setMode}
 			/>
 		</div>
 	</PageTitle>
 
 	{#if deck.show}
 		<DeckCard show={deck.show} label={deck.show.source === 'library' ? 'Library' : 'Watched'} position="{deck.index + 1} / {deck.queue.length}" />
-	{:else if deck.failed}
-		<div class="mb-5 flex min-h-[230px] items-center justify-center rounded-lg border bg-card px-6 py-12 text-center">
-			<p class="m-0 text-[14px] text-muted-foreground">The queue did not load. Is the server running?</p>
-		</div>
-	{:else if deck.loaded}
+	{:else}
 		<div class="mb-5 flex min-h-[230px] items-center justify-center rounded-lg border bg-card px-6 py-12 text-center" data-testid="deck-done">
 			<div class="max-w-[380px]">
-				<VnWindow line={deck.mode === 'unrated' ? 'あら、もう全部に評価をつけたの？ 倫理君にしては仕事が早いじゃない。' : 'これで最後よ。お疲れさま、倫理君。'} />
+				<VnWindow line={data.mode === 'unrated' ? 'あら、もう全部に評価をつけたの？ 倫理君にしては仕事が早いじゃない。' : 'これで最後よ。お疲れさま、倫理君。'} />
 				<h3 class="m-0 mb-2 font-serif text-[20px]">All done</h3>
-				<p class="m-0 mb-5 text-[14px] text-muted-foreground">{deck.mode === 'unrated' ? 'Every show has a tier.' : 'End of the queue.'}</p>
+				<p class="m-0 mb-5 text-[14px] text-muted-foreground">{data.mode === 'unrated' ? 'Every show has a tier.' : 'End of the queue.'}</p>
 				<div class="flex flex-wrap justify-center gap-2.5">
-					{#if deck.mode === 'unrated'}<Button onclick={() => deck.setMode('all')}>Review all</Button>{/if}
+					{#if data.mode === 'unrated'}<Button onclick={() => setMode('all')}>Review all</Button>{/if}
 					<Button variant="primary" onclick={() => goto(resolve('/'))}>Profile</Button>
 				</div>
 			</div>
 		</div>
-	{:else}
-		<div class="mb-5 min-h-[230px] rounded-lg border bg-card"></div>
 	{/if}
 
 	<div class="flex flex-col gap-2.5">

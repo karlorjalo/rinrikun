@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import tailwindcss from '@tailwindcss/vite';
-import adapter from '@sveltejs/adapter-static';
+import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 
 // The address below which the server gives the page. During the change from the old page the
@@ -18,9 +18,8 @@ export default defineConfig({
 				runes: ({ filename }) =>
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
-			// The page is a single page app: the server gives the same file for each address, and
-			// the page gets its data from the API. No page is made on the server.
-			adapter: adapter({ fallback: 'index.html' }),
+			// A Node server renders the pages: see server.js. It gets the data from the API server.
+			adapter: adapter(),
 			paths: { base }
 		})
 	],

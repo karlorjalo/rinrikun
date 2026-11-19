@@ -2,36 +2,22 @@
 	// The Profile tab: the numbers of the user (the ratings, what the user did with the
 	// recommendations, the answers of the Discover deck), and the map of all shows.
 	//
-	// The card has only the numbers. The text about them is in the tooltip of the "i".
-	import { goto } from '$app/navigation';
-	import { resolve } from '$app/paths';
-	import { api } from '#lib/api/client.js';
-	import type { InterestResults, Profile, RecLog, Tier } from '#lib/api/types.js';
+	// The card has only the numbers. The text about them is in the tooltip of the "i". The server
+	// renders the card with its data (+page.server.ts).
 	import InfoDot from '#lib/components/InfoDot.svelte';
 	import VectorMap from '#lib/components/map/VectorMap.svelte';
 	import TierPill from '#lib/components/show/TierPill.svelte';
 	import { TIERS, displayTitles } from '#lib/format.js';
 	import { mapStore } from '#lib/state/map.svelte.js';
-	import { ratingsView } from '#lib/state/ratings.svelte.js';
-	import { loadWithChanges } from '#lib/state/reload.svelte.js';
+	import { tierHref } from '#lib/links.js';
+	import type { PageProps } from './$types';
 
-	let profile = $state<Profile | null>(null);
-	let recLog = $state<RecLog | null>(null);
-	let interest = $state<InterestResults | null>(null);
-
-	async function load() {
-		try {
-			[profile, recLog, interest] = await Promise.all([api.profile(), api.recLog().catch(() => null), api.interestResults().catch(() => null)]);
-		} catch (error) {
-			console.error('Failed to load the profile', error);
-		}
-	}
-	loadWithChanges(load);
+	let { data }: PageProps = $props();
+	const { profile, recLog, interest } = $derived(data);
 
 	const number = (value: number) => value.toLocaleString('en-US');
 
 	const counts = $derived.by(() => {
-		if (!profile) return '';
 		// A show in the library is not always a show that the user watched. Thus the text does not say "watched" for it.
 		const inLibrary = profile.library_count ?? profile.owned_count;
 		const marked = profile.owned_count - inLibrary;
@@ -73,12 +59,6 @@
 		return text;
 	});
 
-	function openTier(tier: Tier) {
-		ratingsView.tier = tier;
-		ratingsView.source = 'rated';
-		goto(resolve('/ratings'));
-	}
-
 	// A part of the card. A line divides two parts: a part is not a box in the card.
 	const part = 'mt-4 border-t pt-4';
 	const partTitle = 'mb-2 flex flex-wrap items-center justify-between gap-1.5 font-serif text-[13.5px] font-semibold';
@@ -99,17 +79,16 @@
 		<div class={partTitle}><span>Ratings</span></div>
 		<div class={row}>
 			{#each TIERS as tier (tier)}
-				<button
-					type="button"
-					class="flex cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-transparent px-1.5 py-[3px] font-sans text-[12.5px] text-foreground transition-colors duration-100 hover:bg-muted"
+				<a
+					href={tierHref(tier)}
+					class="flex items-center gap-1.5 rounded-sm px-1.5 py-[3px] font-sans text-[12.5px] text-foreground no-underline transition-colors duration-100 hover:bg-muted"
 					title="View {tier} tier ratings"
-					onclick={() => openTier(tier)}
 				>
-					<TierPill {tier} /> <span class="font-semibold" data-tier-count={tier}>{profile?.tier_summary[tier] ?? 0}</span>
-				</button>
+					<TierPill {tier} /> <span class="font-semibold" data-tier-count={tier}>{profile.tier_summary[tier] ?? 0}</span>
+				</a>
 			{/each}
 			<span class="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
-				<span class="text-[11.5px]">Unrated:</span> <span class="font-semibold text-foreground">{profile?.tier_summary.unrated ?? 0}</span>
+				<span class="text-[11.5px]">Unrated:</span> <span class="font-semibold text-foreground">{profile.tier_summary.unrated ?? 0}</span>
 			</span>
 		</div>
 	</div>

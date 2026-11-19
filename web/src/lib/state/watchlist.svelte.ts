@@ -10,6 +10,8 @@ class WatchList {
 	 * list with a button that puts the show back, so that a wrong click loses nothing.
 	 */
 	gone = $state<string[]>([]);
+	/** The list is in the browser. Before it, the page shows the number of its data. */
+	loaded = $state(false);
 
 	/** The number of the shows on the list */
 	get count(): number {
@@ -23,11 +25,17 @@ class WatchList {
 	/** Get the list from the server: it has the correct order and the matches of now */
 	async load() {
 		try {
-			this.shows = await api.watchList();
-			this.gone = [];
+			this.set(await api.watchList());
 		} catch (error) {
 			console.error('Failed to load the watch list', error);
 		}
+	}
+
+	/** The list from the data of a page */
+	set(shows: Show[]) {
+		this.shows = shows;
+		this.gone = [];
+		this.loaded = true;
 	}
 
 	/** Keep the list correct after a change of one show */

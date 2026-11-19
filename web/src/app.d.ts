@@ -3,7 +3,10 @@
 declare global {
 	namespace App {
 		// interface Error {}
-		// interface Locals {}
+		interface Locals {
+			/** The preferences of the user, from the cookies */
+			preferences: import('#lib/preferences.js').Preferences;
+		}
 		// interface PageData {}
 		// interface PageState {}
 		// interface Platform {}

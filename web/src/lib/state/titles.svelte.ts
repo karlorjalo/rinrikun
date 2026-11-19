@@ -1,5 +1,5 @@
 // The titles of all shows, for the search box of the Similar tab. The page gets the list one
-// time, when a search box first needs it.
+// time, when the search box first gets the focus: the list is large.
 import { api } from '#lib/api/client.js';
 import type { Title } from '#lib/api/types.js';
 import { searchRank, searchWords, showSearchText } from '#lib/search.js';
@@ -44,14 +44,6 @@ class Titles {
 			.sort((a, b) => a[1] - b[1] || a[2] - b[2])
 			.slice(0, limit)
 			.map((item) => item[0]);
-	}
-
-	/** Some shows of the user at random, as examples below an empty search box */
-	examples(count: number): Title[] {
-		const mine = this.list.filter((title) => title.owned && (title.title_native || title.title));
-		const out: Title[] = [];
-		while (out.length < count && mine.length) out.push(mine.splice(Math.floor(Math.random() * mine.length), 1)[0]);
-		return out;
 	}
 }
 

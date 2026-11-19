@@ -2,7 +2,7 @@
 // answers are "interested", "not interested" and "seen it". The server draws the cards at random.
 //
 // The deck keeps its cards when the user opens a different tab. Thus the user comes back to the
-// same card, and the deck does not draw a card again that the user did not answer.
+// same card, and the deck does not draw a card again that the user did not answer: see `kept`.
 import { api } from '#lib/api/client.js';
 import type { Show, Tier } from '#lib/api/types.js';
 import { library } from './library.svelte.js';
@@ -13,7 +13,7 @@ const BATCH = 12;
 
 type Step = { show: Show; kind: 'answer' } | { show: Show; kind: 'seen'; tier: Tier | null };
 
-class DiscoverDeck {
+export class DiscoverDeck {
 	queue = $state<Show[]>([]);
 	index = $state(0);
 	/** The user said "Seen it" for the card: the deck shows the tier buttons */
@@ -27,14 +27,15 @@ class DiscoverDeck {
 		return this.queue[this.index] ?? null;
 	}
 
-	/** The tab opens: keep the card of now, or start a new deck */
-	async start() {
-		if (this.show) return;
-		this.queue = [];
-		this.index = 0;
-		this.undo = [];
-		this.seen = false;
-		await this.loadCards();
+	/** A deck with the cards that the server drew for the page */
+	constructor(cards: Show[]) {
+		this.queue = cards;
+	}
+
+	/** In the browser: get the pictures of the cards, and new cards if the deck is empty */
+	prepare() {
+		pictures.load(this.queue.slice(this.index).map((show) => show.id)).then(() => pictures.preload(this.queue[this.index + 1]?.id));
+		if (!this.show) this.loadCards();
 	}
 
 	/** Get the next cards and put them at the end of the queue */
@@ -139,4 +140,8 @@ class DiscoverDeck {
 	}
 }
 
-export const discoverDeck = new DiscoverDeck();
+/**
+ * The deck of the browser. It stays when the user opens a different tab: the load function of
+ * the tab then draws no cards. The server makes a new deck for each render.
+ */
+export const kept: { deck: DiscoverDeck | null } = { deck: null };

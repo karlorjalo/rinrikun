@@ -8,9 +8,40 @@
 	import TabBar from '#lib/components/shell/TabBar.svelte';
 	import ThemeToggle from '#lib/components/shell/ThemeToggle.svelte';
 	import * as Tooltip from '#lib/components/ui/tooltip/index.js';
+	import { library } from '#lib/state/library.svelte.js';
+	import { settings } from '#lib/state/settings.svelte.js';
+	import { tabSearch } from '#lib/state/tab-search.svelte.js';
+	import { tierHelp } from '#lib/state/tier-help.svelte.js';
+	import { afterNavigate, invalidate } from '$app/navigation';
+	import { onMount } from 'svelte';
 	import type { LayoutProps } from './$types';
 
 	let { children }: LayoutProps = $props();
+
+	// The browser has its own preferences: the first render used the values of the cookies
+	onMount(() => {
+		settings.start();
+		tierHelp.start();
+	});
+
+	// Each tab keeps its query: see tab-search.svelte.ts
+	afterNavigate(({ to }) => {
+		if (to) tabSearch.note(to.route.id, to.url.search);
+	});
+
+	// A change of a show changes the numbers of the Profile tab and the lists of the Ratings tab.
+	// Their load functions depend on "rinrikun:data": get them again a short time after the last change.
+	// The other tabs keep their lists, as the old page did: a removed recommendation keeps its place.
+	let seen = -1;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	$effect(() => {
+		const version = library.version;
+		if (seen >= 0 && version !== seen) {
+			clearTimeout(timer);
+			timer = setTimeout(() => invalidate('rinrikun:data'), 1500);
+		}
+		seen = version;
+	});
 </script>
 
 <svelte:head>

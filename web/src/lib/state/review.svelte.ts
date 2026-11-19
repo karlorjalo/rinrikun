@@ -1,55 +1,36 @@
 // The deck of the Review tab: the shows of the user, one card at a time. The user gives each
-// show a tier. The shows without a tier come first.
-import { api } from '#lib/api/client.js';
+// show a tier. The shows without a tier come first. The page makes a deck from its data each
+// time the tab opens, thus the deck has the queue of now.
 import type { Show, Tier } from '#lib/api/types.js';
 import { library } from './library.svelte.js';
 
 export type ReviewMode = 'unrated' | 'all';
 
-class ReviewDeck {
-	/** "unrated": only the shows without a tier. "all": then also the rated shows. */
-	mode = $state<ReviewMode>('unrated');
+/** The data of the Review tab: see routes/review/+page.server.ts */
+export interface ReviewData {
+	mode: ReviewMode;
+	queue: Show[];
+	/** The rated shows and all shows of the user */
+	rated: number;
+	total: number;
+}
+
+export class ReviewDeck {
 	queue = $state<Show[]>([]);
 	index = $state(0);
-	/** The numbers of the title row: the rated shows and all shows of the user */
 	rated = $state(0);
 	total = $state(0);
-	loaded = $state(false);
-	/** The server did not give the queue */
-	failed = $state(false);
 	/** The tiers that the user gave in this visit, with the tier that the show had before */
 	private undo: { show: Show; before: Tier | null }[] = [];
 
+	constructor(data: ReviewData) {
+		this.queue = data.queue;
+		this.rated = data.rated;
+		this.total = data.total;
+	}
+
 	get show(): Show | null {
 		return this.queue[this.index] ?? null;
-	}
-
-	/** Get the queue of the mode from the server, and start at its first card */
-	async load() {
-		const mode = this.mode;
-		try {
-			const [queue, profile] = await Promise.all([api.reviewQueue(mode === 'unrated'), api.profile()]);
-			// The user went to the other mode in the time of the request
-			if (this.mode !== mode) return;
-			this.queue = queue;
-			this.index = 0;
-			this.undo = [];
-			const summary = profile.tier_summary;
-			this.rated = summary.S + summary.A + summary.B + summary.C + summary.D;
-			this.total = this.rated + summary.unrated;
-			this.failed = false;
-		} catch (error) {
-			console.error('Failed to load the review queue', error);
-			this.failed = true;
-		}
-		this.loaded = true;
-	}
-
-	setMode(mode: ReviewMode) {
-		if (this.mode === mode) return;
-		this.mode = mode;
-		this.loaded = false;
-		this.load();
 	}
 
 	/** Give the show of the card a tier, and go to the next card */
@@ -87,5 +68,3 @@ class ReviewDeck {
 		if (this.index < this.queue.length) this.index += 1;
 	}
 }
-
-export const reviewDeck = new ReviewDeck();
