@@ -536,7 +536,9 @@ dialog#frame-viewer::backdrop { background: rgba(14, 11, 12, 0.86); }
   nav::-webkit-scrollbar { display: none; }
   nav button { flex: none; padding: 5px 12px; font-size: 13px; white-space: nowrap; }
   main { padding: 16px 12px 48px; }
-  .cards { grid-template-columns: 1fr; gap: 10px; }
+  /* One column that is not wider than the screen. A column of "1fr" gets as wide as the longest
+     line of a card that does not break, and the page was then two to three screens wide. */
+  .cards { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .hero-dna { padding: 18px 14px; }
   .hero-dna-top { flex-direction: column; gap: 14px; }
   .modal-head { flex-direction: column; align-items: center; text-align: center; }
