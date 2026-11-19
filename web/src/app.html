@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="color-scheme" content="light dark" />
+		<meta name="theme-color" content="#fbf8f8" media="(prefers-color-scheme: light)" />
+		<meta name="theme-color" content="#242022" media="(prefers-color-scheme: dark)" />
+		<title>りんりくん</title>
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+		<link
+			href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@500;600;700&family=Noto+Sans+JP:wght@400;500;600;700&display=swap"
+			rel="stylesheet"
+		/>
+		<!-- The weight 200 of Noto Sans JP, with only the three kana of the title (り, ん, く) -->
+		<link
+			href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@200&text=%E3%82%8A%E3%82%93%E3%81%8F&display=swap"
+			rel="stylesheet"
+		/>
+		<script>
+			// The theme and the settings are attributes of the root element, for the style sheet.
+			// Set them here, before the page shows, so that the look does not change after the page
+			// shows. The keys are the keys of the old page: the user keeps the settings.
+			try {
+				const t = localStorage.getItem('rinrikun-theme');
+				if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+			} catch (e) {}
+			try {
+				const saved = JSON.parse(localStorage.getItem('rinrikun-settings') || '{}') || {};
+				for (const key in saved) {
+					if (/^[a-z]+$/.test(key) && typeof saved[key] === 'string')
+						document.documentElement.dataset[key] = saved[key];
+				}
+			} catch (e) {}
+		</script>
+		%sveltekit.head%
+	</head>
+	<body>
+		<div style="display: contents">%sveltekit.body%</div>
+	</body>
+</html>

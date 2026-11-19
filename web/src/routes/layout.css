@@ -1,0 +1,227 @@
+@import 'tailwindcss';
+
+/* The dark theme. The user selects a theme with the button in the page header (the attribute
+   data-theme of the root element), or the page follows the setting of the system. */
+@custom-variant dark {
+	&:where([data-theme='dark'], [data-theme='dark'] *) {
+		@slot;
+	}
+	@media (prefers-color-scheme: dark) {
+		&:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *) {
+			@slot;
+		}
+	}
+}
+
+/* ---- The colors of the app ----
+   The neutral colors are the grey of the rose accent: a paper with a little rose, and an ink
+   with a little plum. --find is the color of the shows that a search on a map found. */
+:root {
+	--bg: #fbf8f8;
+	--card: #ffffff;
+	--border: #eae2e3;
+	--text: #231c1f;
+	--muted: #72656a;
+	--hover: #f4eeee;
+	--accent: #b35c72;
+	--accent-ink: #fbf8f8;
+	--tier-s: #c27803;
+	--tier-a: #b35c72;
+	--tier-b: #3f6285;
+	--tier-c: #6a6165;
+	--tier-d: #8c3333;
+	--find: #0e8177;
+	--sans-face: 'Noto Sans JP', 'Yu Gothic', sans-serif;
+	--serif-face: 'Noto Serif JP', 'Yu Mincho', serif;
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme='light']) {
+		--bg: #242022;
+		--card: #2d282b;
+		--border: #3d363a;
+		--text: #f5f0f1;
+		--muted: #a99ea3;
+		--hover: #3a3337;
+		--accent: #c9758a;
+		--accent-ink: #242022;
+		--tier-s: #e08a00;
+		--tier-a: #c9758a;
+		--tier-b: #5b8ab8;
+		--tier-c: #978d92;
+		--tier-d: #a84444;
+		--find: #2dd4bf;
+	}
+}
+[data-theme='dark'] {
+	--bg: #242022;
+	--card: #2d282b;
+	--border: #3d363a;
+	--text: #f5f0f1;
+	--muted: #a99ea3;
+	--hover: #3a3337;
+	--accent: #c9758a;
+	--accent-ink: #242022;
+	--tier-s: #e08a00;
+	--tier-a: #c9758a;
+	--tier-b: #5b8ab8;
+	--tier-c: #978d92;
+	--tier-d: #a84444;
+	--find: #2dd4bf;
+}
+/* The typeface setting "Sans only": titles and headings use the typeface of the other text */
+:root[data-font='sans'] {
+	--serif-face: var(--sans-face);
+}
+
+/* ---- The theme of Tailwind ----
+   The theme has only the values of the app. The default palette, the default corner sizes and
+   the default shadows of Tailwind are removed: a class such as "bg-indigo-500", "rounded-2xl"
+   or "shadow-lg" makes no style. This keeps the look of the app its own. */
+@theme inline {
+	--color-*: initial;
+	--color-white: #ffffff;
+	--color-black: #000000;
+	/* The names that the components use */
+	--color-background: var(--bg);
+	--color-foreground: var(--text);
+	--color-card: var(--card);
+	--color-card-foreground: var(--text);
+	--color-popover: var(--card);
+	--color-popover-foreground: var(--text);
+	--color-primary: var(--accent);
+	--color-primary-foreground: var(--accent-ink);
+	--color-secondary: var(--hover);
+	--color-secondary-foreground: var(--text);
+	--color-muted: var(--hover);
+	--color-muted-foreground: var(--muted);
+	--color-accent: var(--hover);
+	--color-accent-foreground: var(--text);
+	--color-destructive: var(--tier-d);
+	--color-border: var(--border);
+	--color-input: var(--border);
+	--color-ring: var(--accent);
+	/* The names of the app */
+	--color-rose: var(--accent);
+	--color-rose-ink: var(--accent-ink);
+	--color-tier-s: var(--tier-s);
+	--color-tier-a: var(--tier-a);
+	--color-tier-b: var(--tier-b);
+	--color-tier-c: var(--tier-c);
+	--color-tier-d: var(--tier-d);
+	--color-find: var(--find);
+
+	/* The corners have three sizes: small for a tag and a small button, medium for a button, a
+	   picture and a bar, large for a card and a window. A fully round shape ("rounded-full") is
+	   only for the tab bar, for a counter and for a round button. */
+	--radius-*: initial;
+	--radius-sm: 4px;
+	--radius-md: 8px;
+	--radius-lg: 12px;
+
+	/* A shadow is only for an element that floats above the page: a window, a list that opens,
+	   a tooltip and a control on a map. A card of the page has a border and no shadow. */
+	--shadow-*: initial;
+	--shadow-control: 0 2px 8px rgba(0, 0, 0, 0.14);
+	--shadow-float: 0 10px 30px rgba(0, 0, 0, 0.18);
+
+	--font-sans: var(--sans-face);
+	--font-serif: var(--serif-face);
+}
+
+@layer base {
+	* {
+		border-color: var(--border);
+	}
+	html {
+		color-scheme: light dark;
+	}
+	body {
+		margin: 0;
+		background-color: var(--bg);
+		/* A faint pink sky behind the page header */
+		background-image: radial-gradient(
+			1100px 300px at 50% -70px,
+			color-mix(in srgb, var(--accent) 11%, var(--bg)),
+			var(--bg)
+		);
+		background-repeat: no-repeat;
+		color: var(--text);
+		font-family: var(--sans-face);
+		font-size: 15px;
+		line-height: 1.65;
+	}
+	button,
+	[role='button'],
+	summary {
+		cursor: pointer;
+	}
+}
+
+/* The mark of the app: a petal. It is before each heading, and it is the mark of a
+   recommendation. It has the color of its text. */
+.petal-mark {
+	display: inline-block;
+	flex: none;
+	width: 9px;
+	height: 7px;
+	background: currentColor;
+	border-radius: 100% 0 100% 0;
+	transform: rotate(-18deg);
+}
+.petal-mark.heading {
+	width: 11px;
+	height: 8px;
+	margin-right: 9px;
+	vertical-align: 2px;
+	background: linear-gradient(135deg, #f7c3d1, var(--accent));
+}
+
+/* Cherry blossom petals that fall behind the page header. A setting turns them off, and the
+   page does not show them if the system asks for less motion. */
+.petals {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 300px;
+	overflow: hidden;
+	pointer-events: none;
+	z-index: 0;
+	-webkit-mask-image: linear-gradient(to bottom, #000 50%, transparent);
+	mask-image: linear-gradient(to bottom, #000 50%, transparent);
+}
+.petal {
+	position: absolute;
+	top: -24px;
+	left: var(--x);
+	width: var(--size);
+	height: calc(var(--size) * 0.72);
+	background: linear-gradient(135deg, #fbdbe3, #f0a6ba);
+	border-radius: 100% 0 100% 0;
+	opacity: 0;
+	animation: petal-fall var(--time) linear var(--delay) infinite;
+}
+@keyframes petal-fall {
+	0% {
+		transform: translate3d(0, 0, 0) rotate(var(--turn));
+		opacity: 0;
+	}
+	12% {
+		opacity: var(--alpha);
+	}
+	70% {
+		opacity: var(--alpha);
+	}
+	100% {
+		transform: translate3d(var(--drift), 320px, 0) rotate(calc(var(--turn) + 320deg));
+		opacity: 0;
+	}
+}
+:root[data-petals='off'] .petals {
+	display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+	.petals {
+		display: none;
+	}
+}
