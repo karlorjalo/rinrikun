@@ -529,7 +529,11 @@ dialog#frame-viewer::backdrop { background: rgba(12, 11, 10, 0.86); }
   header { padding: 24px 14px 8px; }
   header h1 { font-size: 28px; }
   header .sub { font-size: 12px; margin: 4px 0 0; }
-  nav button { padding: 5px 12px; font-size: 13px; }
+  /* The seven tabs are wider than a phone screen. The tab bar stays in the screen, and the user
+     moves it to the side. Without this, the phone makes the full page smaller. */
+  nav { box-sizing: border-box; max-width: 100%; justify-content: flex-start; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+  nav::-webkit-scrollbar { display: none; }
+  nav button { flex: none; padding: 5px 12px; font-size: 13px; white-space: nowrap; }
   main { padding: 16px 12px 48px; }
   .cards { grid-template-columns: 1fr; gap: 10px; }
   .hero-dna { padding: 18px 14px; }

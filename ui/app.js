@@ -4115,6 +4115,12 @@ document.querySelectorAll("nav button").forEach((b) => {
   b.onclick = () => {
     document.querySelectorAll("nav button").forEach((x) => x.classList.remove("on"));
     b.classList.add("on");
+    // On a small screen the tab bar is wider than the screen: move it so that the tab of now is in the middle
+    const bar = b.parentElement;
+    if (bar.scrollWidth > bar.clientWidth) {
+      const left = bar.scrollLeft + b.getBoundingClientRect().left - bar.getBoundingClientRect().left - (bar.clientWidth - b.offsetWidth) / 2;
+      bar.scrollTo({ left, behavior: "smooth" });
+    }
     for (const s of document.querySelectorAll("main section")) s.hidden = true;
     $(`#tab-${b.dataset.tab}`).hidden = false;
     // The story of the list plays only on the Recommendations tab
