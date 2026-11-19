@@ -1,7 +1,7 @@
 // @ts-nocheck
 // The map of the shows: a canvas that the user can zoom and move.
 //
-// This file is the map code of the old page (ui/app.js), moved as one module. The draw code and
+// This file came from the map code of the first page of the app, as one module. The draw code and
 // the pointer code are the same. The types are in engine.d.ts. The Svelte component
 // components/map/VectorMap.svelte makes the canvas and calls createVectorMap.
 //

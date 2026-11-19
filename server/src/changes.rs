@@ -1,7 +1,6 @@
 //! The changes of the data of the user: tiers, shows marked as watched, removed shows, answers of
-//! the Discover deck, and the log of the lists. Each function has the rules of the function with
-//! the same name in anime_vec/engine.py: it writes the database, and then it changes the state of
-//! the engine in memory.
+//! the Discover deck, and the log of the lists. Each function writes the database, and then it
+//! changes the state of the engine in memory.
 
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
@@ -9,7 +8,7 @@ use serde_json::{Value, json};
 use crate::engine::Engine;
 use crate::store::Store;
 
-/// The weight of each tier, as TIER_WEIGHTS in anime_vec/store.py. Another tier has the weight 1.
+/// The weight of each tier. Another tier has the weight 1.
 fn tier_weight(tier: &str) -> f64 {
     match tier {
         "S" => 2.0,

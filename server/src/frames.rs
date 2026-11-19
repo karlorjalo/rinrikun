@@ -1,10 +1,8 @@
-//! The pictures of a show for the Discover deck: frames of its episodes and of its trailer. The
-//! rules are the rules of anime_vec/frames.py.
+//! The pictures of a show for the Discover deck: frames of its episodes and of its trailer.
 //!
 //! The catalog has only the poster of an anime. AniList has more pictures: one picture for each
 //! episode that a streaming site has, the trailer, and a banner. The server asks AniList when the
-//! deck shows its cards, and it keeps each answer in a file of anilist_cache/frames. The Python
-//! server uses the same files.
+//! deck shows its cards, and it keeps each answer in a file of anilist_cache/frames.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

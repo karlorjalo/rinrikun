@@ -1,7 +1,7 @@
 // The preferences of the user: the theme, the settings of the Settings tab, the help card of the
 // tiers, and the formula of the recommendations. The browser keeps each of them in a cookie, so
-// that the server can render the page with them, and in the local storage with the keys of the
-// old page, so that the two pages have the same preferences.
+// that the server can render the page with them. (The old page of the app kept them in the local
+// storage: a browser that still has such a value gives it to the cookie one time.)
 
 export const THEME_KEY = 'rinrikun-theme';
 export const SETTINGS_KEY = 'rinrikun-settings';
@@ -84,35 +84,28 @@ export function readCookie(key: string): string | null {
 	return null;
 }
 
-/**
- * Keep a preference in the browser: in a cookie for the server, and in the local storage for the
- * old page. The cookie is for the full site, thus the old page and the new page share it.
- */
+/** Keep a preference in the browser: in a cookie for the full site, which the server reads */
 export function savePreference(key: string, value: string) {
 	document.cookie = `${key}=${encodeURIComponent(value)}; path=/; max-age=31536000; samesite=lax`;
-	try {
-		localStorage.setItem(key, value);
-	} catch {
-		// The browser does not permit the storage: the cookie keeps the value
-	}
 }
 
 /**
- * Read a preference in the browser: the cookie, or the value that the old page keeps. A value
- * from the old page also goes into the cookie, so that the server knows it the next time.
+ * Read a preference in the browser: the cookie. If there is no cookie, a value that the old page
+ * kept in the local storage goes into the cookie, and the local storage forgets it.
  */
 export function loadPreference(key: string): string | null {
 	const cookie = readCookie(key);
-	let stored: string | null = null;
 	try {
-		stored = localStorage.getItem(key);
+		const stored = localStorage.getItem(key);
+		if (stored !== null) {
+			localStorage.removeItem(key);
+			if (cookie === null) {
+				savePreference(key, stored);
+				return stored;
+			}
+		}
 	} catch {
-		// No storage
-	}
-	if (stored !== null && stored !== cookie) {
-		// The old page changed the value after the last visit of the new page
-		savePreference(key, stored);
-		return stored;
+		// The browser does not permit the storage
 	}
 	return cookie;
 }

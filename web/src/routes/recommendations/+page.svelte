@@ -81,8 +81,8 @@
 	});
 
 	onMount(() => {
-		// The old page can change the formula in its own storage. Then the server used the old
-		// formula: get the list again.
+		// A browser that used the old page of the app has the formula in its local storage, and
+		// no cookie yet: the server used the default formula. Then get the list again.
 		const kinds: Kinds = loadPreference(FORMULA_KEY) === 'all' ? 'all' : 'usual';
 		const links = loadPreference(LINKS_KEY) !== 'off';
 		if (kinds !== data.kinds || links !== data.links) progress.track(invalidate('rinrikun:formula'));

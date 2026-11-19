@@ -1,6 +1,5 @@
-//! The connection of the AniList rows to the library rows, with the rules of anime_vec/match.py.
-//! The title match uses the ratio of `difflib.SequenceMatcher` of Python: `ratio` below has the
-//! same algorithm, thus it gives the same numbers.
+//! The connection of the AniList rows to the library rows. The title match uses the ratio of
+//! `difflib.SequenceMatcher` of Python: `ratio` below has the same algorithm.
 
 use std::collections::{HashMap, HashSet};
 
@@ -190,7 +189,7 @@ pub struct Links {
 /// row with the nearest title gets it. The title match is the second method, only for the library
 /// rows that the id map did not connect.
 pub fn link_library(lib_rows: &[ShowRow], pool: &mut [ShowRow], idmap: Option<&IdMap>) -> Links {
-    // A dict of Python: the last row with an AniList id wins
+    // The last row with an AniList id wins
     let by_anilist: HashMap<i64, usize> = pool.iter().enumerate().filter_map(|(k, r)| Some((r.anilist_id?, k))).collect();
     for r in pool.iter_mut() {
         r.library_id = None;
@@ -222,7 +221,7 @@ pub fn link_library(lib_rows: &[ShowRow], pool: &mut [ShowRow], idmap: Option<&I
         let winner = if libs.len() == 1 {
             libs[0]
         } else {
-            // max() of Python: the first row with the largest value
+            // The first row with the largest value
             let mut best = libs[0];
             let mut best_value = title_similarity(&lib_rows[best], &pool[p]);
             for &l in &libs[1..] {

@@ -1,5 +1,5 @@
-//! t-SNE with the Barnes-Hut approximation, with the steps of sklearn.manifold.TSNE that
-//! anime_vec/layout.py uses: perplexity 30, the cosine distance, the PCA start, the learning rate
+//! t-SNE with the Barnes-Hut approximation, with the steps of sklearn.manifold.TSNE (the map of
+//! the first version of the app): perplexity 30, the cosine distance, the PCA start, the learning rate
 //! "auto", 250 steps with early exaggeration 12, then the steps up to 1000 with momentum 0.8.
 //!
 //! The result is not equal to the result of sklearn to the last digit: sklearn adds the forces of

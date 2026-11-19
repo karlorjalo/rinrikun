@@ -1,6 +1,5 @@
-//! The map of the shows, with the rules of anime_vec/layout.py and of `_build_layout` and
-//! `_build_regions` in anime_vec/engine.py: the 2D positions (t-SNE), the grid of the close view,
-//! and the named areas of the map.
+//! The map of the shows: the 2D positions (t-SNE), the grid of the close view, and the named
+//! areas of the map.
 
 use std::collections::{HashMap, HashSet};
 
@@ -53,7 +52,7 @@ pub fn fit_unit_square(points: &[[f32; 2]]) -> Vec<[f32; 2]> {
 /// `_cell_offsets`: the cells around a cell, the nearest first
 fn cell_offsets(radius: i64, dx: f64, dy: f64) -> Vec<(i64, i64)> {
     let mut offsets: Vec<(i64, i64)> = (-radius..=radius).flat_map(|ox| (-radius..=radius).map(move |oy| (ox, oy))).collect();
-    // A stable sort, as list.sort of Python
+    // A stable sort
     offsets.sort_by(|a, b| {
         let da = (a.0 as f64 * dx).powi(2) + (a.1 as f64 * dy).powi(2);
         let db = (b.0 as f64 * dx).powi(2) + (b.1 as f64 * dy).powi(2);
@@ -62,7 +61,7 @@ fn cell_offsets(radius: i64, dx: f64, dy: f64) -> Vec<(i64, i64)> {
     offsets
 }
 
-/// `round()` of Python for a float: the nearest whole number, and the even number for a half
+/// The nearest whole number, and the even number for a half
 fn round_half_even(x: f64) -> i64 {
     let r = x.round();
     if (x - x.trunc()).abs() == 0.5 { (2.0 * (x / 2.0).round()) as i64 } else { r as i64 }
@@ -138,8 +137,8 @@ pub fn grid_layout(points: &[[f32; 2]], order: &[usize]) -> (Vec<[f32; 2]>, f64,
 }
 
 /// `kmeans`: divide the points into k groups with k-means++ and Lloyd steps. Return the group of
-/// each point. The random generator is not the generator of NumPy: the groups of the two builds
-/// can differ.
+/// each point. (The first version of the app used the random generator of NumPy: its groups
+/// were different.)
 pub fn kmeans(points: &[[f64; 2]], k: usize, seed: u64) -> Vec<usize> {
     let n = points.len();
     let k = k.min(n).max(1);
@@ -193,7 +192,7 @@ pub fn kmeans(points: &[[f64; 2]], k: usize, seed: u64) -> Vec<usize> {
     labels
 }
 
-/// `round(x, 4)` of Python
+/// Round to 4 decimals: a value exactly between goes to the even digit
 fn round4(x: f64) -> f64 {
     format!("{x:.4}").parse().unwrap_or(x)
 }
@@ -210,7 +209,7 @@ pub struct Region {
 }
 
 impl Region {
-    /// The text of the area as `json.dumps` of the dict of Python
+    /// The text of the area as JSON, with its keys in this order
     pub fn json(&self) -> String {
         use super::pyjson::{dumps, float_repr};
         format!(
@@ -330,7 +329,7 @@ pub fn regions(points: &[[f32; 2]], cells: &[[f32; 2]], tags: Vec<Vec<f32>>, nam
     let labels = kmeans(&p64, REGION_COUNT, 0);
     let groups = labels.iter().copied().max().map_or(0, |m| m + 1);
     let mut areas: Vec<Vec<usize>> = (0..groups).map(|c| all.iter().copied().filter(|&i| labels[i] == c).collect()).collect();
-    // The largest areas first; a stable sort, as sorted() of Python
+    // The largest areas first; a stable sort
     areas.sort_by_key(|a| std::cmp::Reverse(a.len()));
     let mut out = Vec::new();
     let mut used: HashSet<String> = HashSet::new();
@@ -369,8 +368,8 @@ pub struct Layout {
 
 /// The signature of a layout: the method, the ids of the rows of the map, and the bytes of the
 /// stored embedding that each row uses on the map (a library row uses the embedding of its first
-/// AniList row). anime_vec/engine.py computes the same value. Both programs read these bytes from
-/// the database, thus the value does not depend on the arithmetic of the program.
+/// AniList row). The bytes come from the database, thus the value does not depend on the
+/// arithmetic of the program.
 pub fn signature(ids: &[&str], vectors: &[&[f32]]) -> String {
     let mut hash = sha1_smol::Sha1::new();
     hash.update(b"layout v2\n");
@@ -469,7 +468,7 @@ mod tests {
     }
 
     #[test]
-    fn round_is_the_round_of_python() {
+    fn round_gives_the_even_number_for_a_half() {
         assert_eq!(round_half_even(2.5), 2);
         assert_eq!(round_half_even(3.5), 4);
         assert_eq!(round_half_even(-2.5), -2);

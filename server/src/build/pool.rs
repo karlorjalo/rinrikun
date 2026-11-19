@@ -1,5 +1,5 @@
-//! The anime of AniList for the catalog, with the rules of anime_vec/anilist_pull.py: the most
-//! popular anime (the pool), and more anime by their ids. Each answer stays in a file of
+//! The anime of AniList for the catalog: the most popular anime (the pool), and more anime by
+//! their ids. Each answer stays in a file of
 //! anilist_cache, thus a build asks AniList only for the data that is old or missing.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -173,7 +173,7 @@ pub fn fetch_pool(cache_dir: &Path, force: bool) -> Result<Vec<ShowRow>> {
         let mut data = if force || !cache.exists() { None } else { read_page(&cache) };
         if data.is_none() {
             let _ = std::fs::remove_file(&cache);
-            std::fs::write(&cache, python_ascii_json(&fetch_page(page)?))?;
+            std::fs::write(&cache, ascii_json(&fetch_page(page)?))?;
             std::thread::sleep(PAUSE);
             let written: Value = serde_json::from_str(&std::fs::read_to_string(&cache)?)?;
             data = Some(written["data"]["Page"].clone());
@@ -260,7 +260,7 @@ pub fn fetch_by_ids(cache_dir: &Path, ids: &BTreeSet<i64>, force: bool) -> Resul
         for &i in batch {
             match got.get(&i) {
                 Some(media) => {
-                    std::fs::write(media_file(i), python_ascii_json(media))?;
+                    std::fs::write(media_file(i), ascii_json(media))?;
                     found.insert(i, media.clone());
                 }
                 None => {
@@ -268,7 +268,7 @@ pub fn fetch_by_ids(cache_dir: &Path, ids: &BTreeSet<i64>, force: bool) -> Resul
                 }
             }
         }
-        std::fs::write(&absent_file, python_ascii_json(&json!(absent)))?;
+        std::fs::write(&absent_file, ascii_json(&json!(absent)))?;
         std::thread::sleep(PAUSE);
     }
     if !todo.is_empty() {
@@ -296,9 +296,9 @@ pub fn fetch_extras(cache_dir: &Path, pool: &[ShowRow], ids: &BTreeSet<i64>, for
     Ok(extra)
 }
 
-/// The text of `json.dumps(value)` of Python with its defaults: only ASCII characters. The two
-/// builds read the files of each other. (The keys of an object can have a different order.)
-pub fn python_ascii_json(value: &Value) -> String {
+/// JSON text with only ASCII characters, as the files of the cache had from the first version of
+/// the app (`json.dumps` of Python)
+pub fn ascii_json(value: &Value) -> String {
     let text = super::pyjson::dumps(value);
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
@@ -319,7 +319,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_row_has_the_fields_of_python() {
+    fn a_row_has_the_fields_of_an_anime() {
         let media = json!({
             "id": 21, "title": {"romaji": "One Piece", "english": null, "native": "ワンピース"},
             "format": "TV", "seasonYear": null, "startDate": {"year": 1999}, "status": "RELEASING", "episodes": null,
@@ -350,8 +350,8 @@ mod tests {
     }
 
     #[test]
-    fn the_cache_text_is_ascii_as_in_python() {
+    fn the_cache_text_is_ascii() {
         let expected = format!("[\"{b}u30ef\", \"{b}u00e9\", \"{b}ud83d{b}ude00\"]", b = '\\');
-        assert_eq!(python_ascii_json(&json!(["\u{30ef}", "\u{e9}", "\u{1f600}"])), expected);
+        assert_eq!(ascii_json(&json!(["\u{30ef}", "\u{e9}", "\u{1f600}"])), expected);
     }
 }

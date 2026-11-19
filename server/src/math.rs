@@ -1,6 +1,5 @@
-//! Small numeric functions of the engine. Each function has the rules of the NumPy function with
-//! the same name in anime_vec/engine.py. The results can differ in the last digits, because the
-//! order of the additions is different.
+//! Small numeric functions of the engine. They have the rules of the NumPy functions of the first
+//! version of the app, with the same names.
 
 use rayon::prelude::*;
 
@@ -50,7 +49,7 @@ pub fn mean(x: &[f64]) -> f64 {
     if x.is_empty() { f64::NAN } else { x.iter().sum::<f64>() / x.len() as f64 }
 }
 
-/// The standard deviation of the values (of all values, as `x.std()` in NumPy)
+/// The standard deviation of the values (of all values, not of a sample)
 pub fn std(x: &[f64]) -> f64 {
     let m = mean(x);
     (x.iter().map(|v| (v - m) * (v - m)).sum::<f64>() / x.len() as f64).sqrt()
@@ -120,8 +119,8 @@ pub fn bisect_right(limits: &[f64], v: f64) -> i64 {
     limits.partition_point(|&l| l <= v) as i64
 }
 
-/// `round(x, 1)` of Python: the nearest number with one decimal. A value exactly between two
-/// numbers goes to the even number, as in Python. The text conversion does the rounding.
+/// The nearest number with one decimal. A value exactly between two numbers goes to the even
+/// digit. The text conversion does the rounding, with the exact value of the number.
 pub fn round1(x: f64) -> f64 {
     format!("{x:.1}").parse().unwrap_or(x)
 }
@@ -179,8 +178,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn round1_is_the_round_of_python() {
-        // Python: round(0.25, 1) == 0.2, round(0.35, 1) == 0.3 (0.35 is a little less than 0.35),
+    fn round1_goes_to_the_even_digit_and_uses_the_exact_value() {
+        // round(0.25, 1) == 0.2, round(0.35, 1) == 0.3 (0.35 is a little less than 0.35),
         // round(99.25, 1) == 99.2, round(2.675, 1) == 2.7
         assert_eq!(round1(0.25), 0.2);
         assert_eq!(round1(0.35), 0.3);

@@ -1,4 +1,4 @@
-//! The command `rinrikun build`: the weekly rebuild of the catalog, with the steps of build.py.
+//! The command `rinrikun build`: the weekly rebuild of the catalog.
 //!
 //!   1. The shows of the Jellyfin library.
 //!   2. The most popular anime of AniList, and the anime that the id map and the catalog point to.
@@ -7,8 +7,8 @@
 //!   5. The embeddings of the rows whose text changed.
 //!   6. The map layout and the named areas of the map.
 //!
-//! The files of the AniList answers and of the id map are the same files as the files of the
-//! Python build: anilist_cache and idmap_cache in the project folder.
+//! The answers of AniList and the id map stay in anilist_cache and idmap_cache in the project
+//! folder: a build asks only for the data that is old or missing.
 
 mod embed;
 mod idmap;
@@ -32,7 +32,7 @@ use crate::engine::Engine;
 use crate::store::Store;
 use pyjson::{Ordered, dumps, dumps_ordered};
 
-/// One row of the shows table, as the build makes it (a dict of build.py)
+/// One row of the shows table, as the build makes it
 #[derive(Clone, Debug, Default)]
 pub struct ShowRow {
     pub id: String,
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS rec_log (id TEXT PRIMARY KEY, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, best_rank INTEGER NOT NULL, days INTEGER NOT NULL, kinds TEXT);
 ";
 
-/// A JSON number or text as a value of SQLite, as the sqlite3 module of Python binds it
+/// A JSON number or text as a value of SQLite: a whole number is an INTEGER, another number a REAL
 fn sql(value: &Option<Value>) -> SqlValue {
     match value {
         None | Some(Value::Null) => SqlValue::Null,

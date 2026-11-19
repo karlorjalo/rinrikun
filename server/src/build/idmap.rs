@@ -1,5 +1,4 @@
-//! The map from the provider ids of a Jellyfin item (TMDB, TVDB, IMDb) to AniList ids, with the
-//! rules of anime_vec/idmap.py.
+//! The map from the provider ids of a Jellyfin item (TMDB, TVDB, IMDb) to AniList ids.
 //!
 //! Jellyfin gives one item for a series. AniList has one entry for each season. The public id map
 //! of the Fribb/anime-lists project connects the ids, with the season number of each AniList entry.
@@ -55,7 +54,7 @@ fn as_list(value: Option<&Value>) -> Vec<&Value> {
     }
 }
 
-/// The text of a key as `str(key)` in Python
+/// The text of a key of the id map: a number gives its digits
 fn key_text(value: &Value) -> String {
     match value {
         Value::String(s) => s.clone(),

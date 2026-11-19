@@ -1,6 +1,6 @@
 //! The lists of the engine: the recommendations, the steps of a list, the Discover deck, the
-//! review order and the numbers of the answers. Each function has the rules of the function with
-//! the same name in anime_vec/engine.py.
+//! review order and the numbers of the answers. A name in backticks is the name of the function
+//! in the first version of the app (see engine.rs).
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -117,12 +117,12 @@ impl Random {
     }
 }
 
-/// Round to 3 decimals as `round(x, 3)` in Python
+/// Round to 3 decimals. A value exactly between two numbers goes to the even digit.
 pub fn round3(x: f64) -> f64 {
     format!("{x:.3}").parse().unwrap_or(x)
 }
 
-/// The values as float32 values, as in the NumPy code
+/// The values as float32 values: the scores of the engine are float32 values
 fn as_f32(x: Vec<f64>) -> Vec<f64> {
     x.into_iter().map(|v| v as f32 as f64).collect()
 }

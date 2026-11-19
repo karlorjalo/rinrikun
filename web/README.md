@@ -1,37 +1,40 @@
 # rinrikun web
 
-The new page of rinrikun. It uses SvelteKit, Tailwind CSS and components from shadcn-svelte (Bits UI).
+The page of rinrikun. It uses SvelteKit, Tailwind CSS and components from shadcn-svelte (Bits UI).
 
 The server renders each page with its data, and the page then runs in the browser. The load
-function of each tab is in its `+page.server.ts`: it gets the data from the API server (the Python
-server or the Rust server). The Node server of the build of `@sveltejs/adapter-node` (`node build`)
-runs the load functions and renders the pages. The API server passes the requests for `/next` on
-to the Node server, thus the browser sees one address. The old page in `ui/` stays in use until
-the user approves the new page.
+function of each tab is in its `+page.server.ts`: it gets the data from the API server (the Rust
+server in `../server`). The Node server of the build of `@sveltejs/adapter-node` (`node build`)
+runs the load functions and renders the pages. The API server passes each request that is not
+for `/api/...` on to the Node server, thus the browser sees one address.
 
 How the state of a tab works:
 
 - The data of a tab comes from its load function (`+page.server.ts`). On the first visit the
   server renders the page with it. On a later visit the browser gets only the data from the server.
+  A tab gets its data when the pointer is on its link (Recommendations: at the press, because a
+  list goes into the log of the recommendations).
 - The Discover deck stays in the browser when the user opens a different tab. When the user comes
   back, the page shows the same card, and the new cards of the load go to the end of the deck.
 - The filters, the seed of a list and the show of the Similar tab are in the query of the address,
   thus the server renders them. A link of the tab bar adds the last query of its tab again.
 - The theme, the settings, the help card of the tiers and the formula of the recommendations are
-  cookies, thus the server renders them too. The old page keeps the same values in the local
-  storage: see `src/lib/preferences.ts`.
+  cookies, thus the server renders them too: see `src/lib/preferences.ts`.
 - A module of `src/lib/state` must not keep the data of one request on the server: all requests
   share the module. The pages give their data to the components, and the shared state changes
   only in the browser.
+- The motion (the loading bar, the fades) has its times in `src/routes/layout.css` ("Motion") and
+  in `src/lib/motion.ts`. The system setting "reduce motion" turns it off.
 
 ## Develop
 
-1. Start the Python server: `python serve.py`. It listens on port 8765.
+1. Start the API server: `rinrikun serve anime_vec.db` (see `../server/README.md`). It listens on
+   port 8775 by default.
 2. Run `npm install`.
-3. Run `npm run dev`.
+3. Run `API_TARGET=http://127.0.0.1:8775 npm run dev`.
 
-The development server and the load functions send each `/api` request to `http://127.0.0.1:8765`.
-Set the environment variable `API_TARGET` to use a different server.
+The development server and the load functions send each `/api` request to `API_TARGET` (default
+`http://127.0.0.1:8765`, the port of the live server).
 
 ## Mock API
 
@@ -42,7 +45,8 @@ invented. Use it to work on the page without the data of the real server:
 API_TARGET=http://127.0.0.1:8799 npm run dev
 ```
 
-`POST /api/__reset` puts the data of the mock back to its start.
+`POST /api/__reset` puts the data of the mock back to its start. `POST /api/__delay {"ms": n}`
+makes each next answer wait n milliseconds (a slow server).
 
 ## Check and test
 
@@ -60,12 +64,8 @@ environment variables:
 - `HOST` and `PORT`: the address of the server (the default of adapter-node is `0.0.0.0:3000`;
   `scripts/restart_servers.ps1` gives `127.0.0.1:8780`).
 - `API_TARGET`: the API server (default `http://127.0.0.1:8765`). The load functions get their data
-  there. In a build without a base path, a request for `/api/...` that comes to this server goes on
-  to it too (the browser tests use this): see `src/hooks.server.ts`. A build with `BASE_PATH`
-  answers only below its base path.
-
-If the page is below a path of the API server, set the environment variable `BASE_PATH` before the
-build. For example: `BASE_PATH=/next`. `scripts/build_web.ps1` does this.
+  there. A request for `/api/...` that comes to this server goes on to it too (the browser tests
+  use this): see `src/hooks.server.ts`.
 
 ## Structure
 
@@ -76,7 +76,8 @@ build. For example: `BASE_PATH=/next`. `scripts/build_web.ps1` does this.
 - `src/lib/state/`: the state of the browser that more than one tab uses.
 - `src/lib/components/ui/`: the components from shadcn-svelte, with the look of the app.
 - `src/lib/components/`: the components of the app.
-- `src/routes/layout.css`: the colors, the corner sizes and the shadows.
+- `src/lib/map/`: the map canvas (one module) and its style.
+- `src/routes/layout.css`: the colors, the corner sizes, the shadows and the motion.
 
 ## How the project was made
 

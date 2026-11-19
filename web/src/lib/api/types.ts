@@ -1,5 +1,4 @@
-// The data of the API. The Python server gives these shapes today. When the server is in Rust,
-// the Rust types make this file.
+// The data of the API: the shapes of the answers of the Rust server (server/src/api.rs).
 
 export type Tier = 'S' | 'A' | 'B' | 'C' | 'D';
 

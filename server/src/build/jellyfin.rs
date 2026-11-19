@@ -1,4 +1,4 @@
-//! The shows of the Jellyfin library, with the rules of anime_vec/jellyfin_pull.py.
+//! The shows of the Jellyfin library.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -53,7 +53,7 @@ fn secrets(root: &Path) -> Result<Secrets> {
 }
 
 /// The provider ids of the items in the order of Jellyfin. A `Value` sorts the keys of an
-/// object, but the build writes the provider ids in their order, as build.py does.
+/// object, but the build writes the provider ids in their order.
 #[derive(serde::Deserialize)]
 struct OrderedItems {
     #[serde(rename = "Items")]
@@ -117,7 +117,7 @@ fn text_of(value: Option<&Value>) -> Option<String> {
 /// are one show: the item that the library got first stays, and it gets the ids of the others.
 pub fn merge_same_items(items: &[Value]) -> Vec<(Value, Vec<String>)> {
     let mut sorted: Vec<&Value> = items.iter().collect();
-    // A stable sort, as sorted() of Python: an item without a date has the empty text
+    // A stable sort: an item without a date has the empty text
     sorted.sort_by_key(|item| item.get("DateCreated").and_then(Value::as_str).unwrap_or("").to_string());
     let mut first: BTreeMap<(Option<String>, String), usize> = BTreeMap::new();
     let mut out: Vec<(Value, Vec<String>)> = Vec::new();

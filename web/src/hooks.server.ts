@@ -6,7 +6,7 @@
 //              before any script runs. The browser asks again each time for a page: its data
 //              changes. A request for "/api/..." goes on to the API server.
 // handleFetch  A load function asks "/api/..." on the server too. The API is a different server:
-//              the Python server or the Rust server, at the address API_TARGET.
+//              the Rust server (server/), at the address API_TARGET.
 import type { Handle, HandleFetch } from '@sveltejs/kit/hooks';
 import { parsePreferences, rootAttributes } from '#lib/preferences.js';
 
@@ -18,10 +18,9 @@ const LOCAL_HEADERS = ['host', 'connection', 'accept-encoding', 'content-length'
 
 /**
  * Pass a request for "/api/..." on to the API server, and give its answer back. In the live
- * setup the API server gets these requests itself and passes only "/next" on to this server.
- * This server gets "/api/..." only if the browser opens it directly, for example in the tests.
- * A build with a base path (BASE_PATH=/next) answers 404 for each address outside the base path
- * before this hook runs: thus only a build without a base path passes "/api/..." on.
+ * setup the API server gets these requests itself and passes the other requests on to this
+ * server. This server gets "/api/..." only if the browser opens it directly, for example in the
+ * tests.
  */
 async function toApi(request: Request, url: URL): Promise<Response> {
 	const headers = new Headers(request.headers);

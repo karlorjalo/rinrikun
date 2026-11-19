@@ -38,7 +38,7 @@
 
 	// A change of a show changes the numbers of the Profile tab and the lists of the Ratings tab.
 	// Their load functions depend on "rinrikun:data": get them again a short time after the last change.
-	// The other tabs keep their lists, as the old page did: a removed recommendation keeps its place.
+	// The other tabs keep their lists: a removed recommendation keeps its place.
 	let seen = -1;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	$effect(() => {

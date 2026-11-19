@@ -1,6 +1,6 @@
-//! The engine: the data of all shows and the formulas of the recommender. Each function has the
-//! rules of the function with the same name in anime_vec/engine.py. The comments there tell why
-//! each formula is as it is; the comments here tell only what the code does.
+//! The engine: the data of all shows and the formulas of the recommender. A name in backticks
+//! (`_liked`) is the name of the function in the first version of the app (Python), which was the
+//! reference of this code. The git history of that version tells why each formula is as it is.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Mutex;
@@ -126,7 +126,7 @@ pub struct Engine {
     pub coords: Vec<(f32, f32)>,
     pub grid: Vec<(f32, f32)>,
     pub cell: (f64, f64),
-    /// The areas of the map, as the Python engine keeps them in the database
+    /// The named areas of the map, as the build keeps them in the database
     pub regions: serde_json::Value,
     /// For an AniList row of a library show: the library row
     pub duplicate_of: Vec<Option<usize>>,
@@ -165,7 +165,7 @@ impl Engine {
         let mut rows: Vec<Row> = store.load_rows()?.into_iter().filter(|r| embeddings.contains_key(&r.id)).collect();
         let n = rows.len();
         if n == 0 {
-            bail!("the database has no shows with an embedding: run build.py first");
+            bail!("the database has no shows with an embedding: run `rinrikun build` first");
         }
         let pos: HashMap<String, usize> = rows.iter().enumerate().map(|(i, r)| (r.id.clone(), i)).collect();
         let dismissed: HashSet<String> = store.dismissed_ids().into_iter().filter(|i| pos.contains_key(i)).collect();
@@ -187,8 +187,7 @@ impl Engine {
             }
         }
 
-        // The AniList rows of the library shows. The database must have the column library_id:
-        // the matching by titles of the Python engine is only for databases from before it.
+        // The AniList rows of the library shows: the build connects them (the column library_id)
         let mut duplicate_of = vec![None; n];
         let mut counterparts: Vec<Vec<usize>> = vec![Vec::new(); n];
         for (i, r) in rows.iter().enumerate() {
@@ -306,7 +305,7 @@ impl Engine {
         Ok(engine)
     }
 
-    /// The map layout and the areas that the Python engine keeps in the database. A row
+    /// The map layout and the areas that the build keeps in the database. A row
     /// without a position is in the middle. The Rust engine does not compute the layout in this phase.
     fn read_layout(&mut self, store: &Store) {
         let n = self.len();
@@ -516,7 +515,7 @@ impl Engine {
         for r in &self.rows {
             if let Some(id) = r.anilist_id {
                 for &other in &r.relations {
-                    // Python computes the right side of `parent[find(a)] = find(b)` first
+                    // The order of the two finds decides the root of the franchise: find(b) first
                     let root = find(&mut parent, other);
                     let key = find(&mut parent, id);
                     parent.insert(key, root);
@@ -548,10 +547,6 @@ impl Engine {
         let index: HashMap<&String, usize> = names.iter().enumerate().map(|(k, f)| (f, k)).collect();
         self.row_fr = of_row.iter().map(|f| index[f]).collect();
         self.franchise_names = names;
-    }
-
-    pub fn franchise(&self, i: usize) -> &str {
-        &self.franchise_names[self.row_fr[i]]
     }
 
     /// `_build_links`: the links between franchises from the AniList user recommendations
@@ -815,7 +810,7 @@ impl Engine {
                 }
             }
         }
-        // The Python engine gives the predictions as float32
+        // The predictions are float32 values
         predicted.iter().map(|&v| v as f32 as f64).collect()
     }
 

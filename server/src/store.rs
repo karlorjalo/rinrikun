@@ -1,5 +1,6 @@
-//! The database of the shows. It is the same file with the same tables as anime_vec/store.py.
-//! In this phase the Rust server only reads the database: the Python server writes it.
+//! The database of the shows (SQLite): the shows, the data of the user, the map, and the log of
+//! the lists. The build writes the shows and the map (build/mod.rs); the server writes the data
+//! of the user.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -30,7 +31,7 @@ const JSON_COLUMNS: [(&str, bool); 8] = [
     ("seasons", false),
 ];
 
-/// One show of the database, as anime_vec/store.py load_rows gives it
+/// One show of the database
 #[derive(Clone, Debug)]
 pub struct Row {
     pub id: String,
@@ -79,7 +80,7 @@ pub struct LogEntry {
     pub kinds: Option<String>,
 }
 
-/// The map layout that the Python engine keeps in the database
+/// The map layout that the build keeps in the database
 pub struct Layout {
     pub coords: HashMap<String, (f64, f64)>,
     pub grid: HashMap<String, (f64, f64)>,
@@ -90,7 +91,7 @@ pub struct Store {
     con: Connection,
 }
 
-/// The tables of the data of the user, as SCHEMA in anime_vec/store.py
+/// The tables of the data of the user
 const USER_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS watched_manual (id TEXT PRIMARY KEY, created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS show_weights (id TEXT PRIMARY KEY, tier TEXT NOT NULL, weight REAL NOT NULL, updated_at TEXT DEFAULT (datetime('now')));
@@ -109,7 +110,7 @@ fn to_json(value: SqlValue) -> Value {
     }
 }
 
-/// A value as a number, as `float(value)` in Python. A text with a number is a number too.
+/// A value as a number. A text with a number is a number too.
 pub fn number(value: &Value) -> Option<f64> {
     match value {
         Value::Number(n) => n.as_f64(),
@@ -127,7 +128,7 @@ fn text(value: &Value) -> Option<String> {
     }
 }
 
-/// True for a value that Python counts as true: not empty, not 0, not None
+/// True for a value that is not empty, not 0 and not null
 pub fn truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
@@ -152,8 +153,7 @@ impl Store {
     }
 
     /// Open the database with the right to change it. The tables of the data of the user are
-    /// made if they are not there, as in anime_vec/store.py. The build of the Python project
-    /// makes the table of the shows.
+    /// made if they are not there. The build makes the table of the shows.
     pub fn open_write(path: &Path) -> Result<Store> {
         let con = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX)
             .with_context(|| format!("cannot open the database {}", path.display()))?;
@@ -265,8 +265,8 @@ impl Store {
         rows.filter_map(|r| r.ok()).collect()
     }
 
-    /// The tiers: (id, tier, weight), in the order of the table. The order is the order of
-    /// `get_weights` in Python, which decides which tier a counterpart gets.
+    /// The tiers: (id, tier, weight), in the order of the table. The order decides which tier a
+    /// counterpart gets.
     pub fn weights(&self) -> Result<Vec<(String, String, f64)>> {
         let mut statement = self.con.prepare("SELECT id, tier, weight FROM show_weights")?;
         let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
@@ -377,8 +377,7 @@ impl Store {
         Ok(out)
     }
 
-    /// The map layout that the Python engine keeps in the database, or None. The Rust engine does
-    /// not compute the layout in this phase: it uses the layout of the Python engine.
+    /// The map layout that the build keeps in the database, or None
     pub fn layout(&self) -> Option<Layout> {
         let cell: String = self.con.query_row("SELECT value FROM meta WHERE key='layout_cell'", [], |row| row.get(0)).ok()?;
         let (width, height) = cell.split_once(',')?;
@@ -390,7 +389,7 @@ impl Store {
         Some(Layout { coords: read("layout")?, grid: read("layout_grid")?, cell: (width.parse().ok()?, height.parse().ok()?) })
     }
 
-    /// The areas of the map that the Python engine keeps in the database, if they are for the layout of now
+    /// The areas of the map that the build keeps in the database, if they are for the layout of now
     pub fn regions(&self) -> Option<Value> {
         let value = |key: &str| -> Option<String> { self.con.query_row("SELECT value FROM meta WHERE key=?", [key], |row| row.get(0)).ok() };
         if value("regions_signature")? != value("layout_signature")? {

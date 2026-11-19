@@ -1,6 +1,6 @@
 //! JSON text in the format of `json.dumps(value, ensure_ascii=False)` in Python: ", " between the
-//! items, ": " after a key, and the keys of an object in their order. The build writes the JSON
-//! columns of the shows table with it, thus the two builds write the same text.
+//! items, ": " after a key, and the keys of an object in their order. The JSON columns of the
+//! shows table have this format since the first version of the app, and the build keeps it.
 
 use serde::Deserialize;
 use serde::de::{Deserializer, MapAccess, Visitor};

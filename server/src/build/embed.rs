@@ -1,9 +1,9 @@
-//! The embeddings of the shows, with the rules of anime_vec/embed.py: the text of a row, the hash
-//! of the text, and the vectors of the EmbeddingGemma model (ONNX) with ONNX Runtime.
+//! The embeddings of the shows: the text of a row, the hash of the text, and the vectors of the
+//! EmbeddingGemma model (ONNX) with ONNX Runtime. The texts and the hashes are the texts and the
+//! hashes of the first version of the app: a change makes all stored embeddings old.
 //!
 //! EmbeddingGemma 2 is multilingual: the library rows are in Japanese and the AniList rows in
-//! English. The model files come from the cache of Hugging Face (the Python build puts them
-//! there), or the build downloads them.
+//! English. The model files come from the cache of Hugging Face, or the build downloads them.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -24,8 +24,8 @@ pub const DIM: usize = 768;
 const BATCH_SIZE: usize = 32;
 const MAX_TOKENS: usize = 2048;
 
-/// `str(value)` of Python for a value of a row
-fn python_str(value: Option<&Value>) -> String {
+/// The text of a value of a row, as `str(value)` of Python (the texts of the hashes)
+fn value_text(value: Option<&Value>) -> String {
     match value {
         None | Some(Value::Null) => "None".into(),
         Some(Value::String(s)) => s.clone(),
@@ -36,7 +36,7 @@ fn python_str(value: Option<&Value>) -> String {
 }
 
 fn first_texts(value: Option<&Value>, count: usize) -> Vec<String> {
-    value.and_then(Value::as_array).map(|a| a.iter().take(count).map(|v| python_str(Some(v))).collect()).unwrap_or_default()
+    value.and_then(Value::as_array).map(|a| a.iter().take(count).map(|v| value_text(Some(v))).collect()).unwrap_or_default()
 }
 
 /// `build_text`: the text of a row for the model
@@ -44,15 +44,15 @@ pub fn build_text(r: &Map<String, Value>) -> String {
     let truthy = |key: &str| r.get(key).is_some_and(crate::store::truthy);
     // `r.get('title_native') or r.get('title', '')`
     let name = if truthy("title_native") {
-        python_str(r.get("title_native"))
+        value_text(r.get("title_native"))
     } else if r.contains_key("title") {
-        python_str(r.get("title"))
+        value_text(r.get("title"))
     } else {
         String::new()
     };
-    let mut out = format!("{name} ({})", python_str(r.get("title")));
+    let mut out = format!("{name} ({})", value_text(r.get("title")));
     if truthy("year") {
-        out.push_str(&format!(". {}", python_str(r.get("year"))));
+        out.push_str(&format!(". {}", value_text(r.get("year"))));
     }
     if truthy("genres") {
         out.push_str(&format!(". Genres: {}", first_texts(r.get("genres"), 6).join(", ")));
@@ -64,7 +64,7 @@ pub fn build_text(r: &Map<String, Value>) -> String {
         out.push_str(&format!(". Studios: {}", first_texts(r.get("studios"), 3).join(", ")));
     }
     if truthy("overview") {
-        let overview = python_str(r.get("overview"));
+        let overview = value_text(r.get("overview"));
         out.push_str(". ");
         out.extend(overview.chars().take(1200));
     }
@@ -203,7 +203,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn the_text_and_its_hash_are_the_text_and_the_hash_of_python() {
+    fn the_text_and_its_hash_have_the_old_format() {
         let row = json!({"title": "Show 12", "title_native": "ショー", "year": 2022, "genres": ["Action", "Drama"],
                          "tags": ["A", "B"], "studios": ["Studio 5"], "overview": "An invented show."});
         let r = row.as_object().unwrap();

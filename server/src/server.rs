@@ -1,14 +1,14 @@
-//! The command `rinrikun serve`: the HTTP server with the routes of serve.py, the old page at `/`
-//! and the new page at `/next`. Without --write it only reads: a request that changes data gets
-//! the answer 405. When a different program (the Python server) changes the database, this server
-//! loads the data again.
+//! The command `rinrikun serve`: the HTTP server of the app. It answers the API (/api/...), and it
+//! passes each other request on to the page server, a Node server that renders the page (node
+//! web/build). Thus the browser sees one address.
 //!
-//! A Node server renders the new page (node web/build). This server passes the requests for /next
-//! on to it, as the Python server does (forward_page in anime_vec/pages.py).
+//! The server changes the data of the user (tiers, watched marks, removed shows, answers). With
+//! --read-only it only reads: a request that changes data gets the answer 405. When a different
+//! program (the weekly build) changes the database, the server loads the data again.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime};
 
@@ -17,13 +17,11 @@ use axum::Json;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Path as UrlPath, Query, Request, State};
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde_json::{Map, Value, json};
-use tower::ServiceExt;
 use tower_http::compression::CompressionLayer;
-use tower_http::services::ServeFile;
 
 use crate::api::RecommendOptions;
 use crate::changes::Refused;
@@ -32,8 +30,6 @@ use crate::frames;
 use crate::lists::Random;
 use crate::store::{Store, truthy};
 
-/// The browser asks again each time if a file of a page changed (see PAGE_HEADERS in anime_vec/pages.py)
-const NO_CACHE: &str = "no-cache";
 /// The headers of a request that go on to the page server, and the headers of its answer that come back
 const REQUEST_HEADERS: [&str; 6] = ["accept", "accept-language", "cookie", "if-none-match", "if-modified-since", "user-agent"];
 const ANSWER_HEADERS: [&str; 7] = ["content-type", "cache-control", "etag", "last-modified", "location", "set-cookie", "vary"];
@@ -42,7 +38,7 @@ const FRAMES_MAX: usize = 50;
 
 struct App {
     engine: RwLock<Engine>,
-    /// The database with the right to change it (--write). Without it the server only reads.
+    /// The database with the right to change it. With --read-only there is none.
     store: Option<Mutex<Store>>,
     /// The time and the size of the database files after the last change of this server. The
     /// watcher does not load the data again for a change of this server.
@@ -50,7 +46,7 @@ struct App {
     random: Mutex<Random>,
     root: PathBuf,
     db: PathBuf,
-    /// The page server of /next, and the client for its requests
+    /// The page server, and the client for its requests
     web: String,
     client: ureq::Agent,
     /// The client for the posters of Jellyfin. It follows redirects, and an error status is an error.
@@ -60,7 +56,7 @@ struct App {
 type Shared = Arc<App>;
 type Params = Query<HashMap<String, String>>;
 
-/// An error answer with the shape of FastAPI: {"detail": text}
+/// An error answer: {"detail": text}
 struct ApiError(StatusCode, String);
 
 impl IntoResponse for ApiError {
@@ -79,7 +75,7 @@ fn invalid(name: &str) -> ApiError {
     ApiError(StatusCode::UNPROCESSABLE_ENTITY, format!("the value of {name} is not valid"))
 }
 
-/// A yes/no value of a query, with the words that FastAPI accepts
+/// A yes/no value of a query: true, 1, yes, on or false, 0, no, off
 fn flag(p: &HashMap<String, String>, name: &str, default: bool) -> std::result::Result<bool, ApiError> {
     match p.get(name).map(|v| v.to_ascii_lowercase()) {
         None => Ok(default),
@@ -121,13 +117,18 @@ fn change_error(error: anyhow::Error) -> ApiError {
     }
 }
 
+/// The answer of a server with --read-only to a change
+fn read_only() -> ApiError {
+    ApiError(StatusCode::METHOD_NOT_ALLOWED, "this server only reads: start it without --read-only to change the data".into())
+}
+
 /// Run a change of the data: one change at a time, while no request reads the engine. A server
-/// without --write gives 405.
+/// with --read-only gives 405.
 async fn change(app: &Shared, work: impl FnOnce(&mut Engine, &mut Store) -> Result<Value> + Send + 'static) -> Answer {
     let app = app.clone();
     tokio::task::spawn_blocking(move || {
         let Some(store) = &app.store else {
-            return Err(ApiError(StatusCode::METHOD_NOT_ALLOWED, "this server only reads: start it with --write to change the data".into()));
+            return Err(read_only());
         };
         let mut store = store.lock().unwrap();
         let mut engine = app.engine.write().unwrap();
@@ -139,11 +140,11 @@ async fn change(app: &Shared, work: impl FnOnce(&mut Engine, &mut Store) -> Resu
     .expect("the change of the data stopped")
 }
 
-/// The id of the show of a change. A missing id or an id that is not in the data gives 404, as in
-/// serve.py. A server without --write gives 405 first.
+/// The id of the show of a change. A missing id or an id that is not in the data gives 404. A
+/// server with --read-only gives 405 first.
 fn known_id(app: &App, id: Option<&str>) -> std::result::Result<String, ApiError> {
     if app.store.is_none() {
-        return Err(ApiError(StatusCode::METHOD_NOT_ALLOWED, "this server only reads: start it with --write to change the data".into()));
+        return Err(read_only());
     }
     match id {
         Some(id) if !id.is_empty() && app.engine.read().unwrap().pos.contains_key(id) => Ok(id.to_string()),
@@ -151,7 +152,7 @@ fn known_id(app: &App, id: Option<&str>) -> std::result::Result<String, ApiError
     }
 }
 
-/// A yes/no value of a change, as `bool(payload.get(name, default))` in serve.py
+/// A yes/no value of a change: a missing value has the default, and an empty or zero value is false
 fn yes(body: &Value, name: &str, default: bool) -> bool {
     body.get(name).map(truthy).unwrap_or(default)
 }
@@ -252,7 +253,7 @@ async fn recommend(State(app): State<Shared>, Query(p): Params) -> Answer {
         e.api_recommend(&options).map(Json).map_err(|err| ApiError(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
     })
     .await?;
-    // The log of a list without a seed, with its formula: as in serve.py
+    // The log of a list without a seed, with its formula (the API of the Recommendations tab shows it)
     if !has_seed && app.store.is_some() {
         let shows = list.0.clone();
         let kinds = format!("{}{}", if usual { "usual" } else { "all" }, if links { "" } else { ", no links" });
@@ -320,7 +321,7 @@ async fn poster(State(app): State<Shared>, UrlPath(id): UrlPath<String>) -> Resp
     let client = app.posters.clone();
     let answer = tokio::task::spawn_blocking(move || -> std::result::Result<(String, Vec<u8>), ureq::Error> {
         let mut answer = client.get(&url).call()?;
-        // The type without its parameters, as get_content_type() in Python. Without a type: text/plain.
+        // The type without its parameters. Without a type: text/plain.
         let kind = answer
             .headers()
             .get(header::CONTENT_TYPE)
@@ -345,39 +346,6 @@ async fn poster(State(app): State<Shared>, UrlPath(id): UrlPath<String>) -> Resp
     }
 }
 
-/// A path below a folder, without ".." and without a root
-fn below(folder: &Path, rest: &str) -> Option<PathBuf> {
-    let rest = Path::new(rest);
-    rest.components().all(|c| matches!(c, Component::Normal(_))).then(|| folder.join(rest))
-}
-
-/// Give a file with its type, with conditional requests, and with the cache header
-async fn send_file(path: PathBuf, cache: &'static str, request: Request) -> Response {
-    match ServeFile::new(&path).oneshot(request).await {
-        Ok(response) => {
-            let mut response = response.map(Body::new);
-            response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
-            response
-        }
-        Err(_) => not_found("Not Found").into_response(),
-    }
-}
-
-async fn old_page(State(app): State<Shared>, request: Request) -> Response {
-    send_file(app.root.join("ui").join("index.html"), NO_CACHE, request).await
-}
-
-async fn favicon(State(app): State<Shared>, request: Request) -> Response {
-    send_file(app.root.join("ui").join("favicon.svg"), NO_CACHE, request).await
-}
-
-async fn old_page_file(State(app): State<Shared>, UrlPath(rest): UrlPath<String>, request: Request) -> Response {
-    match below(&app.root.join("ui"), &rest).filter(|p| p.is_file()) {
-        Some(path) => send_file(path, NO_CACHE, request).await,
-        None => not_found("Not Found").into_response(),
-    }
-}
-
 /// Pass a request on to the page server, and give back its answer (status, headers, body)
 fn forward(client: &ureq::Agent, url: &str, headers: &[(String, String)]) -> std::result::Result<(u16, Vec<(String, String)>, Vec<u8>), ureq::Error> {
     // This server compresses the answer itself
@@ -399,9 +367,9 @@ fn forward(client: &ureq::Agent, url: &str, headers: &[(String, String)]) -> std
     Ok((status, out, body))
 }
 
-/// GET /next and each address below it: the page server renders the page
-async fn new_page(State(app): State<Shared>, request: Request) -> Response {
-    let path = request.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_else(|| "/next".into());
+/// A page: the page server renders it
+async fn page(app: &App, request: Request) -> Response {
+    let path = request.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_else(|| "/".into());
     let url = format!("{}{}", app.web.trim_end_matches('/'), path);
     let headers: Vec<(String, String)> = REQUEST_HEADERS
         .iter()
@@ -410,7 +378,7 @@ async fn new_page(State(app): State<Shared>, request: Request) -> Response {
     let client = app.client.clone();
     let answer = tokio::task::spawn_blocking(move || forward(&client, &url, &headers)).await;
     let Ok(Ok((status, headers, body))) = answer else {
-        return (StatusCode::BAD_GATEWAY, "The server of the new page does not run. Start it with scripts/restart_servers.ps1.").into_response();
+        return (StatusCode::BAD_GATEWAY, "The page server does not run. Start it with scripts/restart_servers.ps1.").into_response();
     };
     let mut response = Response::new(Body::from(body));
     *response.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY);
@@ -422,9 +390,29 @@ async fn new_page(State(app): State<Shared>, request: Request) -> Response {
     response
 }
 
-/// An unknown address: 404 for each method, as FastAPI gives
-async fn fallback() -> ApiError {
-    not_found("Not Found")
+/// Each address that has no route of this server. A GET request outside /api is a page. An
+/// unknown address of the API gets 404, and a change of a page gets 405.
+async fn fallback(State(app): State<Shared>, request: Request) -> Response {
+    let path = request.uri().path();
+    if path == "/api" || path.starts_with("/api/") {
+        return not_found("Not Found").into_response();
+    }
+    if request.method() == Method::GET || request.method() == Method::HEAD {
+        return page(&app, request).await;
+    }
+    wrong_method().await.into_response()
+}
+
+/// /next and each address below it: the address of the page while it was new. It now goes to the
+/// same address without /next (a permanent redirect).
+async fn old_address(request: Request) -> Response {
+    let rest = request.uri().path().strip_prefix("/next").unwrap_or("");
+    let rest = if rest.is_empty() { "/" } else { rest };
+    let query = request.uri().query().map(|q| format!("?{q}")).unwrap_or_default();
+    match HeaderValue::from_str(&format!("{rest}{query}")) {
+        Ok(location) => (StatusCode::PERMANENT_REDIRECT, [(header::LOCATION, location)]).into_response(),
+        Err(_) => not_found("Not Found").into_response(),
+    }
 }
 
 /// A known address with a method that it does not have
@@ -453,13 +441,10 @@ fn router(app: Shared) -> Router {
         .route("/api/rec-log", get(|s| simple(s, Engine::api_rec_log)))
         .route("/api/shows", get(|s| simple(s, Engine::api_titles)))
         .route("/api/poster/{*id}", get(poster))
-        .route("/", get(old_page))
-        .route("/favicon.ico", get(favicon))
-        .route("/ui/{*path}", get(old_page_file))
         // A wildcard does not match an empty rest: "/next/" needs its own route
-        .route("/next", get(new_page))
-        .route("/next/", get(new_page))
-        .route("/next/{*path}", get(new_page))
+        .route("/next", get(old_address))
+        .route("/next/", get(old_address))
+        .route("/next/{*rest}", get(old_address))
         .fallback(fallback)
         .method_not_allowed_fallback(wrong_method)
         .layer(CompressionLayer::new())
@@ -525,20 +510,20 @@ pub fn run(args: &[String]) -> Result<()> {
     let mut addresses: Vec<SocketAddr> = Vec::new();
     let mut root: Option<PathBuf> = None;
     let mut web: Option<String> = None;
-    let mut write = false;
+    let mut write = true;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
             "--listen" => addresses.push(rest.next().context("--listen needs an address")?.parse().context("the address is not valid")?),
             "--root" => root = Some(PathBuf::from(rest.next().context("--root needs a folder")?)),
             "--web" => web = Some(rest.next().context("--web needs an address")?.clone()),
-            "--write" => write = true,
+            "--read-only" => write = false,
             other if db.is_none() && !other.starts_with("--") => db = Some(PathBuf::from(other)),
             other => bail!("unknown argument {other}"),
         }
     }
-    let db = db.context("usage: rinrikun serve <database> [--listen address]... [--root folder] [--web address] [--write]")?;
-    // The page server of /next: the same default as the Python server
+    let db = db.context("usage: rinrikun serve <database> [--listen address]... [--root folder] [--web address] [--read-only]")?;
+    // The page server
     let web = web.or_else(|| std::env::var("RINRIKUN_WEB").ok()).unwrap_or_else(|| "http://127.0.0.1:8780".into());
     let client: ureq::Agent = ureq::Agent::config_builder()
         .max_redirects(0)
@@ -551,7 +536,7 @@ pub fn run(args: &[String]) -> Result<()> {
     if addresses.is_empty() {
         addresses.push("127.0.0.1:8775".parse()?);
     }
-    // The folder of the project: it has ui/, web/build/ and anilist_cache/. By default it is the folder of the database.
+    // The folder of the project: it has anilist_cache/ (the pictures of the Discover deck). By default it is the folder of the database.
     let root = root.unwrap_or_else(|| db.parent().map(Path::to_path_buf).unwrap_or_default());
     let started = std::time::Instant::now();
     let engine = load(&db)?;

@@ -1,4 +1,4 @@
-//! Requests to the GraphQL API of AniList, with the rules of anime_vec/anilist_pull.py.
+//! Requests to the GraphQL API of AniList.
 
 use std::time::Duration;
 
@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 /// The address of the API
 const URL: &str = "https://graphql.anilist.co";
-/// The User-Agent of the Python build (UA in anilist_pull.py)
+/// The User-Agent of the requests
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 /// The states of an anime that is not finished: its data changes with time
 pub const UNFINISHED: [&str; 3] = ["NOT_YET_RELEASED", "RELEASING", "HIATUS"];

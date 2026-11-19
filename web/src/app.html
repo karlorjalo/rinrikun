@@ -18,22 +18,6 @@
 			href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@200&text=%E3%82%8A%E3%82%93%E3%81%8F&display=swap"
 			rel="stylesheet"
 		/>
-		<script>
-			// The theme and the settings are attributes of the root element, for the style sheet.
-			// The server sets them from the cookies. The old page keeps them in the local storage:
-			// a value that it changed after the last visit of this page wins. See preferences.ts.
-			try {
-				const t = localStorage.getItem('rinrikun-theme');
-				if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
-			} catch (e) {}
-			try {
-				const saved = JSON.parse(localStorage.getItem('rinrikun-settings') || '{}') || {};
-				for (const key in saved) {
-					if (/^[a-z]+$/.test(key) && typeof saved[key] === 'string')
-						document.documentElement.dataset[key] = saved[key];
-				}
-			} catch (e) {}
-		</script>
 		%sveltekit.head%
 	</head>
 	<body>

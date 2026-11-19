@@ -1,5 +1,4 @@
-//! The answers of the API as JSON, with the same shapes as the answers of serve.py. The HTTP
-//! server and the command `rinrikun reference` use these functions.
+//! The answers of the API as JSON. The shapes are the types of web/src/lib/api/types.ts.
 
 use anyhow::Result;
 use serde_json::{Map, Value, json};
@@ -178,7 +177,7 @@ impl Engine {
             Some("D") => 4,
             _ => 99,
         };
-        // As the sort of Python: the highest match first, and -0.0 is equal to 0.0
+        // A stable sort: the highest match first, and -0.0 is equal to 0.0
         out.sort_by(|a, b| {
             let key = |v: &Value| (order(v["tier"].as_str()), v["match"].as_f64().unwrap_or(0.0));
             let (ka, kb) = (key(a), key(b));
@@ -230,7 +229,7 @@ impl Engine {
         Ok(Value::from(self.with_match(list.iter().map(|&(j, s)| self.result(j, Some(s), Some(seed))).collect())))
     }
 
-    /// GET /api/recommend. The Python server also writes the log of a list without a seed: this server only reads.
+    /// GET /api/recommend. The server writes a list without a seed into the log (server.rs).
     pub fn api_recommend(&self, o: &RecommendOptions) -> Result<Value> {
         let list = self.recommend(o.k, o.seed, o.diverse, o.new_only, o.usual, o.links)?;
         let rows = list
