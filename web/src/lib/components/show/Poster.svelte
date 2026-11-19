@@ -1,14 +1,16 @@
 <script lang="ts">
 	// The poster of a show. If the picture does not load, the box shows the first letter of the
 	// title. `large` asks for the larger file of AniList, and uses the small file if that fails.
+	// `letter` is the size of that letter, for a box that is smaller or larger than a card poster.
 	import { largePoster } from '#lib/format.js';
 
 	let {
 		src,
 		title,
 		large = false,
+		letter = 'text-2xl',
 		class: className = ''
-	}: { src: string | null | undefined; title: string; large?: boolean; class?: string } = $props();
+	}: { src: string | null | undefined; title: string; large?: boolean; letter?: string; class?: string } = $props();
 
 	let failed = $state(false);
 	let small = $state(false);
@@ -32,7 +34,7 @@
 		<img src={address} alt={title} loading="lazy" class="block size-full object-cover" {onerror} />
 	{:else}
 		<div
-			class="flex size-full items-center justify-center font-serif text-2xl font-semibold text-muted-foreground select-none"
+			class="flex size-full items-center justify-center font-serif {letter} font-semibold text-muted-foreground select-none"
 			aria-hidden="true"
 		>
 			{title[0] || '?'}

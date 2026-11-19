@@ -11,6 +11,7 @@
 	import { detail } from '#lib/state/detail.svelte.js';
 	import { library } from '#lib/state/library.svelte.js';
 	import { seeds } from '#lib/state/seed.svelte.js';
+	import { similarView } from '#lib/state/similar.svelte.js';
 	import GuessText from './GuessText.svelte';
 	import MatchText from './MatchText.svelte';
 	import Poster from './Poster.svelte';
@@ -57,7 +58,7 @@
 
 	function findSimilar() {
 		if (!show) return;
-		seeds.similar = show;
+		similarView.run(show);
 		detail.close();
 		goto(resolve('/similar'));
 	}
