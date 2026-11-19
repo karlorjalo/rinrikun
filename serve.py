@@ -13,11 +13,10 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response
-from fastapi.staticfiles import StaticFiles
-from starlette.types import Scope
 
 from anime_vec import frames
 from anime_vec.engine import Engine
+from anime_vec.pages import PAGE_HEADERS, NewPage, PageFiles
 from anime_vec.store import Store
 
 ROOT = Path(__file__).resolve().parent
@@ -258,22 +257,6 @@ def poster(id: str):
     return Response(content=data, media_type=media_type, headers={"Cache-Control": "max-age=86400"})
 
 
-# The browser asks the server each time if a file of the page changed. Without this header a
-# browser can use its old copy of one file with the new copy of a different file for some
-# minutes after a change, and the page is then wrong: for example a new page with the old style
-# sheet. The files have an ETag, thus the answer for a file that did not change is short.
-PAGE_HEADERS = {"Cache-Control": "no-cache"}
-
-
-class PageFiles(StaticFiles):
-    """The files of the page, with the header that makes the browser ask again each time."""
-
-    async def get_response(self, path: str, scope: Scope):
-        response = await super().get_response(path, scope)
-        response.headers.update(PAGE_HEADERS)
-        return response
-
-
 @app.get("/favicon.ico")
 def favicon():
     return FileResponse(ROOT / "ui" / "favicon.svg")
@@ -285,6 +268,12 @@ def index():
 
 
 app.mount("/ui", PageFiles(directory=ROOT / "ui"), name="ui")
+
+# The new page is at /next while it replaces the old page. The server gives it only if its build
+# is there: see web/README.md and scripts/build_web.ps1. The build must have the base path /next.
+NEW_PAGE = ROOT / "web" / "build"
+if (NEW_PAGE / "index.html").is_file():
+    app.mount("/next", NewPage(directory=NEW_PAGE), name="next")
 
 
 def parse_address(text: str) -> tuple[str, int]:

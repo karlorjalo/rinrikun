@@ -71,6 +71,18 @@ powershell -ExecutionPolicy Bypass -File scripts\restart_servers.ps1        # on
 - `restart_servers.ps1` starts one server process that listens on two addresses: `127.0.0.1:8765` and `0.0.0.0:8771`. Its parameter `-Addresses` selects other addresses. The log of the server is `serve.log`.
 - When the build adds shows, it computes the map again. The positions of the shows on the map can then be different.
 
+## The new page
+
+The folder `web/` has a new page for the same server: SvelteKit, Tailwind CSS and components. It has all tabs of the page in `ui/`, and each tab has its own address. The two pages use the same API and the same settings of the browser, thus you can use the two at the same time. `web/README.md` tells how to work on the new page.
+
+The server gives the new page at `/next` (for example `http://localhost:8765/next/`) when its build is there. The build needs Node.js:
+
+```
+powershell -ExecutionPolicy Bypass -File scripts\build_web.ps1   # install the packages and build the page to web\build
+```
+
+Start the server again after the first build: the server looks for the build when it starts. A later build needs no restart. The page at `/` is the page in `ui/`, as before.
+
 ## Notes
 
 - The build connects each library show to its AniList entries with the public id map of the Fribb/anime-lists project (TMDB, TVDB and IMDb ids, with season numbers). The file stays in `idmap_cache/` for 7 days. A title match finds the shows that the id map does not have.
