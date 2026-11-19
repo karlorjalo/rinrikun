@@ -35,8 +35,8 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 15px; line-height: 1.65; }
-header { position: relative; max-width: 1040px; margin: 0 auto; padding: 36px 16px 14px; text-align: center; }
-.header-top { position: relative; display: flex; align-items: center; justify-content: center; margin-bottom: 22px; }
+header { position: relative; max-width: 1040px; margin: 0 auto; padding: 26px 16px 12px; text-align: center; }
+.header-top { position: relative; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
 .header-top .mast { text-align: center; }
 header h1 { font-family: var(--serif); font-weight: 600; font-size: 34px; letter-spacing: .06em; margin: 0; }
 header .sub { color: var(--muted); font-size: 13px; margin: 6px 0 0; letter-spacing: .08em; }
@@ -168,7 +168,7 @@ h2 { font-family: var(--serif); font-weight: 600; font-size: 22px; margin: 26px 
 .hero-dna { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-l); padding: 24px;
   margin-bottom: 28px; }
 .hero-dna-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px;
-  flex-wrap: wrap; margin-bottom: 20px; }
+  flex-wrap: wrap; }
 .hero-dna-title { font-family: var(--serif); font-size: 24px; font-weight: 700; margin: 0; color: var(--text); }
 .hero-dna-counts { color: var(--muted); font-size: 13px; }
 
@@ -210,7 +210,6 @@ dialog#detail-modal::backdrop { background: rgba(24, 18, 21, 0.66); }
 .modal-tag { background: var(--hover); border: 1px solid var(--border); border-radius: var(--radius-s); padding: 3px 8px;
   font-size: 12px; color: var(--text); display: inline-flex; align-items: center; gap: 6px; }
 .modal-tag .trank { font-size: 10.5px; color: var(--muted); font-weight: 500; }
-.badge-unowned { background: var(--hover); color: var(--muted); border: 1px solid var(--border); }
 .badge.badge-franchise { background: var(--hover); color: var(--muted); border: 1px solid var(--border); }
 .badge.badge-manual { background: color-mix(in srgb, var(--accent) 18%, var(--card)); color: var(--accent);
   border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
@@ -371,7 +370,8 @@ dialog#frame-viewer::backdrop { background: rgba(14, 11, 12, 0.86); }
 .deck-nav-buttons { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
 
 /* Taste Profile Tier Summary */
-.tier-summary-box { background: var(--hover); border: 1px solid var(--border); border-radius: var(--radius-m); padding: 14px 16px; margin-top: 18px; }
+/* The parts of the card of the Profile tab. A line divides two parts: a part is not a box in the card. */
+.tier-summary-box { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 16px; }
 .tier-summary-title { font-family: var(--serif); font-size: 13.5px; font-weight: 600; color: var(--text); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; }
 .tier-summary-row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
 .tier-summary-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
@@ -392,7 +392,7 @@ dialog#frame-viewer::backdrop { background: rgba(14, 11, 12, 0.86); }
   cursor: pointer; padding: 3px 6px; border-radius: var(--radius-s); transition: background .12s ease;
 }
 .tier-summary-item.clickable:hover {
-  background: var(--card);
+  background: var(--hover);
 }
 
 #ratings-grid .badge:not(.badge-manual):not(.badge-franchise) { display: none; }
@@ -401,9 +401,9 @@ dialog#frame-viewer::backdrop { background: rgba(14, 11, 12, 0.86); }
 .watched-count-badge { font-size: 13px; font-weight: 500; color: var(--muted); }
 
 /* Vector Space Visualizer */
+/* A map has its title and its legend above it. The map is the card: it has no second frame around it. */
 .vector-map-wrap {
-  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-l);
-  padding: 16px 18px; margin-bottom: 22px;
+  margin-bottom: 26px;
 }
 .vector-map-header {
   display: flex; justify-content: space-between; align-items: center;
@@ -436,8 +436,8 @@ dialog#frame-viewer::backdrop { background: rgba(14, 11, 12, 0.86); }
   background: var(--accent);
 }
 .vector-canvas-box {
-  position: relative; width: 100%; height: 520px; border-radius: var(--radius-m);
-  background: color-mix(in srgb, var(--bg) 65%, var(--card));
+  position: relative; width: 100%; height: 520px; border-radius: var(--radius-l);
+  background: var(--card);
   border: 1px solid var(--border); overflow: hidden;
 }
 .vector-canvas-box canvas {
@@ -580,7 +580,7 @@ main { position: relative; }
 header h1.brand { display: inline-flex; flex-direction: column; align-items: center; gap: 9px; margin: 0;
   font-family: "Noto Sans JP", "Yu Gothic", sans-serif; font-size: 40px; font-weight: 200; letter-spacing: .05em;
   line-height: 1; color: var(--text); }
-.brand-mark { width: 62px; height: 62px; flex: none; }
+.brand-mark { width: 56px; height: 56px; flex: none; }
 .brand-text { display: flex; flex-direction: column; align-items: stretch; }
 .brand-name { white-space: nowrap; margin-right: -.05em; }
 .brand-sub { display: flex; justify-content: space-between; margin-top: 9px; padding: 0 4px; font-size: 9.5px;
