@@ -254,8 +254,9 @@ dialog#detail-modal::backdrop { background: rgba(24, 18, 21, 0.66); }
 /* Review Deck */
 #tab-review, #tab-discover { max-width: 680px; margin: 0 auto; }
 .deck-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
-.deck-title-row { display: flex; align-items: baseline; gap: 12px; }
-.deck-title-row h2 { margin: 0; }
+/* The title of a deck and its numbers. On a small screen the numbers go below the title. */
+.deck-title-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; }
+.deck-title-row h2 { flex: none; margin: 0; }
 .deck-progress { font-size: 13px; color: var(--muted); font-weight: 500; }
 .deck-filter-row { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-m); padding: 3px; }
 .deck-card {
