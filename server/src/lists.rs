@@ -501,6 +501,11 @@ impl Engine {
             let j = groups[g].swap_remove(at);
             picked.push((j, matches[j]));
         }
+        // The answer of a card keeps the match that the deck showed: see set_interest
+        let mut deck = self.deck_match.lock().unwrap();
+        for &(j, m) in &picked {
+            deck.insert(self.rows[j].id.clone(), m);
+        }
         picked
     }
 

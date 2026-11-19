@@ -1,6 +1,7 @@
-//! The command `rinrikun serve`: the HTTP server with the GET routes of serve.py, the old page at
-//! `/` and the new page at `/next`. In this phase it only reads: a request that changes data gets
-//! the answer 405. When the Python server changes the database, this server loads the data again.
+//! The command `rinrikun serve`: the HTTP server with the routes of serve.py, the old page at `/`
+//! and the new page at `/next`. Without --write it only reads: a request that changes data gets
+//! the answer 405. When a different program (the Python server) changes the database, this server
+//! loads the data again.
 //!
 //! A Node server renders the new page (web/server.js). This server passes the requests for /next
 //! on to it, as the Python server does (forward_page in anime_vec/pages.py).
@@ -16,7 +17,7 @@ use axum::Json;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Path as UrlPath, Query, Request, State};
-use axum::http::{HeaderValue, Method, StatusCode, header};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde_json::{Map, Value, json};
@@ -25,10 +26,11 @@ use tower_http::compression::CompressionLayer;
 use tower_http::services::ServeFile;
 
 use crate::api::RecommendOptions;
+use crate::changes::Refused;
 use crate::engine::Engine;
 use crate::frames;
 use crate::lists::Random;
-use crate::store::Store;
+use crate::store::{Store, truthy};
 
 /// The browser asks again each time if a file of a page changed (see PAGE_HEADERS in anime_vec/pages.py)
 const NO_CACHE: &str = "no-cache";
@@ -39,7 +41,12 @@ const ANSWER_HEADERS: [&str; 7] = ["content-type", "cache-control", "etag", "las
 const FRAMES_MAX: usize = 50;
 
 struct App {
-    engine: RwLock<Arc<Engine>>,
+    engine: RwLock<Engine>,
+    /// The database with the right to change it (--write). Without it the server only reads.
+    store: Option<Mutex<Store>>,
+    /// The time and the size of the database files after the last change of this server. The
+    /// watcher does not load the data again for a change of this server.
+    own_stamp: Mutex<Vec<Option<(SystemTime, u64)>>>,
     random: Mutex<Random>,
     root: PathBuf,
     db: PathBuf,
@@ -93,14 +100,107 @@ fn choice<'a>(p: &'a HashMap<String, String>, name: &str, default: &'a str, allo
     if allowed.contains(&value) { Ok(value) } else { Err(invalid(name)) }
 }
 
-fn engine(app: &App) -> Arc<Engine> {
-    app.engine.read().unwrap().clone()
-}
-
 /// Run work of the engine on a thread for blocking work: the computation of a list takes some time
 async fn compute<T: Send + 'static>(app: &Shared, work: impl FnOnce(&Engine) -> T + Send + 'static) -> T {
-    let engine = engine(app);
-    tokio::task::spawn_blocking(move || work(&engine)).await.expect("the work of the engine stopped")
+    let app = app.clone();
+    tokio::task::spawn_blocking(move || {
+        let engine = app.engine.read().unwrap();
+        work(&engine)
+    })
+    .await
+    .expect("the work of the engine stopped")
+}
+
+/// The answer for a change that failed: 400 for a change that the user cannot make, else 500
+fn change_error(error: anyhow::Error) -> ApiError {
+    match error.downcast_ref::<Refused>() {
+        Some(refused) => ApiError(StatusCode::BAD_REQUEST, refused.to_string()),
+        None => ApiError(StatusCode::INTERNAL_SERVER_ERROR, format!("{error:#}")),
+    }
+}
+
+/// Run a change of the data: one change at a time, while no request reads the engine. A server
+/// without --write gives 405.
+async fn change(app: &Shared, work: impl FnOnce(&mut Engine, &mut Store) -> Result<Value> + Send + 'static) -> Answer {
+    let app = app.clone();
+    tokio::task::spawn_blocking(move || {
+        let Some(store) = &app.store else {
+            return Err(ApiError(StatusCode::METHOD_NOT_ALLOWED, "this server only reads: start it with --write to change the data".into()));
+        };
+        let mut store = store.lock().unwrap();
+        let mut engine = app.engine.write().unwrap();
+        let result = work(&mut engine, &mut store);
+        *app.own_stamp.lock().unwrap() = stamp(&app.db);
+        result.map(Json).map_err(change_error)
+    })
+    .await
+    .expect("the change of the data stopped")
+}
+
+/// The id of the show of a change. A missing id or an id that is not in the data gives 404, as in
+/// serve.py. A server without --write gives 405 first.
+fn known_id(app: &App, id: Option<&str>) -> std::result::Result<String, ApiError> {
+    if app.store.is_none() {
+        return Err(ApiError(StatusCode::METHOD_NOT_ALLOWED, "this server only reads: start it with --write to change the data".into()));
+    }
+    match id {
+        Some(id) if !id.is_empty() && app.engine.read().unwrap().pos.contains_key(id) => Ok(id.to_string()),
+        _ => Err(not_found("unknown show id")),
+    }
+}
+
+/// A yes/no value of a change, as `bool(payload.get(name, default))` in serve.py
+fn yes(body: &Value, name: &str, default: bool) -> bool {
+    body.get(name).map(truthy).unwrap_or(default)
+}
+
+/// POST /api/weights {id, tier}: give a show a tier. A tier of null takes the tier away.
+async fn post_weights(State(app): State<Shared>, Json(body): Json<Value>) -> Answer {
+    let id = known_id(&app, body["id"].as_str())?;
+    let tier = body["tier"].as_str().map(str::to_string);
+    change(&app, move |e, s| e.set_show_tier(s, &id, tier.as_deref())).await
+}
+
+/// DELETE /api/weights?id=...: take the tier away
+async fn delete_weights(State(app): State<Shared>, Query(p): Params) -> Answer {
+    let id = p.get("id").ok_or_else(|| invalid("id"))?;
+    let id = known_id(&app, Some(id))?;
+    change(&app, move |e, s| e.set_show_tier(s, &id, None)).await
+}
+
+/// POST /api/watched {id, watched}: mark a show as watched, or take the mark away
+async fn post_watched(State(app): State<Shared>, Json(body): Json<Value>) -> Answer {
+    let id = known_id(&app, body["id"].as_str())?;
+    let watched = yes(&body, "watched", true);
+    change(&app, move |e, s| {
+        let owned = e.set_watched(s, &id, watched)?;
+        Ok(json!({"id": id, "watched": watched, "owned": owned}))
+    })
+    .await
+}
+
+/// POST /api/dismissed {id, dismissed}: remove a show from the recommendations, or put it back
+async fn post_dismissed(State(app): State<Shared>, Json(body): Json<Value>) -> Answer {
+    let id = known_id(&app, body["id"].as_str())?;
+    let dismissed = yes(&body, "dismissed", true);
+    change(&app, move |e, s| {
+        e.set_dismissed(s, &id, dismissed)?;
+        Ok(json!({"id": id, "dismissed": dismissed}))
+    })
+    .await
+}
+
+/// POST /api/interest {id, value, source}: the answer of the user for a show. A value of null deletes the answer.
+async fn post_interest(State(app): State<Shared>, Json(body): Json<Value>) -> Answer {
+    let id = known_id(&app, body["id"].as_str())?;
+    let value = body.get("value").filter(|v| !v.is_null()).map(truthy);
+    let source = if body["source"].as_str() == Some("deck") { "deck" } else { "page" };
+    change(&app, move |e, s| {
+        e.set_interest(s, &id, value, source)?;
+        let interest = e.interest.get(&id).copied();
+        Ok(json!({"id": id, "interest": interest, "dismissed": e.refused(&id) as i64, "counts": e.interest_counts()}))
+    })
+    .await
 }
 
 async fn simple(State(app): State<Shared>, work: fn(&Engine) -> Value) -> Json<Value> {
@@ -141,14 +241,22 @@ async fn recommend(State(app): State<Shared>, Query(p): Params) -> Answer {
     let new_only = flag(&p, "new_only", false)?;
     let usual = choice(&p, "kinds", "all", &["all", "usual"])? == "usual";
     let links = flag(&p, "links", true)?;
-    compute(&app, move |e| {
+    let has_seed = seed.is_some();
+    let list = compute(&app, move |e| {
         if seed.as_ref().is_some_and(|s| !e.pos.contains_key(s)) {
             return Err(not_found("unknown seed"));
         }
         let options = RecommendOptions { k, seed: seed.as_deref(), diverse, new_only, usual, links };
         e.api_recommend(&options).map(Json).map_err(|err| ApiError(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
     })
-    .await
+    .await?;
+    // The log of a list without a seed, with its formula: as in serve.py
+    if !has_seed && app.store.is_some() {
+        let shows = list.0.clone();
+        let kinds = format!("{}{}", if usual { "usual" } else { "all" }, if links { "" } else { ", no links" });
+        let _ = change(&app, move |e, s| e.log_list(s, &shows, &kinds).map(|_| Value::Null)).await?;
+    }
+    Ok(list)
 }
 
 async fn steps(State(app): State<Shared>, Query(p): Params) -> Answer {
@@ -259,12 +367,14 @@ async fn new_page(State(app): State<Shared>, request: Request) -> Response {
     response
 }
 
-async fn fallback(method: Method) -> ApiError {
-    if method == Method::GET || method == Method::HEAD {
-        not_found("Not Found")
-    } else {
-        ApiError(StatusCode::METHOD_NOT_ALLOWED, "this server only reads: change the data through the Python server".into())
-    }
+/// An unknown address: 404 for each method, as FastAPI gives
+async fn fallback() -> ApiError {
+    not_found("Not Found")
+}
+
+/// A known address with a method that it does not have
+async fn wrong_method() -> ApiError {
+    ApiError(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed".into())
 }
 
 fn router(app: Shared) -> Router {
@@ -272,13 +382,13 @@ fn router(app: Shared) -> Router {
         .route("/api/profile", get(|s| simple(s, Engine::api_profile)))
         .route("/api/vector-map", get(|s| simple(s, Engine::api_vector_map)))
         .route("/api/vector-map/match", get(|s| simple(s, Engine::api_map_match)))
-        .route("/api/weights", get(|s| simple(s, Engine::api_weights)))
+        .route("/api/weights", get(|s| simple(s, Engine::api_weights)).post(post_weights).delete(delete_weights))
         .route("/api/review-queue", get(review_queue))
         .route("/api/ratings", get(|s| simple(s, Engine::api_ratings)))
-        .route("/api/watched", get(|s| simple(s, Engine::api_watched)))
-        .route("/api/dismissed", get(|s| simple(s, Engine::api_dismissed)))
+        .route("/api/watched", get(|s| simple(s, Engine::api_watched)).post(post_watched))
+        .route("/api/dismissed", get(|s| simple(s, Engine::api_dismissed)).post(post_dismissed))
         .route("/api/discover", get(discover))
-        .route("/api/interest", get(|s| simple(s, Engine::api_watch_list)))
+        .route("/api/interest", get(|s| simple(s, Engine::api_watch_list)).post(post_interest))
         .route("/api/interest/results", get(|s| simple(s, Engine::api_interest_results)))
         .route("/api/frames", get(pictures))
         .route("/api/similar", get(similar))
@@ -297,6 +407,7 @@ fn router(app: Shared) -> Router {
         .route("/next/", get(new_page))
         .route("/next/{*path}", get(new_page))
         .fallback(fallback)
+        .method_not_allowed_fallback(wrong_method)
         .layer(CompressionLayer::new())
         .with_state(app)
 }
@@ -332,7 +443,12 @@ fn watch(app: Shared) {
             if now == seen {
                 continue;
             }
-            // Wait until the Python server ends its writes
+            if now == *app.own_stamp.lock().unwrap() {
+                // A change of this server: the engine has it already
+                seen = now;
+                continue;
+            }
+            // Wait until the other program ends its writes
             std::thread::sleep(Duration::from_secs(1));
             if stamp(&app.db) != now {
                 continue;
@@ -340,7 +456,7 @@ fn watch(app: Shared) {
             let started = std::time::Instant::now();
             match load(&app.db) {
                 Ok(engine) => {
-                    *app.engine.write().unwrap() = Arc::new(engine);
+                    *app.engine.write().unwrap() = engine;
                     eprintln!("the database changed: data loaded again in {:.2?}", started.elapsed());
                 }
                 Err(error) => eprintln!("the database changed, but the load failed: {error:#}"),
@@ -355,17 +471,19 @@ pub fn run(args: &[String]) -> Result<()> {
     let mut addresses: Vec<SocketAddr> = Vec::new();
     let mut root: Option<PathBuf> = None;
     let mut web: Option<String> = None;
+    let mut write = false;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
             "--listen" => addresses.push(rest.next().context("--listen needs an address")?.parse().context("the address is not valid")?),
             "--root" => root = Some(PathBuf::from(rest.next().context("--root needs a folder")?)),
             "--web" => web = Some(rest.next().context("--web needs an address")?.clone()),
+            "--write" => write = true,
             other if db.is_none() && !other.starts_with("--") => db = Some(PathBuf::from(other)),
             other => bail!("unknown argument {other}"),
         }
     }
-    let db = db.context("usage: rinrikun serve <database> [--listen address]... [--root folder] [--web address]")?;
+    let db = db.context("usage: rinrikun serve <database> [--listen address]... [--root folder] [--web address] [--write]")?;
     // The page server of /next: the same default as the Python server
     let web = web.or_else(|| std::env::var("RINRIKUN_WEB").ok()).unwrap_or_else(|| "http://127.0.0.1:8780".into());
     let client: ureq::Agent = ureq::Agent::config_builder()
@@ -384,7 +502,10 @@ pub fn run(args: &[String]) -> Result<()> {
     let started = std::time::Instant::now();
     let engine = load(&db)?;
     eprintln!("{} shows loaded in {:.2?}", engine.len(), started.elapsed());
-    let app = Arc::new(App { engine: RwLock::new(Arc::new(engine)), random: Mutex::new(Random::from_time()), root, db, web, client });
+    let store = if write { Some(Mutex::new(Store::open_write(&db)?)) } else { None };
+    eprintln!("{}", if write { "this server changes the data" } else { "this server only reads" });
+    let own_stamp = Mutex::new(stamp(&db));
+    let app = Arc::new(App { engine: RwLock::new(engine), store, own_stamp, random: Mutex::new(Random::from_time()), root, db, web, client });
     watch(app.clone());
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     runtime.block_on(async move {

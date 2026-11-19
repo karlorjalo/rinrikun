@@ -1,7 +1,8 @@
 # rinrikun server (Rust)
 
 The Rust version of the server. It reads the same database as the Python server and computes the
-same results. In this phase the Python server stays the live server, and the Rust server only reads.
+same results. With `--write` it also changes the data of the user, as the Python server does. The
+Python server stays the live server until the switch.
 
 ## Build
 
@@ -15,24 +16,44 @@ and copy the program.
 ## Run
 
 ```sh
-rinrikun serve <database> [--listen 127.0.0.1:8775]... [--root <project folder>] [--web <page server>]
+rinrikun serve <database> [--listen 127.0.0.1:8775]... [--root <project folder>] [--web <page server>] [--write]
 ```
 
-The server gives the GET routes of `serve.py`, the old page at `/` and the new page at `/next`.
+The server gives the routes of `serve.py`, the old page at `/` and the new page at `/next`.
 The project folder has `ui/` and `anilist_cache/`; by default it is the folder of the database.
 `--listen` can be given more than one time. The Node server of the new page renders `/next`: this
 server passes the requests on to it, as the Python server does. Its address is `--web`, or the
 environment variable `RINRIKUN_WEB`, or `http://127.0.0.1:8780`.
 
-In this phase the server only reads:
+### With --write
 
-- A request that changes data gets the answer 405. Make the change through the Python server.
-- When the Python server changes the database, this server loads the data again (in about 1 second).
+The server changes the data of the user with the rules of `anime_vec/engine.py`:
+
+- `POST /api/weights` and `DELETE /api/weights`: the tier of a show and of its counterparts.
+- `POST /api/watched`: a show marked as watched by hand.
+- `POST /api/dismissed`: a show removed from the recommendations.
+- `POST /api/interest`: an answer of the Discover deck or of a page. The database keeps the match
+  that the deck showed for the card.
+- A list of recommendations without a seed goes into the log of the lists.
+
+One change runs at a time, and no request reads the data during a change. Let only one server change
+a database: do not start the Python server and a Rust server with `--write` on the same file.
+
+### Without --write
+
+The server only reads:
+
+- A request that changes data gets the answer 405.
+- A list of recommendations is not written to the log of the lists.
+
+### In the two modes
+
+- When a different program changes the database, this server loads the data again (in about 1
+  second). Its own changes do not start a load.
 - The pictures of the Discover deck come from the files that the Python server keeps in
   `anilist_cache/frames`. This server does not ask AniList.
 - The poster of a library show without an AniList entry gets 404: the Python server passes these
   posters on from Jellyfin.
-- A list of recommendations is not written to the log of the lists.
 
 ## Compare with the Python engine
 
@@ -49,6 +70,11 @@ python compare/compare.py py.json rs.json
 `compare/http_check.py` sends the same requests to a Python server and to a Rust server that read
 the same database, and compares the answers. Use a test server with a copy of the database: the
 Python server writes each list of recommendations without a seed into its log.
+
+`compare/write_check.py` compares the changes. Start the Python server on one copy of a database
+and the Rust server with `--write` on a second copy. The script sends the same changes to the two
+servers, and compares each answer, the tables of the data of the user, and the lists after the
+changes. It changes the data: never use it on the live database.
 
 The two engines add numbers in a different order. Thus a value can differ in its last digits, and a
 show near a limit can move by one place. The scripts tell the differences and fail if one is

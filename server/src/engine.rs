@@ -155,6 +155,8 @@ pub struct Engine {
     /// The group of each row for the year, the format, the number of episodes and the crowd score. -1 = not known.
     pub kind_codes: Vec<[i64; 4]>,
     cache: Mutex<Cache>,
+    /// The match of each card that the Discover deck gave, until the user answers it
+    pub deck_match: Mutex<HashMap<String, f32>>,
 }
 
 impl Engine {
@@ -292,6 +294,7 @@ impl Engine {
             entry_row: Vec::new(),
             kind_codes: Vec::new(),
             cache: Mutex::new(Cache::default()),
+            deck_match: Mutex::new(HashMap::new()),
         };
         engine.build_tag_matrix();
         engine.build_taste_model()?;
@@ -328,6 +331,11 @@ impl Engine {
             }
         }
         self.regions = store.regions().unwrap_or(serde_json::Value::Array(Vec::new()));
+    }
+
+    /// Forget the match and the tier guess: the data of the user changed
+    pub fn clear_cache(&self) {
+        *self.cache.lock().unwrap() = Cache::default();
     }
 
     pub fn len(&self) -> usize {

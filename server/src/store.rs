@@ -90,6 +90,15 @@ pub struct Store {
     con: Connection,
 }
 
+/// The tables of the data of the user, as SCHEMA in anime_vec/store.py
+const USER_TABLES: &str = "
+CREATE TABLE IF NOT EXISTS watched_manual (id TEXT PRIMARY KEY, created_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS show_weights (id TEXT PRIMARY KEY, tier TEXT NOT NULL, weight REAL NOT NULL, updated_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS dismissed (id TEXT PRIMARY KEY, created_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS interest (id TEXT PRIMARY KEY, value INTEGER NOT NULL, match REAL, source TEXT, created_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS rec_log (id TEXT PRIMARY KEY, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, best_rank INTEGER NOT NULL, days INTEGER NOT NULL, kinds TEXT);
+";
+
 /// A value of the database as JSON
 fn to_json(value: SqlValue) -> Value {
     match value {
@@ -140,6 +149,81 @@ impl Store {
         let con = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
             .with_context(|| format!("cannot open the database {}", path.display()))?;
         Ok(Store { con })
+    }
+
+    /// Open the database with the right to change it. The tables of the data of the user are
+    /// made if they are not there, as in anime_vec/store.py. The build of the Python project
+    /// makes the table of the shows.
+    pub fn open_write(path: &Path) -> Result<Store> {
+        let con = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX)
+            .with_context(|| format!("cannot open the database {}", path.display()))?;
+        con.execute_batch(USER_TABLES)?;
+        Ok(Store { con })
+    }
+
+    /// Mark a show as watched by hand, or take the mark away. A show of the library stays owned.
+    pub fn set_manual_watched(&mut self, id: &str, watched: bool) -> Result<()> {
+        let change = self.con.transaction()?;
+        if watched {
+            change.execute("INSERT OR REPLACE INTO watched_manual (id) VALUES (?1)", [id])?;
+            change.execute("UPDATE shows SET owned=1 WHERE id=?1", [id])?;
+        } else {
+            change.execute("DELETE FROM watched_manual WHERE id=?1", [id])?;
+            change.execute("UPDATE shows SET owned=0 WHERE id=?1 AND source != 'library'", [id])?;
+        }
+        change.commit()?;
+        Ok(())
+    }
+
+    pub fn set_dismissed(&mut self, id: &str, dismissed: bool) -> Result<()> {
+        if dismissed {
+            self.con.execute("INSERT OR REPLACE INTO dismissed (id) VALUES (?1)", [id])?;
+        } else {
+            self.con.execute("DELETE FROM dismissed WHERE id=?1", [id])?;
+        }
+        Ok(())
+    }
+
+    /// Record an answer of the user for a show. The value None deletes the answer.
+    pub fn set_interest(&mut self, id: &str, value: Option<i64>, matched: Option<f64>, source: &str) -> Result<()> {
+        match value {
+            None => self.con.execute("DELETE FROM interest WHERE id=?1", [id])?,
+            Some(v) => self.con.execute(
+                "INSERT OR REPLACE INTO interest (id, value, match, source) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![id, v, matched, source],
+            )?,
+        };
+        Ok(())
+    }
+
+    pub fn set_weight(&mut self, id: &str, tier: &str, weight: f64) -> Result<()> {
+        self.con.execute(
+            "INSERT OR REPLACE INTO show_weights (id, tier, weight, updated_at) VALUES (?1, ?2, ?3, datetime('now'))",
+            rusqlite::params![id, tier, weight],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_weight(&mut self, id: &str) -> Result<()> {
+        self.con.execute("DELETE FROM show_weights WHERE id=?1", [id])?;
+        Ok(())
+    }
+
+    /// Record the shows of a list of recommendations: (id, place in the list). The log keeps for
+    /// each show its first day and its last day in a list, its best place, the number of days,
+    /// and the formula of the first list.
+    pub fn log_recommendations(&mut self, items: &[(String, usize)], kinds: &str, today: &str) -> Result<()> {
+        let change = self.con.transaction()?;
+        for (id, rank) in items {
+            change.execute(
+                "INSERT INTO rec_log (id, first_seen, last_seen, best_rank, days, kinds) VALUES (?1, ?2, ?2, ?3, 1, ?4) \
+                 ON CONFLICT(id) DO UPDATE SET best_rank = MIN(best_rank, excluded.best_rank), \
+                 days = days + (last_seen != excluded.last_seen), last_seen = excluded.last_seen",
+                rusqlite::params![id, today, *rank as i64, kinds],
+            )?;
+        }
+        change.commit()?;
+        Ok(())
     }
 
     fn ids(&self, sql: &str) -> HashSet<String> {

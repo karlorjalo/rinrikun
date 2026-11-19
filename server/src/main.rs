@@ -1,10 +1,11 @@
-//! The rinrikun server in Rust. In this phase it reads the database of the Python server and
-//! computes the same results; the Python server stays the live server.
+//! The rinrikun server in Rust. It reads the database of the Python server and computes the same
+//! results. With --write it also changes the data of the user, as the Python server does.
 //!
-//!   rinrikun serve <database> [--listen address]... [--root folder] [--web address]   the HTTP server (only reads)
+//!   rinrikun serve <database> [--listen address]... [--root folder] [--web address] [--write]   the HTTP server
 //!   rinrikun reference <database> <out.json>   write the results of the engine as JSON
 
 mod api;
+mod changes;
 mod engine;
 mod frames;
 mod lists;
@@ -19,7 +20,7 @@ fn main() {
         Some("reference") => reference::run(&args[1..]),
         Some("serve") => server::run(&args[1..]),
         _ => {
-            eprintln!("usage: rinrikun serve <database> [--listen address]... [--root folder]
+            eprintln!("usage: rinrikun serve <database> [--listen address]... [--root folder] [--web address] [--write]
        rinrikun reference <database> <out.json>");
             std::process::exit(2);
         }
