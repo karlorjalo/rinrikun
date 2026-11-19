@@ -1666,16 +1666,16 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     const rootStyle = getComputedStyle(document.documentElement);
     const colors = {
       accent: getThemeAccent(),
-      catalog: isDark ? "rgba(168, 162, 158, 0.28)" : "rgba(120, 113, 108, 0.24)",
-      library: isDark ? "rgba(235, 230, 220, 0.75)" : "rgba(40, 36, 33, 0.62)",
-      neutral: isDark ? "rgba(168, 162, 158, 0.55)" : "rgba(120, 113, 108, 0.5)",
-      muted: isDark ? "#a8a29e" : "#78716c",
-      empty: isDark ? "#3a3833" : "#efede6",
-      paper: isDark ? "#262624" : "#ffffff",
-      ink: isDark ? "#f5f2ea" : "#1c1917",
-      shadow: isDark ? "rgba(0, 0, 0, 0.7)" : "rgba(28, 25, 23, 0.45)",
+      catalog: isDark ? "rgba(169, 158, 163, 0.28)" : "rgba(114, 101, 106, 0.24)",
+      library: isDark ? "rgba(238, 229, 232, 0.75)" : "rgba(35, 28, 31, 0.62)",
+      neutral: isDark ? "rgba(169, 158, 163, 0.55)" : "rgba(114, 101, 106, 0.5)",
+      muted: isDark ? "#a99ea3" : "#72656a",
+      empty: isDark ? "#3a3337" : "#f1eaeb",
+      paper: isDark ? "#242022" : "#ffffff",
+      ink: isDark ? "#f5f0f1" : "#231c1f",
+      shadow: isDark ? "rgba(0, 0, 0, 0.7)" : "rgba(35, 28, 31, 0.45)",
       find: rootStyle.getPropertyValue("--find").trim() || "#0e8177",
-      dot: isDark ? "rgb(222, 216, 206)" : "rgb(74, 68, 63)",
+      dot: isDark ? "rgb(224, 214, 218)" : "rgb(74, 65, 69)",
       tier: {},
     };
     for (const t of ["S", "A", "B", "C", "D"]) {
