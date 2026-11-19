@@ -41,7 +41,7 @@ function card(r, why) {
   if (why) {
     tagHtml = `<span class="chip chip-why">${esc(why)}</span>`;
   } else if (r.matched_favorite) {
-    const matchChip = `<span class="chip chip-matched" title="Matches your favorite: ${esc(r.matched_favorite)}">✦ ${esc(r.matched_favorite)}</span>`;
+    const matchChip = `<span class="chip chip-matched" title="Matches your favorite: ${esc(r.matched_favorite)}"><i class="petal-mark"></i>${esc(r.matched_favorite)}</span>`;
     const linkChip = r.linked_favorite
       ? `<span class="chip chip-linked" title="AniList users recommend this show to people who like: ${esc(r.linked_favorite)}">⇄ ${esc(r.linked_favorite)}</span>`
       : "";
@@ -87,7 +87,8 @@ function card(r, why) {
   const quick = document.createElement("button");
   quick.className = "card-quick-seed";
   quick.title = "Recommend like this";
-  quick.innerHTML = "✦";
+  quick.setAttribute("aria-label", "Recommend like this");
+  quick.innerHTML = '<i class="petal-mark"></i>';
   quick.onclick = (e) => {
     e.stopPropagation();
     useSeed(r);
@@ -313,8 +314,6 @@ async function openModal(r) {
     metaItems.push('<span class="badge">library</span>');
   } else if (r.manual_watched) {
     metaItems.push('<span class="badge badge-manual">watched</span>');
-  } else {
-    metaItems.push('<span class="badge badge-unowned">pool</span>');
   }
   if (r.format) metaItems.push(`<span>${esc(r.format.toUpperCase())}</span>`);
   if (r.year) metaItems.push(`<span>${r.year}</span>`);
@@ -334,7 +333,7 @@ async function openModal(r) {
   const watchedBtn = isLibrary
     ? ""
     : `<button class="btn-action btn-watched ${r.manual_watched ? 'active' : ''}" id="modal-toggle-watched" aria-pressed="${r.manual_watched ? 'true' : 'false'}">
-         ${r.manual_watched ? 'Watched' : '+ Add to Watched'}
+         ${r.manual_watched ? 'Watched' : '+ Add to watched'}
        </button>`;
 
   // A show that the user does not own can go out of the recommendations
@@ -364,7 +363,7 @@ async function openModal(r) {
 
   const tierSection = `
     <div class="modal-tier-section">
-      <span class="modal-tier-label">Preference tier:</span>
+      <span class="modal-tier-label">Your tier:</span>
       <div class="modal-tier-pills">
         ${tierPills}
         ${clearTierBtn}
@@ -383,8 +382,8 @@ async function openModal(r) {
           ${r.studios && r.studios.length ? `<div class="modal-studio">Studio: <b>${esc(r.studios.join(", "))}</b></div>` : ""}
           <div class="modal-score-row">${modalStatsHtml(r)}</div>
           <div class="modal-actions">
-            <button class="btn-action primary" id="modal-find-sim">Find Similar</button>
-            <button class="btn-action" id="modal-seed-rec">Recommend Like This</button>
+            <button class="btn-action primary" id="modal-find-sim">Find similar</button>
+            <button class="btn-action" id="modal-seed-rec">Recommend like this</button>
             ${watchedBtn}
             ${interestBtn}${dismissBtn}
             ${anilistLink}
@@ -691,7 +690,7 @@ function buildProfile(el) {
     <div class="vector-map-wrap" id="profile-vector-map-wrap">
       <div class="vector-map-header">
         <div class="vector-map-title">
-          <span>Taste Map</span>
+          <span>Taste map</span>
         </div>
         <div class="vector-map-legend">
           <div class="vector-view-pills" data-canvas="profile-vector-canvas">
@@ -1405,7 +1404,7 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
   // a recommendation, a show with a tier, a show of the user without a tier, or a show of the catalog.
   function pointLook(pt, colors) {
     if (highlightSet.has(pt.id) && highlightKind === "recommended") {
-      return { stroke: colors.accent, strong: true, glow: true, badge: "✦", badgeColor: colors.accent };
+      return { stroke: colors.accent, strong: true, glow: true, badge: "petal", badgeColor: colors.accent };
     }
     if (pt.owned && pt.tier) {
       const color = colors.tier[pt.tier] || colors.library;
@@ -1505,6 +1504,19 @@ async function initVectorMap(canvasId, tooltipId, highlightIds = [], highlightLa
     ctx.strokeStyle = colors.paper;
     ctx.stroke();
     ctx.fillStyle = "#ffffff";
+    if (look.badge === "petal") {
+      // The mark of a recommendation: a petal, as in the legend of the map
+      ctx.save();
+      ctx.translate(bx + size / 2, by + size / 2);
+      ctx.rotate(-0.6);
+      ctx.beginPath();
+      ctx.moveTo(-size * 0.3, 0);
+      ctx.quadraticCurveTo(0, -size * 0.36, size * 0.3, 0);
+      ctx.quadraticCurveTo(0, size * 0.36, -size * 0.3, 0);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
     ctx.font = `700 ${Math.round(size * 0.62)}px ${fontFamily}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -4053,14 +4065,14 @@ function renderRatingsGrid() {
     } else if (ratingsSource === "manual" && ratingsTierFilter === "all") {
       box.innerHTML = `<div style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 20px;">
           ${vnWindow("ライブラリの外で観た作品があるなら、正直に白状なさい。")}
-          <p style="margin:0;">No manually added shows yet. When you watch a show outside your local library, find it and click "+ Add to Watched".</p></div>`;
+          <p style="margin:0;">No manually added shows yet. When you watch a show outside your local library, find it and click "+ Add to watched".</p></div>`;
     } else if (!ratedShows.length) {
       box.innerHTML = `
         <div style="grid-column:1/-1;text-align:center;padding:48px 20px;color:var(--muted);">
           ${vnWindow("まだ何も評価していないのね。話はそれからよ、倫理君。")}
           <h3 style="font-family:var(--serif);font-size:18px;margin:0 0 6px;color:var(--text);">No ratings yet</h3>
           <p style="font-size:13.5px;margin:0 0 16px;">Head over to the Review deck or click any show to assign a tier.</p>
-          <button class="btn-action primary" id="ratings-go-review">Go to Review →</button>
+          <button class="btn-action primary" id="ratings-go-review">Go to Review</button>
         </div>`;
       const btn = $("#ratings-go-review");
       if (btn) btn.onclick = () => $('[data-tab="review"]').click();
