@@ -53,6 +53,8 @@ struct App {
     /// The page server of /next, and the client for its requests
     web: String,
     client: ureq::Agent,
+    /// The client for the posters of Jellyfin. It follows redirects, and an error status is an error.
+    posters: ureq::Agent,
 }
 
 type Shared = Arc<App>;
@@ -267,11 +269,12 @@ async fn steps(State(app): State<Shared>, Query(p): Params) -> Answer {
     Ok(Json(compute(&app, move |e| e.api_steps(k, usual, links, new_only)).await))
 }
 
-/// GET /api/frames: the pictures from the files of the Python server. A show without a file is not in the answer.
+/// GET /api/frames: the pictures of some shows, by the id of the show. The server asks AniList for
+/// a show without a good file, and it keeps the answer in a file (see frames.rs). A show is not
+/// in the result if it has no AniList entry, or if AniList gave no answer.
 async fn pictures(State(app): State<Shared>, Query(p): Params) -> Answer {
     let ids = p.get("ids").filter(|ids| ids.len() <= 2000).cloned().ok_or_else(|| invalid("ids"))?;
-    let cache = app.root.join("anilist_cache").join("frames");
-    compute(&app, move |e| {
+    let wanted = compute(&app, move |e| {
         let mut wanted: Vec<(String, i64)> = Vec::new();
         for id in ids.split(',') {
             let Some(&j) = e.pos.get(id) else { continue };
@@ -281,13 +284,65 @@ async fn pictures(State(app): State<Shared>, Query(p): Params) -> Answer {
                 }
             }
         }
-        if wanted.len() > FRAMES_MAX {
-            return Err(ApiError(StatusCode::BAD_REQUEST, format!("too many shows: the limit is {FRAMES_MAX}")));
-        }
-        let out: Map<String, Value> = wanted.into_iter().filter_map(|(id, anilist)| frames::read(&cache, anilist).map(|p| (id, p))).collect();
-        Ok(Json(Value::Object(out)))
+        wanted
+    })
+    .await;
+    if wanted.len() > FRAMES_MAX {
+        return Err(ApiError(StatusCode::BAD_REQUEST, format!("too many shows: the limit is {FRAMES_MAX}")));
+    }
+    // The request to AniList runs without the lock of the engine: a change of the data does not wait for it
+    let cache = app.root.join("anilist_cache").join("frames");
+    let out = tokio::task::spawn_blocking(move || {
+        let mut found = frames::get_pictures(&cache, wanted.iter().map(|(_, anilist)| *anilist));
+        let out: Map<String, Value> = wanted.into_iter().filter_map(|(id, anilist)| found.remove(&anilist).map(|p| (id, p))).collect();
+        out
     })
     .await
+    .expect("the request for the pictures stopped");
+    Ok(Json(Value::Object(out)))
+}
+
+/// GET /api/poster/{id}: pass the poster of a library show on from Jellyfin.
+///
+/// The address of a poster of the library is on the Jellyfin server. A browser on a different
+/// computer frequently cannot reach that server, but this server can. Only a library show without
+/// an AniList entry uses this address: the other shows use the poster from AniList.
+async fn poster(State(app): State<Shared>, UrlPath(id): UrlPath<String>) -> Response {
+    let address = compute(&app, move |e| {
+        let r = &e.rows[*e.pos.get(&id)?];
+        let poster = r.data.get("poster")?.as_str().filter(|p| !p.is_empty())?;
+        (r.source == "library").then(|| poster.to_string())
+    })
+    .await;
+    let Some(address) = address else { return not_found("no poster").into_response() };
+    // A poster in the interface is small, thus ask Jellyfin for a small picture
+    let url = format!("{address}{}maxWidth=400&quality=90", if address.contains('?') { '&' } else { '?' });
+    let client = app.posters.clone();
+    let answer = tokio::task::spawn_blocking(move || -> std::result::Result<(String, Vec<u8>), ureq::Error> {
+        let mut answer = client.get(&url).call()?;
+        // The type without its parameters, as get_content_type() in Python. Without a type: text/plain.
+        let kind = answer
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.split(';').next())
+            .map(|v| v.trim().to_ascii_lowercase())
+            .filter(|v| v.contains('/'))
+            .unwrap_or_else(|| "text/plain".into());
+        let body = answer.body_mut().with_config().limit(32 << 20).read_to_vec()?;
+        Ok((kind, body))
+    })
+    .await;
+    match answer {
+        Ok(Ok((kind, body))) => {
+            let mut response = Response::new(Body::from(body));
+            let headers = response.headers_mut();
+            headers.insert(header::CONTENT_TYPE, HeaderValue::from_str(&kind).unwrap_or(HeaderValue::from_static("text/plain")));
+            headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("max-age=86400"));
+            response
+        }
+        _ => ApiError(StatusCode::BAD_GATEWAY, "the library server did not give the poster".into()).into_response(),
+    }
 }
 
 /// A path below a folder, without ".." and without a root
@@ -397,8 +452,7 @@ fn router(app: Shared) -> Router {
         .route("/api/recommend/steps", get(steps))
         .route("/api/rec-log", get(|s| simple(s, Engine::api_rec_log)))
         .route("/api/shows", get(|s| simple(s, Engine::api_titles)))
-        // The Python server passes a poster of the library on from Jellyfin. This server does not.
-        .route("/api/poster/{*id}", get(|| async { not_found("no poster") }))
+        .route("/api/poster/{*id}", get(poster))
         .route("/", get(old_page))
         .route("/favicon.ico", get(favicon))
         .route("/ui/{*path}", get(old_page_file))
@@ -505,7 +559,8 @@ pub fn run(args: &[String]) -> Result<()> {
     let store = if write { Some(Mutex::new(Store::open_write(&db)?)) } else { None };
     eprintln!("{}", if write { "this server changes the data" } else { "this server only reads" });
     let own_stamp = Mutex::new(stamp(&db));
-    let app = Arc::new(App { engine: RwLock::new(engine), store, own_stamp, random: Mutex::new(Random::from_time()), root, db, web, client });
+    let posters: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(15))).build().into();
+    let app = Arc::new(App { engine: RwLock::new(engine), store, own_stamp, random: Mutex::new(Random::from_time()), root, db, web, client, posters });
     watch(app.clone());
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     runtime.block_on(async move {

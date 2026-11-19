@@ -4,6 +4,7 @@
 //!   rinrikun serve <database> [--listen address]... [--root folder] [--web address] [--write]   the HTTP server
 //!   rinrikun reference <database> <out.json>   write the results of the engine as JSON
 
+mod anilist;
 mod api;
 mod changes;
 mod engine;

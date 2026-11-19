@@ -50,10 +50,12 @@ The server only reads:
 
 - When a different program changes the database, this server loads the data again (in about 1
   second). Its own changes do not start a load.
-- The pictures of the Discover deck come from the files that the Python server keeps in
-  `anilist_cache/frames`. This server does not ask AniList.
-- The poster of a library show without an AniList entry gets 404: the Python server passes these
-  posters on from Jellyfin.
+- The pictures of the Discover deck (`/api/frames`): the server asks AniList for a show without a
+  good file, and it keeps the answer in `anilist_cache/frames`, with the rules of
+  `anime_vec/frames.py`. The Python server uses the same files. A file with frames is good for 30
+  days; a file without frames, or of a show that is not finished, for 7 days.
+- The poster of a library show without an AniList entry (`/api/poster/{id}`): the server passes
+  it on from Jellyfin, as a small picture.
 
 ## Compare with the Python engine
 

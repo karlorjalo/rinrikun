@@ -1,14 +1,37 @@
 //! The pictures of a show for the Discover deck: frames of its episodes and of its trailer. The
-//! rules are the rules of anime_vec/frames.py. In this phase the Rust server does not ask AniList:
-//! it reads the files that the Python server keeps in anilist_cache/frames.
+//! rules are the rules of anime_vec/frames.py.
+//!
+//! The catalog has only the poster of an anime. AniList has more pictures: one picture for each
+//! episode that a streaming site has, the trailer, and a banner. The server asks AniList when the
+//! deck shows its cards, and it keeps each answer in a file of anilist_cache/frames. The Python
+//! server uses the same files.
 
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, SystemTime};
 
+use anyhow::{Result, bail};
 use serde_json::{Value, json};
 
+use crate::anilist;
+
+const QUERY: &str = "query ($ids: [Int]) { Page(perPage: 50) { media(id_in: $ids, type: ANIME) { \
+                     id status bannerImage trailer { id site thumbnail } streamingEpisodes { title thumbnail } } } }";
+/// The largest number of anime in one request to AniList
+const BATCH: usize = 50;
 /// The number of frames from the episodes, and from the trailer
 const EPISODE_FRAMES: usize = 3;
 const TRAILER_FRAMES: usize = 3;
+/// The file of an anime is good for this number of days
+const MAX_AGE_DAYS: f64 = 30.0;
+/// An anime that is not finished, or an anime without pictures, can get pictures later. Its file
+/// is good for this number of days.
+const SHORT_MAX_AGE_DAYS: f64 = 7.0;
+/// The time to wait for the answer of AniList. The deck works without the pictures, thus the time is short.
+const TIMEOUT: Duration = Duration::from_secs(15);
+/// Only one thread asks AniList at a time. A second request for the same anime then finds the file.
+static LOCK: Mutex<()> = Mutex::new(());
 
 /// `_address`: the text if it is a safe address of a picture
 fn address(value: Option<&Value>) -> Option<String> {
@@ -103,11 +126,100 @@ pub fn pictures_from_media(media: &Value) -> Value {
     json!({"frames": frames, "trailer": link, "banner": address(media.get("bannerImage"))})
 }
 
-/// The pictures of an anime from the file of the Python server, or None if there is no file
-pub fn read(cache: &Path, anilist_id: i64) -> Option<Value> {
-    let text = std::fs::read_to_string(cache.join(format!("{anilist_id}.json"))).ok()?;
-    let media: Value = serde_json::from_str(&text).ok()?;
-    media.is_object().then(|| pictures_from_media(&media))
+fn file(cache: &Path, anilist_id: i64) -> PathBuf {
+    cache.join(format!("{anilist_id}.json"))
+}
+
+/// `_read`: the answer of AniList for one anime from its file. None if there is no good file: no
+/// file, a file that is not correct, or (without `any_age`) a file that is too old.
+fn read_media(cache: &Path, anilist_id: i64, any_age: bool) -> Option<Value> {
+    let path = file(cache, anilist_id);
+    let media: Value = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+    let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
+    if !media.is_object() {
+        return None;
+    }
+    if any_age {
+        return Some(media);
+    }
+    let age_days = SystemTime::now().duration_since(modified).map(|d| d.as_secs_f64()).unwrap_or(0.0) / 86400.0;
+    let short = crate::store::truthy(&media["absent"])
+        || anilist::unfinished(media["status"].as_str())
+        || pictures_from_media(&media)["frames"].as_array().is_none_or(|f| f.is_empty());
+    (age_days <= if short { SHORT_MAX_AGE_DAYS } else { MAX_AGE_DAYS }).then_some(media)
+}
+
+/// `_fetch`: ask AniList for the pictures of some anime
+fn fetch(ids: &[i64]) -> Result<Vec<Value>> {
+    let data = anilist::post(QUERY, json!({ "ids": ids }), TIMEOUT)?;
+    let Some(page) = data.get("data").and_then(|d| d.get("Page")).filter(|p| crate::store::truthy(p)) else {
+        let text: String = data.to_string().chars().take(200).collect();
+        bail!("AniList returned no data for ids {:?}: {text}", &ids[..ids.len().min(3)]);
+    };
+    Ok(page["media"].as_array().cloned().unwrap_or_default())
+}
+
+/// `get_pictures`: the pictures of the anime with these AniList ids, by the id.
+///
+/// The function asks AniList only for the anime that have no good file. If AniList does not
+/// answer, an anime with an old file gets its old pictures, and an anime without a file is not in
+/// the result. The function gives no error for this: the caller works without the pictures.
+pub fn get_pictures(cache: &Path, anilist_ids: impl IntoIterator<Item = i64>) -> BTreeMap<i64, Value> {
+    let wanted: std::collections::BTreeSet<i64> = anilist_ids.into_iter().collect();
+    let mut out = BTreeMap::new();
+    let mut todo = Vec::new();
+    for i in wanted {
+        match read_media(cache, i, false) {
+            Some(media) => {
+                out.insert(i, pictures_from_media(&media));
+            }
+            None => todo.push(i),
+        }
+    }
+    if todo.is_empty() {
+        return out;
+    }
+    let _only_one = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    for part in todo.chunks(BATCH) {
+        let mut batch = Vec::new();
+        for &i in part {
+            // A different thread wrote the file in the time that this thread waited
+            match read_media(cache, i, false) {
+                Some(media) => {
+                    out.insert(i, pictures_from_media(&media));
+                }
+                None => batch.push(i),
+            }
+        }
+        if batch.is_empty() {
+            continue;
+        }
+        let got: BTreeMap<i64, Value> = match fetch(&batch) {
+            Ok(media) => media.into_iter().filter_map(|m| Some((m["id"].as_i64()?, m))).collect(),
+            Err(error) => {
+                eprintln!("WARNING no pictures from AniList for {} anime ({error:#})", batch.len());
+                for &i in &batch {
+                    if let Some(media) = read_media(cache, i, true) {
+                        out.insert(i, pictures_from_media(&media));
+                    }
+                }
+                continue;
+            }
+        };
+        if let Err(error) = std::fs::create_dir_all(cache) {
+            eprintln!("WARNING cannot make the folder {}: {error}", cache.display());
+        }
+        for &i in &batch {
+            // AniList does not return an adult anime or a removed entry. The file keeps this
+            // result, so that the server does not ask again each time.
+            let media = got.get(&i).cloned().unwrap_or_else(|| json!({"id": i, "absent": true}));
+            if let Err(error) = std::fs::write(file(cache, i), media.to_string()) {
+                eprintln!("WARNING cannot write the pictures of {i}: {error}");
+            }
+            out.insert(i, pictures_from_media(&media));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -133,6 +245,30 @@ mod tests {
         assert_eq!(p["trailer"], "https://www.youtube.com/watch?v=abcDEF_12");
         assert_eq!(p["frames"][3]["large"], "https://i.ytimg.com/vi/abcDEF_12/maxres1.jpg");
         assert_eq!(p["banner"], "https://a/banner.jpg");
+    }
+
+    /// Write a file of the cache with the given age in days
+    fn cache_file(cache: &Path, id: i64, media: &Value, days: u64) {
+        std::fs::write(file(cache, id), media.to_string()).unwrap();
+        let time = SystemTime::now() - Duration::from_secs(days * 86400);
+        std::fs::File::options().write(true).open(file(cache, id)).unwrap().set_modified(time).unwrap();
+    }
+
+    #[test]
+    fn a_file_with_frames_is_good_for_30_days_and_a_file_without_frames_for_7_days() {
+        let cache = std::env::temp_dir().join(format!("rinrikun-frames-test-{}", std::process::id()));
+        std::fs::create_dir_all(&cache).unwrap();
+        let with_frames = json!({"id": 1, "status": "FINISHED", "trailer": {"site": "youtube", "id": "abcDEF_12"}});
+        let releasing = json!({"id": 2, "status": "RELEASING", "trailer": {"site": "youtube", "id": "abcDEF_12"}});
+        let absent = json!({"id": 3, "absent": true});
+        let cases = [(1, &with_frames, 20, true), (1, &with_frames, 31, false), (2, &releasing, 6, true), (2, &releasing, 8, false), (3, &absent, 6, true), (3, &absent, 8, false)];
+        for (id, media, days, good) in cases {
+            cache_file(&cache, id, media, days);
+            assert_eq!(read_media(&cache, id, false).is_some(), good, "anime {id}, {days} days");
+            assert!(read_media(&cache, id, true).is_some(), "any age: anime {id}");
+        }
+        assert!(read_media(&cache, 99, true).is_none());
+        std::fs::remove_dir_all(&cache).unwrap();
     }
 
     #[test]
