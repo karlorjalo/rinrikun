@@ -8,6 +8,8 @@
 //!       check the text hashes, the embeddings and the map of a database (reads only)
 //!   rinrikun evaluate [--db file] [--tiers] [--recent N] [--benchmark label]
 //!       the offline test of the recommendations: the hidden franchise test (reads only)
+//!   rinrikun timing <database>
+//!       the time of each stage of the engine (reads only)
 
 mod anilist;
 mod api;
@@ -21,6 +23,7 @@ mod math;
 mod memo;
 mod server;
 mod store;
+mod timing;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -29,12 +32,14 @@ fn main() {
         Some("build") => build::run(&args[1..]),
         Some("build-check") => build::check(&args[1..]),
         Some("evaluate") => evaluate::run(&args[1..]),
+        Some("timing") => timing::run(&args[1..]),
         _ => {
             eprintln!(
                 "usage: rinrikun serve <database> [--listen address]... [--root folder] [--web address] [--read-only]
        rinrikun build [--root folder] [--db file] [--refresh-anilist] [--pool-only]
        rinrikun build-check <database> [--embed N] [--tsne]
-       rinrikun evaluate [--db file] [--tiers] [--recent N] [--benchmark label]"
+       rinrikun evaluate [--db file] [--tiers] [--recent N] [--benchmark label]
+       rinrikun timing <database>"
             );
             std::process::exit(2);
         }

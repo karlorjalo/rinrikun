@@ -106,6 +106,17 @@ measure interest in a show from outside the library: the answers of the Discover
 
 The test reads only. On the real data it takes about 2 minutes.
 
+## The time of each stage
+
+```sh
+rinrikun timing <database>
+```
+
+The time of each stage of the engine on the real data (`src/timing.rs`): the load, the match, the
+tier guess, the candidates, the content score, the tier model, a list, a list with more variety,
+the steps of a list, and the JSON of the map and of the titles. Each value is the best of 3 runs.
+The command reads only. Run it before and after a change that must make the server faster.
+
 ## History
 
 The first version of the app was in Python. Before the switch, the Rust code gave the same results

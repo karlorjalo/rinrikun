@@ -350,6 +350,9 @@ The effects that the user sees: the search of the browser (Ctrl+F) finds only th
 
 ## Not in this plan
 
+- `content` (the nearest liked shows of each candidate, for the text and for the tags) takes 110 ms for the candidates, and most of the 276 ms of the match (measured with `rinrikun timing` in Task 3). A faster method, for example a matrix product in blocks, could make it some times faster. It must not change a formula: `rinrikun evaluate` must give the same output. After Tasks 2 and 4, this time comes only at the first request right after a change.
+- The load of the engine takes about 0.95 s. It comes only when the server starts and after the weekly build.
+
 - Split the map data into a fixed part (positions, titles, posters) and a part of the user (tier, owned). Do it only if Task 5 is not enough: after a tier change, the ETag changes and the browser downloads the full map one time.
 - A cached picture of the catalog points of the map, so that a draw paints only the parts that change. Do it only if Task 10 is not enough.
 - Brotli, or the static files directly from the Rust server: a small effect at a round trip of 9 ms.

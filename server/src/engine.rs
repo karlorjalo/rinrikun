@@ -726,11 +726,12 @@ impl Engine {
         }
         let size = self.tag_size();
         let count = learned.len();
-        let dense: Vec<Vec<f32>> = learned.iter().map(|&i| self.tags[i].to_dense(size)).collect();
+        // One f64 copy of each learned row, made one time: the loop below uses each row many times
+        let dense64: Vec<Vec<f64>> = learned.iter().map(|&i| self.tags[i].to_dense(size).into_iter().map(f64::from).collect()).collect();
         let mut gram = DMatrix::<f64>::zeros(count, count);
         for a in 0..count {
             for b in a..count {
-                let v = self.tags[learned[a]].dot_dense64(&dense[b].iter().map(|&x| x as f64).collect::<Vec<_>>());
+                let v = self.tags[learned[a]].dot_dense64(&dense64[b]);
                 gram[(a, b)] = v;
                 gram[(b, a)] = v;
             }
