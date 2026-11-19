@@ -51,3 +51,16 @@ def test_one_server_process_has_one_state_for_two_addresses():
         server.should_exit = True
         thread.join(20)
     assert not thread.is_alive()
+
+
+def test_the_browser_asks_again_for_the_files_of_the_page():
+    from fastapi.testclient import TestClient
+    import serve
+    client = TestClient(serve.app)
+    for path in ("/", "/ui/app.js", "/ui/styles.css"):
+        res = client.get(path)
+        assert res.status_code == 200 and res.headers["cache-control"] == "no-cache", path
+    # A file that did not change gets a short answer, and this answer has the header too
+    first = client.get("/ui/app.js")
+    again = client.get("/ui/app.js", headers={"If-None-Match": first.headers["etag"]})
+    assert again.status_code == 304 and again.headers["cache-control"] == "no-cache"
