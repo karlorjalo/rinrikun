@@ -65,7 +65,8 @@ const TIER_WEIGHTS = { S: 2.0, A: 1.5, B: 1.0, C: 0.5, D: 0.0 };
 const TIERS = ['S', 'A', 'B', 'C', 'D'];
 const LIBRARY = 28;
 const TOTAL = 140;
-const CELL = { w: 0.05, h: 0.07 };
+// A cell of the grid of the close view of the map. It is small, thus the map starts in its far view.
+const CELL = { w: 0.03, h: 0.042 };
 
 /** A picture as an address that needs no request: one color and one character */
 function picture(width, height, hue, text, size) {

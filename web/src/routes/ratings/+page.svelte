@@ -12,8 +12,8 @@
 	import { Button } from '#lib/components/ui/button/index.js';
 	import VnWindow from '#lib/components/VnWindow.svelte';
 	import { TIERS, countOf, displayTitles } from '#lib/format.js';
-	import { library } from '#lib/state/library.svelte.js';
 	import { ratingsView as view } from '#lib/state/ratings.svelte.js';
+	import { loadWithChanges } from '#lib/state/reload.svelte.js';
 
 	let rated = $state<Show[]>([]);
 	let manual = $state<Show[]>([]);
@@ -29,18 +29,8 @@
 		}
 	}
 
-	// Get the lists when the tab opens, and a short time after the last change of a show: a
-	// change moves a show from one list to a different list, and it changes the match of other shows.
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	let seen = -1;
-	$effect(() => {
-		const version = library.version;
-		clearTimeout(timer);
-		if (seen < 0) load();
-		else if (version !== seen) timer = setTimeout(load, 1500);
-		seen = version;
-		return () => clearTimeout(timer);
-	});
+	// Get the lists when the tab opens, and a short time after the last change of a show
+	loadWithChanges(load);
 
 	const counts = $derived(
 		Object.fromEntries(TIERS.map((tier) => [tier, rated.filter((s) => s.tier === tier).length])) as Record<Tier, number>
