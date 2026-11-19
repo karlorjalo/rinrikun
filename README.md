@@ -70,6 +70,7 @@ powershell -ExecutionPolicy Bypass -File scripts\restart_servers.ps1        # on
 - If the build fails, the server continues with the old index.
 - `restart_servers.ps1` starts one server process that listens on two addresses: `127.0.0.1:8765` and `0.0.0.0:8771`. Its parameter `-Addresses` selects other addresses. The log of the server is `serve.log`.
 - When the build adds shows, it computes the map again. The positions of the shows on the map can then be different.
+- `weekly_rebuild.ps1 -Builder rust` (and `install_weekly_task.ps1 -Builder rust`) runs the Rust build in place of `build.py`: the same steps, the same files of the caches and the same database. The program must be at `server\target\release\rinrikun.exe`: see `server/README.md`.
 
 ## The new page
 
