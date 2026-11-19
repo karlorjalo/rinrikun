@@ -10,13 +10,13 @@ sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response
 
 from anime_vec import frames
 from anime_vec.engine import Engine
-from anime_vec.pages import PAGE_HEADERS, NewPage, PageFiles
+from anime_vec.pages import PAGE_HEADERS, PageFiles, forward_page
 from anime_vec.store import Store
 
 ROOT = Path(__file__).resolve().parent
@@ -269,11 +269,15 @@ def index():
 
 app.mount("/ui", PageFiles(directory=ROOT / "ui"), name="ui")
 
-# The new page is at /next while it replaces the old page. The server gives it only if its build
-# is there: see web/README.md and scripts/build_web.ps1. The build must have the base path /next.
-NEW_PAGE = ROOT / "web" / "build"
-if (NEW_PAGE / "index.html").is_file():
-    app.mount("/next", NewPage(directory=NEW_PAGE), name="next")
+# The new page is at /next while it replaces the old page. A Node server renders it (web/server.js),
+# and this server passes the requests on to it: see web/README.md and scripts/restart_servers.ps1.
+WEB_SERVER = os.environ.get("RINRIKUN_WEB", "http://127.0.0.1:8780")
+
+
+@app.api_route("/next", methods=["GET", "HEAD"])
+@app.api_route("/next/{path:path}", methods=["GET", "HEAD"])
+def new_page(request: Request, path: str = ""):
+    return forward_page(WEB_SERVER, request.url.path, request.url.query, request.headers)
 
 
 def parse_address(text: str) -> tuple[str, int]:

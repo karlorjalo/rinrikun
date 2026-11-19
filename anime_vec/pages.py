@@ -1,13 +1,15 @@
-"""The files of the pages that the server gives to the browser.
+"""The pages that the server gives to the browser.
 
 The server has two pages while the new page replaces the old page:
-  PageFiles   The old page in ui/: a few files without a build.
-  NewPage     The new page in web/build: a single-page app that a build makes. See web/README.md.
+  PageFiles     The old page in ui/: a few files without a build.
+  forward_page  The new page at /next. A Node server renders it (web/server.js): this server
+                passes the requests for /next on to it, thus the browser sees one address.
 """
+import urllib.error
+import urllib.request
+
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
-# The error of a missing file is the error class of Starlette. The class of FastAPI is a subclass of
-# it, thus "except" with the class of FastAPI does not catch it.
-from starlette.exceptions import HTTPException
 from starlette.types import Scope
 
 # The browser asks the server each time if a file of the page changed. Without this header a
@@ -16,10 +18,13 @@ from starlette.types import Scope
 # sheet. The files have an ETag, thus the answer for a file that did not change is short.
 PAGE_HEADERS = {"Cache-Control": "no-cache"}
 
-# A file of the new page with a hash of its contents in its name. A change of the file changes
-# the name, thus the browser can keep the file for a long time and does not ask again.
-HASHED_HEADERS = {"Cache-Control": "public, max-age=31536000, immutable"}
-HASHED_FILES = "_app/immutable/"
+# The headers of a request that go on to the page server: the cookies have the preferences of
+# the user, and the conditions of a request make a short answer for a file that did not change.
+REQUEST_HEADERS = ("accept", "accept-language", "cookie", "if-none-match", "if-modified-since", "user-agent")
+# The headers of the answer of the page server that come back to the browser
+ANSWER_HEADERS = ("content-type", "cache-control", "etag", "last-modified", "location", "set-cookie", "vary")
+# Seconds to wait for the page server. A page with a list of recommendations takes about 1 second.
+TIMEOUT = 30
 
 
 class PageFiles(StaticFiles):
@@ -31,28 +36,37 @@ class PageFiles(StaticFiles):
         return response
 
 
-class NewPage(StaticFiles):
-    """The files of the new page.
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect of the page server goes back to the browser: the address in the browser must change."""
 
-    The new page is a single-page app: each tab has its own address (for example /next/ratings),
-    but the build has one page file for all tabs. Thus the server gives that page file for an
-    address that has no file, and the page opens the tab of the address. An address with a file
-    ending that has no file is a missing file, and the answer is 404.
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def forward_page(server: str, path: str, query: str, headers) -> Response:
+    """Pass a request for the new page on to the page server, and give back its answer.
+
+    `server` is the address of the page server, `path` and `query` are the parts of the address
+    of the request, and `headers` are the headers of the request. If the page server does not
+    answer, the answer is 502 with a short text.
     """
-
-    def __init__(self, directory):
-        super().__init__(directory=directory, html=True)
-
-    async def get_response(self, path: str, scope: Scope):
-        # On Windows the path has backslashes
-        path = path.replace("\\", "/")
-        try:
-            response = await super().get_response(path, scope)
-        except HTTPException as error:
-            name = path.rsplit("/", 1)[-1]
-            if error.status_code != 404 or "." in name:
-                raise
-            response = await super().get_response("index.html", scope)
-        hashed = path.startswith(HASHED_FILES) and response.status_code in (200, 304)
-        response.headers.update(HASHED_HEADERS if hashed else PAGE_HEADERS)
-        return response
+    url = server.rstrip("/") + path + (f"?{query}" if query else "")
+    forwarded = {name: headers[name] for name in REQUEST_HEADERS if headers.get(name)}
+    # This server compresses the answer itself
+    forwarded["Accept-Encoding"] = "identity"
+    try:
+        with _OPENER.open(urllib.request.Request(url, headers=forwarded), timeout=TIMEOUT) as answer:
+            status, body, answer_headers = answer.status, answer.read(), answer.headers
+    except urllib.error.HTTPError as error:
+        status, body, answer_headers = error.code, error.read(), error.headers
+    except (urllib.error.URLError, OSError):
+        return Response("The server of the new page does not run. Start it with scripts/restart_servers.ps1.",
+                        status_code=502, media_type="text/plain")
+    response = Response(content=body, status_code=status)
+    for name in ANSWER_HEADERS:
+        for value in answer_headers.get_all(name) or []:
+            response.headers.append(name, value)
+    return response

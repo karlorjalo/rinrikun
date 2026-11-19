@@ -1,10 +1,11 @@
-# Build the new page (the folder web\) so that the server can give it at /next.
+# Build the new page (the folder web\), which the server gives at /next.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\build_web.ps1
 #
-# The build is in web\build. The server gives the new page only if that folder is there, and it
-# looks for it when it starts. Thus start the server again after the first build
-# (scripts\restart_servers.ps1). A later build needs no restart.
+# The build is in web\build. A Node server renders the pages from it (web\server.js), and it
+# reads the build when it starts. Thus start it again after a build:
+#
+#   powershell -ExecutionPolicy Bypass -File scripts\restart_servers.ps1 -WebOnly
 param(
     # Do not install the packages again. Use this if web\node_modules is correct already.
     [switch]$NoInstall
@@ -31,7 +32,7 @@ if (-not $NoInstall) {
 }
 cmd /c "npm.cmd run build"
 if ($LASTEXITCODE -ne 0) {
-    "The build failed with code $LASTEXITCODE. The server continues with the old build, if there is one."
+    "The build failed with code $LASTEXITCODE. The page server continues with the old build, if there is one."
     exit 1
 }
-"The new page is in web\build. The server gives it at /next."
+"The new page is in web\build. Start its server again: scripts\restart_servers.ps1 -WebOnly"
