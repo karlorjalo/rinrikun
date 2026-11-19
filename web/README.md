@@ -60,8 +60,9 @@ environment variables:
 - `HOST` and `PORT`: the address of the server (the default of adapter-node is `0.0.0.0:3000`;
   `scripts/restart_servers.ps1` gives `127.0.0.1:8780`).
 - `API_TARGET`: the API server (default `http://127.0.0.1:8765`). The load functions get their data
-  there. A request for `/api/...` that comes to this server goes on to it too: see
-  `src/hooks.server.ts`.
+  there. In a build without a base path, a request for `/api/...` that comes to this server goes on
+  to it too (the browser tests use this): see `src/hooks.server.ts`. A build with `BASE_PATH`
+  answers only below its base path.
 
 If the page is below a path of the API server, set the environment variable `BASE_PATH` before the
 build. For example: `BASE_PATH=/next`. `scripts/build_web.ps1` does this.

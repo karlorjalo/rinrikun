@@ -20,6 +20,8 @@ const LOCAL_HEADERS = ['host', 'connection', 'accept-encoding', 'content-length'
  * Pass a request for "/api/..." on to the API server, and give its answer back. In the live
  * setup the API server gets these requests itself and passes only "/next" on to this server.
  * This server gets "/api/..." only if the browser opens it directly, for example in the tests.
+ * A build with a base path (BASE_PATH=/next) answers 404 for each address outside the base path
+ * before this hook runs: thus only a build without a base path passes "/api/..." on.
  */
 async function toApi(request: Request, url: URL): Promise<Response> {
 	const headers = new Headers(request.headers);
