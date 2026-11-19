@@ -1475,9 +1475,9 @@ def test_not_interested_show_is_a_removed_show(tmp_path):
 
 def test_discover_draws_shows_without_an_answer_from_the_groups(tmp_path, monkeypatch):
     import anime_vec.engine as engine_module
-    # The parts of the groups are 1 together, and the group with the lowest match gets the fewest cards
+    # The parts of the groups are 1 together, and each group gives cards
     parts = [part for _, part in engine_module.DISCOVER_GROUPS]
-    assert sum(parts) == pytest.approx(1.0) and parts[-1] == min(parts)
+    assert sum(parts) == pytest.approx(1.0) and min(parts) > 0
     e = _discover_engine(tmp_path)
     cards = e.discover(count=12, seed=3)
     ids = [c["id"] for c in cards]

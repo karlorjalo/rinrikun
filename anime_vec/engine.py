@@ -79,11 +79,11 @@ MATCH_TIER_WEIGHT = 0.25
 DISCOVER_POPULAR = 5000
 # The Discover deck draws its shows at random in groups of the match: (lowest match of the group,
 # part of the cards that come from the group). In one group each show has the same chance, thus
-# the answers of a group are a fair sample of the group. Most cards come from the groups between
-# 80 and 99. There the first 110 answers of the user were mixed (27% and 58% "interested"), thus
-# an answer tells the taste model the most. Below 80 the answer was "not interested" for 23 of
-# 24 shows, thus this group gets only a few cards: they show if the match stays correct there.
-DISCOVER_GROUPS = ((99.0, 0.25), (95.0, 0.35), (80.0, 0.35), (0.0, 0.05))
+# the answers of a group are a fair sample of the group. Each group gives the same number of
+# cards. For the popular anime, the first answers of the user do not tell where the match starts
+# to predict the answer: above a match of 80 the answer was "interested" for 38 of 42 cards, and
+# below 80 there was only 1 answer. Thus the deck must also ask about shows with a low match.
+DISCOVER_GROUPS = ((99.0, 0.25), (95.0, 0.25), (80.0, 0.25), (0.0, 0.25))
 # The "usual kinds" formula gives a higher score to the kinds of shows that the library has many of.
 # The kind of a show is its year, its format and its number of episodes. The crowd score counts
 # only as a lower limit.
