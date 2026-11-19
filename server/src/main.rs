@@ -1,7 +1,7 @@
 //! The rinrikun server in Rust. In this phase it reads the database of the Python server and
 //! computes the same results; the Python server stays the live server.
 //!
-//!   rinrikun serve <database> [--listen address]... [--root folder]   the HTTP server (only reads)
+//!   rinrikun serve <database> [--listen address]... [--root folder] [--web address]   the HTTP server (only reads)
 //!   rinrikun reference <database> <out.json>   write the results of the engine as JSON
 
 mod api;

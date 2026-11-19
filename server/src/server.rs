@@ -1,6 +1,9 @@
 //! The command `rinrikun serve`: the HTTP server with the GET routes of serve.py, the old page at
 //! `/` and the new page at `/next`. In this phase it only reads: a request that changes data gets
 //! the answer 405. When the Python server changes the database, this server loads the data again.
+//!
+//! A Node server renders the new page (web/server.js). This server passes the requests for /next
+//! on to it, as the Python server does (forward_page in anime_vec/pages.py).
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -14,7 +17,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::extract::{Path as UrlPath, Query, Request, State};
 use axum::http::{HeaderValue, Method, StatusCode, header};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde_json::{Map, Value, json};
 use tower::ServiceExt;
@@ -29,8 +32,9 @@ use crate::store::Store;
 
 /// The browser asks again each time if a file of a page changed (see PAGE_HEADERS in anime_vec/pages.py)
 const NO_CACHE: &str = "no-cache";
-/// A file of the new page with a hash in its name can stay in the browser
-const IMMUTABLE: &str = "public, max-age=31536000, immutable";
+/// The headers of a request that go on to the page server, and the headers of its answer that come back
+const REQUEST_HEADERS: [&str; 6] = ["accept", "accept-language", "cookie", "if-none-match", "if-modified-since", "user-agent"];
+const ANSWER_HEADERS: [&str; 7] = ["content-type", "cache-control", "etag", "last-modified", "location", "set-cookie", "vary"];
 /// The largest number of shows in one request for pictures
 const FRAMES_MAX: usize = 50;
 
@@ -39,6 +43,9 @@ struct App {
     random: Mutex<Random>,
     root: PathBuf,
     db: PathBuf,
+    /// The page server of /next, and the client for its requests
+    web: String,
+    client: ureq::Agent,
 }
 
 type Shared = Arc<App>;
@@ -208,30 +215,48 @@ async fn old_page_file(State(app): State<Shared>, UrlPath(rest): UrlPath<String>
     }
 }
 
-/// The new page is a single-page app: an address without a file is a tab, and it gets the page
-/// file. A missing file with a file ending is a missing file. See NewPage in anime_vec/pages.py.
-async fn new_page(app: &App, rest: &str, request: Request) -> Response {
-    let build = app.root.join("web").join("build");
-    if !build.join("index.html").is_file() {
-        return not_found("Not Found").into_response();
+/// Pass a request on to the page server, and give back its answer (status, headers, body)
+fn forward(client: &ureq::Agent, url: &str, headers: &[(String, String)]) -> std::result::Result<(u16, Vec<(String, String)>, Vec<u8>), ureq::Error> {
+    // This server compresses the answer itself
+    let mut request = client.get(url).header("accept-encoding", "identity");
+    for (name, value) in headers {
+        request = request.header(name.as_str(), value.as_str());
     }
-    let rest = rest.trim_start_matches('/');
-    if let Some(path) = below(&build, rest).filter(|p| p.is_file()) {
-        let cache = if rest.starts_with("_app/immutable/") { IMMUTABLE } else { NO_CACHE };
-        return send_file(path, cache, request).await;
+    let mut answer = request.call()?;
+    let status = answer.status().as_u16();
+    let mut out = Vec::new();
+    for name in ANSWER_HEADERS {
+        for value in answer.headers().get_all(name) {
+            if let Ok(value) = value.to_str() {
+                out.push((name.to_string(), value.to_string()));
+            }
+        }
     }
-    if rest.rsplit('/').next().is_some_and(|name| name.contains('.')) {
-        return not_found("Not Found").into_response();
-    }
-    send_file(build.join("index.html"), NO_CACHE, request).await
+    let body = answer.body_mut().with_config().limit(64 << 20).read_to_vec()?;
+    Ok((status, out, body))
 }
 
-async fn new_page_root(State(app): State<Shared>, request: Request) -> Response {
-    new_page(&app, "", request).await
-}
-
-async fn new_page_file(State(app): State<Shared>, UrlPath(rest): UrlPath<String>, request: Request) -> Response {
-    new_page(&app, &rest, request).await
+/// GET /next and each address below it: the page server renders the page
+async fn new_page(State(app): State<Shared>, request: Request) -> Response {
+    let path = request.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_else(|| "/next".into());
+    let url = format!("{}{}", app.web.trim_end_matches('/'), path);
+    let headers: Vec<(String, String)> = REQUEST_HEADERS
+        .iter()
+        .filter_map(|name| request.headers().get(*name).and_then(|v| v.to_str().ok()).map(|v| (name.to_string(), v.to_string())))
+        .collect();
+    let client = app.client.clone();
+    let answer = tokio::task::spawn_blocking(move || forward(&client, &url, &headers)).await;
+    let Ok(Ok((status, headers, body))) = answer else {
+        return (StatusCode::BAD_GATEWAY, "The server of the new page does not run. Start it with scripts/restart_servers.ps1.").into_response();
+    };
+    let mut response = Response::new(Body::from(body));
+    *response.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY);
+    for (name, value) in headers {
+        if let (Ok(name), Ok(value)) = (header::HeaderName::try_from(name), HeaderValue::from_str(&value)) {
+            response.headers_mut().append(name, value);
+        }
+    }
+    response
 }
 
 async fn fallback(method: Method) -> ApiError {
@@ -267,9 +292,10 @@ fn router(app: Shared) -> Router {
         .route("/", get(old_page))
         .route("/favicon.ico", get(favicon))
         .route("/ui/{*path}", get(old_page_file))
-        .route("/next", get(|| async { Redirect::temporary("/next/") }))
-        .route("/next/", get(new_page_root))
-        .route("/next/{*path}", get(new_page_file))
+        // A wildcard does not match an empty rest: "/next/" needs its own route
+        .route("/next", get(new_page))
+        .route("/next/", get(new_page))
+        .route("/next/{*path}", get(new_page))
         .fallback(fallback)
         .layer(CompressionLayer::new())
         .with_state(app)
@@ -328,16 +354,27 @@ pub fn run(args: &[String]) -> Result<()> {
     let mut db: Option<PathBuf> = None;
     let mut addresses: Vec<SocketAddr> = Vec::new();
     let mut root: Option<PathBuf> = None;
+    let mut web: Option<String> = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
             "--listen" => addresses.push(rest.next().context("--listen needs an address")?.parse().context("the address is not valid")?),
             "--root" => root = Some(PathBuf::from(rest.next().context("--root needs a folder")?)),
+            "--web" => web = Some(rest.next().context("--web needs an address")?.clone()),
             other if db.is_none() && !other.starts_with("--") => db = Some(PathBuf::from(other)),
             other => bail!("unknown argument {other}"),
         }
     }
-    let db = db.context("usage: rinrikun serve <database> [--listen address]... [--root folder]")?;
+    let db = db.context("usage: rinrikun serve <database> [--listen address]... [--root folder] [--web address]")?;
+    // The page server of /next: the same default as the Python server
+    let web = web.or_else(|| std::env::var("RINRIKUN_WEB").ok()).unwrap_or_else(|| "http://127.0.0.1:8780".into());
+    let client: ureq::Agent = ureq::Agent::config_builder()
+        .max_redirects(0)
+        .max_redirects_will_error(false)
+        .http_status_as_error(false)
+        .timeout_global(Some(Duration::from_secs(30)))
+        .build()
+        .into();
     let db = std::fs::canonicalize(&db).with_context(|| format!("no database at {}", db.display()))?;
     if addresses.is_empty() {
         addresses.push("127.0.0.1:8775".parse()?);
@@ -347,7 +384,7 @@ pub fn run(args: &[String]) -> Result<()> {
     let started = std::time::Instant::now();
     let engine = load(&db)?;
     eprintln!("{} shows loaded in {:.2?}", engine.len(), started.elapsed());
-    let app = Arc::new(App { engine: RwLock::new(Arc::new(engine)), random: Mutex::new(Random::from_time()), root, db });
+    let app = Arc::new(App { engine: RwLock::new(Arc::new(engine)), random: Mutex::new(Random::from_time()), root, db, web, client });
     watch(app.clone());
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     runtime.block_on(async move {

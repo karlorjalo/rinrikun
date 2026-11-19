@@ -9,6 +9,7 @@ recommendations without a seed into its log. The two servers must read the same 
 script uses the rules of compare.py, and it ends with code 1 if a check fails.
 """
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -103,10 +104,13 @@ for path in ("/", "/ui/app.js", "/next/", "/next/ratings", "/next/_app/immutable
     a, b = get(PYTHON, path), get(RUST, path)
     same_page = a[0] == b[0] and a[1].get("cache-control") == b[1].get("cache-control") and (a[0] != 200 or a[2] == b[2])
     check(f"page {path}", same_page, f"{a[0]} {a[1].get('cache-control')} / {b[0]} {b[1].get('cache-control')}")
+# A file of the build with a hash in its name. The page has relative addresses: "./_app/immutable/..."
 status, _, page = get(RUST, "/next/")
-asset = page.split('href="/next/', 1)[1].split('"', 1)[0] if isinstance(page, str) and 'href="/next/' in page else ""
+found = re.search(r'_app/immutable/[^"]+?\.js', page) if isinstance(page, str) else None
+asset = found.group(0) if found else ""
 a, b = get(PYTHON, f"/next/{asset}"), get(RUST, f"/next/{asset}")
-check(f"page /next/{asset[:40]}", a[1].get("cache-control") == b[1].get("cache-control"), f"{a[1].get('cache-control')} / {b[1].get('cache-control')}")
+check(f"page /next/{asset[:40]}", bool(asset) and a[0] == b[0] == 200 and a[1].get("cache-control") == b[1].get("cache-control") and "immutable" in (b[1].get("cache-control") or ""),
+      f"{a[1].get('cache-control')} / {b[1].get('cache-control')}")
 status = urllib.request.Request(RUST + "/api/weights", data=b"{}", method="POST")
 try:
     urllib.request.urlopen(status, timeout=10)

@@ -15,12 +15,14 @@ and copy the program.
 ## Run
 
 ```sh
-rinrikun serve <database> [--listen 127.0.0.1:8775]... [--root <project folder>]
+rinrikun serve <database> [--listen 127.0.0.1:8775]... [--root <project folder>] [--web <page server>]
 ```
 
 The server gives the GET routes of `serve.py`, the old page at `/` and the new page at `/next`.
-The project folder has `ui/`, `web/build/` and `anilist_cache/`; by default it is the folder of the
-database. `--listen` can be given more than one time.
+The project folder has `ui/` and `anilist_cache/`; by default it is the folder of the database.
+`--listen` can be given more than one time. The Node server of the new page renders `/next`: this
+server passes the requests on to it, as the Python server does. Its address is `--web`, or the
+environment variable `RINRIKUN_WEB`, or `http://127.0.0.1:8780`.
 
 In this phase the server only reads:
 
