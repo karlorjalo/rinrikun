@@ -138,7 +138,6 @@
             <button class="pill active" data-source="rated">Rated</button>
             <button class="pill" data-source="manual" title="Shows that you marked as watched and that are not in the library">Manually added <span class="pill-count" id="count-manual">0</span></button>
             <button class="pill" data-source="dismissed" title="Shows that you removed from the recommendations">Not interested <span class="pill-count" id="count-dismissed">0</span></button>
-            <button class="pill" data-source="interested" title="Shows that you want to watch: your answers &quot;Interested&quot;">Watch list <span class="pill-count" id="count-interested">0</span></button>
           </div>
         </div>
         <div class="filter-group">
@@ -243,6 +242,22 @@
     <div id="settings-list" class="settings-list"></div>
   </section>
 </main>
+<!-- The watch list of the Discover tab: the shows with the answer "Interested". Its button floats
+     at the bottom right of the window, and the list opens above the button. The two elements are
+     not in the section of the tab: a section moves a little when its tab opens, and an element
+     with a fixed position inside it is then at a wrong place. -->
+<button type="button" class="watch-button" id="watch-button" aria-haspopup="dialog" aria-expanded="false" aria-controls="watch-panel" title="Watch list" hidden>
+  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 6.5h16M4 12h16M4 17.5h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+  <span class="watch-count" id="watch-count">0</span>
+</button>
+<div class="watch-panel" id="watch-panel" role="dialog" aria-label="Watch list" hidden>
+  <div class="watch-head">
+    <span class="watch-heading">Watch list</span>
+    <span class="watch-total" id="watch-total"></span>
+    <button type="button" class="watch-close" id="watch-close" aria-label="Close the watch list" title="Close">✕</button>
+  </div>
+  <ul class="watch-list" id="watch-list" tabindex="-1"></ul>
+</div>
 <dialog id="detail-modal"></dialog>
 <dialog id="frame-viewer" aria-label="Frames of the show"></dialog>
 <script src="/ui/app.js"></script>

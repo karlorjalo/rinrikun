@@ -275,6 +275,43 @@ dialog#detail-modal::backdrop { background: rgba(20, 18, 16, 0.6); backdrop-filt
 }
 .deck-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
 .deck-bottom-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+/* The watch list of the Discover tab: a round button that floats at the bottom right of the
+   window, and a list that opens above the button */
+#tab-discover { padding-bottom: 64px; }
+.watch-button { position: fixed; right: 24px; bottom: 24px; z-index: 70; display: flex; align-items: center; justify-content: center;
+  width: 54px; height: 54px; padding: 0; color: var(--accent-ink); cursor: pointer; background: var(--accent); border: 0; border-radius: 50%;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24); transition: transform .15s ease, box-shadow .15s ease; animation: watchIn .18s ease-out; }
+@keyframes watchIn { from { opacity: 0; } to { opacity: 1; } }
+.watch-button:hover, .watch-button:focus-visible, .watch-button[aria-expanded="true"] { transform: translateY(-2px); box-shadow: 0 9px 24px rgba(0, 0, 0, 0.3); }
+.watch-count { position: absolute; top: -5px; right: -5px; box-sizing: border-box; min-width: 23px; height: 23px; padding: 0 6px; font-family: var(--sans);
+  font-size: 11.5px; font-weight: 600; line-height: 21px; text-align: center; color: var(--text); background: var(--card); border: 1px solid var(--border);
+  border-radius: 999px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
+.watch-panel { position: fixed; right: 24px; bottom: 92px; z-index: 70; display: flex; flex-direction: column; width: min(380px, calc(100vw - 24px));
+  max-height: min(72vh, 640px); overflow: hidden; font-family: var(--sans); background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.24); }
+.watch-head { display: flex; align-items: baseline; gap: 8px; padding: 12px 10px 10px 16px; border-bottom: 1px solid var(--border); }
+.watch-heading { font-family: var(--serif); font-size: 16px; font-weight: 600; color: var(--text); }
+.watch-total { flex: 1; font-size: 12.5px; color: var(--muted); }
+.watch-close { align-self: center; width: 28px; height: 28px; padding: 0; font-size: 13px; line-height: 1; color: var(--muted); cursor: pointer; background: none;
+  border: 0; border-radius: 6px; }
+.watch-close:hover, .watch-close:focus-visible { color: var(--text); background: var(--hover); }
+.watch-list { margin: 0; padding: 6px; overflow-y: auto; overscroll-behavior: contain; list-style: none; outline: none; }
+.watch-row { display: flex; align-items: center; gap: 2px; border-radius: 8px; }
+.watch-row:hover, .watch-row:focus-within { background: var(--hover); }
+.watch-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 6px 4px 6px 8px; font-family: var(--sans); text-align: left;
+  color: inherit; cursor: pointer; background: none; border: 0; border-radius: 8px; }
+.watch-poster { flex: none; width: 38px; height: 54px; overflow: hidden; background: var(--hover); border: 1px solid var(--border); border-radius: 4px; }
+.watch-poster img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.watch-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.watch-title { font-size: 13.5px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.watch-sub, .watch-meta { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.watch-remove { flex: none; min-width: 30px; height: 30px; margin-right: 4px; padding: 0 7px; font-family: var(--sans); font-size: 12px; color: var(--muted);
+  cursor: pointer; background: none; border: 1px solid transparent; border-radius: 6px; }
+.watch-remove:hover, .watch-remove:focus-visible { color: var(--tier-d); border-color: var(--border); background: var(--card); }
+.watch-row.gone .watch-open { opacity: 0.45; }
+.watch-row.gone .watch-title { text-decoration: line-through; }
+.watch-row.gone .watch-remove { color: var(--accent); border-color: var(--border); }
+.watch-empty { padding: 28px 18px; font-size: 13px; text-align: center; color: var(--muted); }
 /* The frames of a show on a card of the Discover deck: one row below the poster and the text.
    The row has a fixed height, and it moves to the side when it has more frames than the card
    has space for. A part of the fourth frame shows that the row has more frames. */
@@ -506,6 +543,8 @@ dialog#frame-viewer::backdrop { background: rgba(12, 11, 10, 0.86); }
   .deck-poster-wrap { width: 100px; height: 146px; margin: 0 auto; }
   .deck-card.with-frames { flex-wrap: nowrap; }
   .deck-frames { height: 92px; }
+  .watch-button { right: 14px; bottom: 14px; }
+  .watch-panel { right: 12px; left: 12px; bottom: 80px; width: auto; max-height: 68vh; }
   .tier-buttons { grid-template-columns: repeat(5, 1fr); gap: 4px; }
   .btn-tier { padding: 8px 2px; }
   .btn-tier .tier-key { font-size: 13px; }

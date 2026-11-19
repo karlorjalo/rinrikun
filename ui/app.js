@@ -3603,6 +3603,7 @@ async function setInterest(show, value, source) {
   show.interest = data.interest;
   show.dismissed = data.dismissed;
   discoverCounts = data.counts || discoverCounts;
+  noteWatchList(show);
   // An answer changes the taste model, thus the match of the other shows changes
   scheduleMapMatch(1200);
 }
@@ -3684,6 +3685,141 @@ async function undoDiscover() {
   renderDeckCard();
 }
 
+// ---- The watch list: the shows with the answer "interested" that the user does not have ----
+// A round button floats at the bottom right of the window while the Discover tab is open. It
+// opens the list above it.
+let watchList = [];
+let watchOpen = false;
+// The shows that the user took off the list while the list was open. Their rows stay in the
+// list with a button that puts the show back, so that a wrong click loses nothing.
+const watchGone = new Set();
+
+async function loadWatchList() {
+  try {
+    const res = await (await fetch("/api/interest")).json();
+    if (Array.isArray(res)) {
+      watchList = res;
+      watchGone.clear();
+    }
+  } catch (e) {
+    console.error("Failed to load the watch list", e);
+  }
+  renderWatchList();
+}
+
+// Keep the list of the page correct after an answer for a show
+function noteWatchList(show) {
+  const at = watchList.findIndex((s) => s.id === show.id);
+  if (show.interest === 1 && !show.owned) {
+    watchGone.delete(show.id);
+    if (at < 0) {
+      watchList.push(show);
+      watchList.sort((a, b) => (b.match ?? 0) - (a.match ?? 0));
+    }
+  } else if (at >= 0 && !watchGone.has(show.id)) {
+    watchList.splice(at, 1);
+  }
+  renderWatchList();
+}
+
+// The detail window can change a show of the list: a tier, "watched" or "not interested".
+// After the window closes, the list keeps only the shows that are on the watch list.
+function syncWatchList() {
+  watchList = watchList.filter((s) => watchGone.has(s.id) || (s.interest === 1 && !s.owned && !s.dismissed));
+  renderWatchList();
+}
+
+function renderWatchList() {
+  const count = watchList.filter((s) => !watchGone.has(s.id)).length;
+  const button = $("#watch-button");
+  if (!button) return;
+  $("#watch-count").textContent = count;
+  button.setAttribute("aria-label", `Watch list: ${count} ${count === 1 ? "show" : "shows"}`);
+  if (!watchOpen) return;
+  $("#watch-total").textContent = `${count} ${count === 1 ? "show" : "shows"}`;
+  const list = $("#watch-list");
+  if (!watchList.length) {
+    list.innerHTML = '<li class="watch-empty">Your watch list is empty. Answer "Interested" for a show that you want to watch.</li>';
+    return;
+  }
+  list.innerHTML = watchList.map((show) => {
+    const { main, sub } = displayTitles(show);
+    const gone = watchGone.has(show.id);
+    const meta = [];
+    if (show.format) meta.push(esc(show.format.toUpperCase().replace("_", " ")));
+    if (show.year) meta.push(show.year);
+    if (formatMatch(show.match) != null) meta.push(`${formatMatch(show.match)}% match`);
+    const poster = show.poster
+      ? `<img src="${esc(show.poster)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'">`
+      : "";
+    return `
+      <li class="watch-row${gone ? " gone" : ""}" data-id="${esc(show.id)}">
+        <button type="button" class="watch-open" title="Show the details">
+          <span class="watch-poster">${poster}</span>
+          <span class="watch-text">
+            <span class="watch-title">${esc(main)}</span>
+            ${sub ? `<span class="watch-sub">${esc(sub)}</span>` : ""}
+            <span class="watch-meta">${meta.join(" · ")}</span>
+          </span>
+        </button>
+        <button type="button" class="watch-remove" title="${gone ? "Put this show back on the watch list" : "Take this show off the watch list"}"
+          aria-label="${gone ? "Put" : "Take"} ${esc(main)} ${gone ? "back on" : "off"} the watch list">${gone ? "Undo" : "✕"}</button>
+      </li>`;
+  }).join("");
+}
+
+// Take a show off the watch list, or put it back
+async function toggleWatchRow(show) {
+  const back = watchGone.has(show.id);
+  if (!back) watchGone.add(show.id);
+  try {
+    await setInterest(show, back ? true : null, "page");
+  } catch (e) {
+    console.error("Failed to change the watch list", e);
+    if (!back) watchGone.delete(show.id);
+    renderWatchList();
+  }
+  updateDeckProgress();
+}
+
+function setWatchOpen(open) {
+  if (watchOpen === open) return;
+  watchOpen = open;
+  $("#watch-panel").hidden = !open;
+  $("#watch-button").setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    renderWatchList();
+    // The server has the correct order and the matches of now
+    loadWatchList();
+    $("#watch-list").focus({ preventScroll: true });
+  } else {
+    // A show that the user took off the list does not come back after the list closes
+    watchList = watchList.filter((s) => !watchGone.has(s.id));
+    watchGone.clear();
+  }
+}
+
+function initWatchList() {
+  $("#watch-button").onclick = () => setWatchOpen(!watchOpen);
+  $("#watch-close").onclick = () => {
+    setWatchOpen(false);
+    $("#watch-button").focus({ preventScroll: true });
+  };
+  $("#watch-list").onclick = (e) => {
+    const row = e.target.closest(".watch-row");
+    const show = row && watchList.find((s) => s.id === row.dataset.id);
+    if (!show) return;
+    if (e.target.closest(".watch-remove")) toggleWatchRow(show);
+    else openModal(show);
+  };
+  // A click outside the list closes it. The detail window and the viewer of the frames are not "outside".
+  document.addEventListener("pointerdown", (e) => {
+    if (!watchOpen || !e.target.closest) return;
+    if (!e.target.closest("#watch-panel, #watch-button, dialog")) setWatchOpen(false);
+  });
+  $("#detail-modal").addEventListener("close", syncWatchList);
+}
+
 // The mode of the Review tab that the user selected last: "unrated" or "all"
 let reviewMode = "unrated";
 // The cards of the Discover deck, in the time that the deck shows the shows of the user
@@ -3703,6 +3839,8 @@ function setDeckMode(mode) {
   $("#deck-filter-unrated").classList.toggle("active", reviewMode === "unrated");
   $("#deck-filter-all").classList.toggle("active", reviewMode === "all");
   if (mode === "discover") {
+    // The button of the watch list has the number of its shows
+    loadWatchList();
     // The Discover deck keeps its cards when the user opens a different tab. Thus the user
     // comes back to the same card, and the deck does not draw a card that the user did not answer.
     let kept = before === "discover";
@@ -3744,10 +3882,20 @@ function initReviewDeck() {
   $("#deck-skip").onclick = () => skipReview();
 
   initViewer();
+  initWatchList();
 
   document.addEventListener("keydown", (e) => {
     if ($("#tab-review").hidden && $("#tab-discover").hidden) return;
     if ($("#detail-modal").open || $("#frame-viewer").open) return;
+    // While the watch list is open, the keys of the deck do nothing, and Escape closes the list
+    if (watchOpen) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setWatchOpen(false);
+        $("#watch-button").focus({ preventScroll: true });
+      }
+      return;
+    }
     const tag = (document.activeElement && document.activeElement.tagName) || "";
     if (tag === "INPUT" || tag === "TEXTAREA") return;
 
@@ -3800,25 +3948,21 @@ let ratedShows = [];
 let manualShows = [];
 // The shows that the user removed from the recommendations
 let dismissedShows = [];
-// The shows with the answer "interested": the watch list
-let interestedShows = [];
 let ratingsSource = "rated";
 let ratingsTierFilter = "all";
 let ratingsSort = "tier";
 
 async function loadRatings() {
   try {
-    const [res, manual, dismissed, interested] = await Promise.all([
+    const [res, manual, dismissed] = await Promise.all([
       fetch("/api/ratings").then((r) => r.json()),
       fetch("/api/watched").then((r) => r.json()),
       fetch("/api/dismissed").then((r) => r.json()),
-      fetch("/api/interest").then((r) => r.json()).catch(() => []),
     ]);
     if (!Array.isArray(res)) return;
     ratedShows = res;
     manualShows = Array.isArray(manual) ? manual : [];
     dismissedShows = Array.isArray(dismissed) ? dismissed : [];
-    interestedShows = Array.isArray(interested) ? interested : [];
     renderRatingsSummary();
   } catch (e) {
     console.error("Failed to load ratings", e);
@@ -3829,7 +3973,6 @@ async function loadRatings() {
 function renderRatingsSummary() {
   if ($("#count-manual")) $("#count-manual").textContent = manualShows.length;
   if ($("#count-dismissed")) $("#count-dismissed").textContent = dismissedShows.length;
-  if ($("#count-interested")) $("#count-interested").textContent = interestedShows.length;
 
   const counts = { S: 0, A: 0, B: 0, C: 0, D: 0 };
   ratedShows.forEach((s) => {
@@ -3878,8 +4021,7 @@ function renderRatingsGrid() {
   box.innerHTML = "";
 
   const source = ratingsSource === "manual" ? manualShows
-    : ratingsSource === "dismissed" ? dismissedShows
-    : ratingsSource === "interested" ? interestedShows : ratedShows;
+    : ratingsSource === "dismissed" ? dismissedShows : ratedShows;
   let filtered = source.filter((r) => {
     if (ratingsTierFilter === "all") return true;
     return r.tier === ratingsTierFilter;
@@ -3904,10 +4046,7 @@ function renderRatingsGrid() {
   });
 
   if (!filtered.length) {
-    if (ratingsSource === "interested") {
-      box.innerHTML = `<div style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 20px;">
-          <p style="margin:0;">Your watch list is empty. In the Discover tab, answer "Interested" for a show that you want to watch.</p></div>`;
-    } else if (ratingsSource === "dismissed" && ratingsTierFilter === "all") {
+    if (ratingsSource === "dismissed" && ratingsTierFilter === "all") {
       box.innerHTML = `<div style="grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 20px;">
           ${vnWindow("切り捨てた作品はまだ一つもないのね。優しいのか、優柔不断なのか……。")}
           <p style="margin:0;">No removed recommendations. In the Recommendations tab, click ✕ on a show that you do not want.</p></div>`;
@@ -3980,6 +4119,9 @@ document.querySelectorAll("nav button").forEach((b) => {
     $(`#tab-${b.dataset.tab}`).hidden = false;
     // The story of the list plays only on the Recommendations tab
     closeStory();
+    // The button of the watch list is only on the Discover tab
+    setWatchOpen(false);
+    $("#watch-button").hidden = b.dataset.tab !== "discover";
     if (b.dataset.tab === "review") setDeckMode(reviewMode);
     if (b.dataset.tab === "discover") setDeckMode("discover");
     if (b.dataset.tab === "ratings") loadRatings();
