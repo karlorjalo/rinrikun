@@ -42,7 +42,7 @@ $firstHost = $first.Substring(0, $split)
 $firstPort = $first.Substring($split + 1)
 
 if (-not $WebOnly -and -not (Test-Path $program)) {
-    "the Rust program is not at $program: nothing was stopped"
+    "the Rust program is not at ${program}: nothing was stopped"
     exit 1
 }
 
