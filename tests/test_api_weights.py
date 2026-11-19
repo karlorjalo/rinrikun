@@ -342,3 +342,35 @@ def test_api_discover_and_interest(tmp_path):
         assert client.get("/api/discover?count=0").status_code == 422
     finally:
         serve.store, serve.engine = orig_store, orig_engine
+
+
+def test_api_frames(tmp_path, monkeypatch):
+    import serve
+    store = Store(tmp_path / "api_frames.db")
+    store.upsert_rows([make_row(1, owned=1), make_row(2, owned=0), make_row(3, owned=0)])
+    for i in (1, 2, 3):
+        store.save_embedding(f"al:{i}", b"\x00" * 1536)
+    orig_store, orig_engine = serve.store, serve.engine
+    serve.store, serve.engine = store, Engine(store)
+    asked = []
+    pictures = {"frames": [{"small": "https://x.example/s.jpg", "large": "https://x.example/l.jpg", "label": "Episode 1"}],
+                "trailer": None, "banner": None}
+
+    def fake(ids):
+        asked.append(sorted(ids))
+        return {2: pictures}
+
+    monkeypatch.setattr(serve.frames, "get_pictures", fake)
+    try:
+        client = TestClient(serve.app)
+        res = client.get("/api/frames?ids=al:1,al:2,al:99")
+        # AniList gave no answer for al:1, and al:99 is not a show
+        assert res.status_code == 200 and res.json() == {"al:2": pictures}
+        assert asked == [[1, 2]]
+        # No show of the catalog: the server does not ask AniList
+        assert client.get("/api/frames?ids=al:99").json() == {} and len(asked) == 1
+        assert client.get("/api/frames").status_code == 422
+        monkeypatch.setattr(serve, "FRAMES_MAX", 2)
+        assert client.get("/api/frames?ids=al:1,al:2,al:3").status_code == 400
+    finally:
+        serve.store, serve.engine = orig_store, orig_engine

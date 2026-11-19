@@ -3114,6 +3114,176 @@ let discoverBusy = false;
 // The deck gets this number of cards in one request
 const DISCOVER_BATCH = 12;
 
+// ---- The pictures of a show: frames of its episodes and of its trailer ----
+// A card of the Discover deck shows them, so that the user sees how a show looks without a
+// visit to AniList. The server gets the pictures from AniList: see /api/frames.
+// The value of a show is null while the request for it is in progress.
+const showPictures = new Map();
+// The shows for which the server gave no pictures. The page does not ask for them again.
+const pictureMisses = new Set();
+// The frames that the viewer shows, and the position of the frame of now
+let viewerFrames = [];
+let viewerIndex = 0;
+
+async function loadPictures(ids) {
+  const wanted = ids.filter((id) => !showPictures.has(id) && !pictureMisses.has(id));
+  if (!wanted.length) return;
+  wanted.forEach((id) => showPictures.set(id, null));
+  let res = null;
+  try {
+    const response = await fetch(`/api/frames?ids=${encodeURIComponent(wanted.join(","))}`);
+    if (response.ok) res = await response.json();
+  } catch (e) {
+    console.error("Failed to load the pictures of the shows", e);
+  }
+  wanted.forEach((id) => {
+    if (res && res[id]) {
+      showPictures.set(id, res[id]);
+    } else {
+      showPictures.delete(id);
+      pictureMisses.add(id);
+    }
+  });
+  paintDeckFrames();
+  preloadFrames(reviewQueue[reviewIndex + 1]);
+}
+
+// YouTube gives a small grey picture, 120 by 90, for a frame that it does not have
+function isPlaceholder(img) {
+  return img.naturalWidth > 0 && img.naturalWidth <= 120 && img.naturalHeight <= 90;
+}
+
+// Get the first frames of a show before its card comes, so that the card shows them immediately
+function preloadFrames(show) {
+  const pictures = show && showPictures.get(show.id);
+  if (!pictures) return;
+  pictures.frames.slice(0, 4).forEach((frame) => {
+    const img = new Image();
+    img.referrerPolicy = "no-referrer";
+    img.src = frame.small;
+  });
+}
+
+// Fill the row of frames of the card of now. The row has the same height in each state, thus
+// the buttons below the card do not move when the pictures come.
+function paintDeckFrames() {
+  const box = $("#deck-frames");
+  const show = reviewQueue[reviewIndex];
+  if (!box || !show || box.dataset.show !== show.id) return;
+  const pictures = showPictures.get(show.id);
+  const trailer = $("#deck-trailer-link");
+  if (trailer) {
+    trailer.hidden = !(pictures && pictures.trailer);
+    if (pictures && pictures.trailer) trailer.href = pictures.trailer;
+  }
+  const note = (text) => { box.innerHTML = `<p class="deck-frames-note">${text}</p>`; };
+  if (!pictures) {
+    if (pictureMisses.has(show.id)) note("The frames of this show did not load.");
+    else box.innerHTML = '<div class="deck-frame empty"></div>'.repeat(3);
+    return;
+  }
+  const frames = pictures.frames.filter((frame) => !frame.broken);
+  if (!frames.length) {
+    if (pictures.banner) {
+      box.innerHTML = `<div class="deck-banner"><img src="${esc(pictures.banner)}" alt="Banner of the show" referrerpolicy="no-referrer"></div>`;
+      box.querySelector("img").onerror = () => note("AniList has no frames of this show.");
+    } else {
+      note("AniList has no frames of this show.");
+    }
+    return;
+  }
+  box.innerHTML = frames.map((frame, n) => `
+    <button type="button" class="deck-frame" data-frame="${n}" title="${esc(frame.label)}: show this frame larger">
+      <img src="${esc(frame.small)}" alt="${esc(frame.label)}: a frame of the show" referrerpolicy="no-referrer" decoding="async">
+      <span class="deck-frame-label">${esc(frame.label)}</span>
+    </button>`).join("");
+  box.scrollLeft = 0;
+  box.querySelectorAll(".deck-frame").forEach((button) => {
+    const frame = frames[Number(button.dataset.frame)];
+    const img = button.querySelector("img");
+    // A frame that does not load goes out of the row
+    const drop = () => {
+      frame.broken = true;
+      paintDeckFrames();
+    };
+    img.onerror = drop;
+    img.onload = () => { if (isPlaceholder(img)) drop(); };
+    if (img.complete && isPlaceholder(img)) drop();
+    button.onclick = () => openViewer(frames, frames.indexOf(frame));
+  });
+}
+
+// The viewer shows one frame large. The arrow keys and the two buttons go to the other frames.
+function openViewer(frames, index) {
+  viewerFrames = frames.filter((frame) => !frame.broken);
+  if (!viewerFrames.length) return;
+  viewerIndex = Math.max(0, viewerFrames.indexOf(frames[index]));
+  const dialog = $("#frame-viewer");
+  dialog.innerHTML = `
+    <button type="button" class="viewer-button viewer-close" aria-label="Close">✕</button>
+    <button type="button" class="viewer-button viewer-prev" aria-label="The frame before">‹</button>
+    <img class="viewer-picture" alt="" referrerpolicy="no-referrer">
+    <button type="button" class="viewer-button viewer-next" aria-label="The next frame">›</button>
+    <div class="viewer-caption" aria-live="polite"></div>`;
+  dialog.querySelector(".viewer-close").onclick = () => dialog.close();
+  dialog.querySelector(".viewer-prev").onclick = () => moveViewer(-1);
+  dialog.querySelector(".viewer-next").onclick = () => moveViewer(1);
+  paintViewer();
+  if (!dialog.open) dialog.showModal();
+  // The focus is on the button for the next frame, thus Space and Enter show the next frame.
+  // Without this, the focus is on the button that closes the viewer.
+  dialog.querySelector(viewerFrames.length > 1 ? ".viewer-next" : ".viewer-close").focus();
+}
+
+function paintViewer() {
+  const dialog = $("#frame-viewer");
+  const frame = viewerFrames[viewerIndex];
+  const img = dialog.querySelector(".viewer-picture");
+  // The large picture is not there for each frame. The small picture then takes its place.
+  const useSmall = () => {
+    if (img.dataset.small !== "1") {
+      img.dataset.small = "1";
+      img.src = frame.small;
+    }
+  };
+  img.dataset.small = frame.large === frame.small ? "1" : "";
+  img.onerror = useSmall;
+  img.onload = () => { if (isPlaceholder(img)) useSmall(); };
+  img.alt = `${frame.label}: a frame of the show`;
+  img.src = frame.large;
+  dialog.querySelector(".viewer-caption").textContent = `${frame.label} · ${viewerIndex + 1} of ${viewerFrames.length}`;
+  dialog.querySelectorAll(".viewer-prev, .viewer-next").forEach((button) => { button.hidden = viewerFrames.length < 2; });
+}
+
+function moveViewer(step) {
+  if (viewerFrames.length < 2) return;
+  viewerIndex = (viewerIndex + step + viewerFrames.length) % viewerFrames.length;
+  paintViewer();
+}
+
+function initViewer() {
+  const dialog = $("#frame-viewer");
+  // A click on the dark area around the picture closes the viewer
+  dialog.onclick = (e) => { if (e.target === dialog) dialog.close(); };
+  dialog.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      moveViewer(e.key === "ArrowLeft" ? -1 : 1);
+    }
+    // The keys of the deck must not answer the card while the viewer is open
+    e.stopPropagation();
+  });
+  // The wheel of the mouse moves the row of frames to the side, when the row has more frames to show
+  document.addEventListener("wheel", (e) => {
+    const box = e.target.closest ? e.target.closest("#deck-frames") : null;
+    if (!box || e.ctrlKey || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+    const end = box.scrollWidth - box.clientWidth;
+    if (end <= 0 || (e.deltaY < 0 && box.scrollLeft <= 0) || (e.deltaY > 0 && box.scrollLeft >= end - 1)) return;
+    e.preventDefault();
+    box.scrollLeft += e.deltaY;
+  }, { passive: false });
+}
+
 async function loadReviewQueue() {
   try {
     if (reviewFilter === "discover") {
@@ -3239,9 +3409,15 @@ function renderDeckCard() {
   if (guessHtml(show)) metaItems.push(guessHtml(show));
 
   const tagsHtml = (show.tags || []).slice(0, 5).map(t => `<span class="chip">${esc(t)}</span>`).join("");
+  // A card of the Discover deck has a row of frames, and links to AniList and to the trailer
+  const discover = reviewFilter === "discover";
+  const linksHtml = discover
+    ? `<a class="btn-action" id="deck-trailer-link" target="_blank" rel="noopener noreferrer" hidden>Trailer ↗</a>`
+      + (show.anilist_id ? `<a class="btn-action" href="https://anilist.co/anime/${show.anilist_id}" target="_blank" rel="noopener noreferrer">AniList ↗</a>` : "")
+    : "";
 
   wrap.innerHTML = `
-    <div class="deck-card">
+    <div class="deck-card${discover ? " with-frames" : ""}">
       <div class="deck-poster-wrap poster-box">
         ${posterHtml}
       </div>
@@ -3259,12 +3435,19 @@ function renderDeckCard() {
         <div class="deck-synopsis">${formatOverview(show.overview)}</div>
         ${tagsHtml ? `<div class="deck-tags">${tagsHtml}</div>` : ""}
         <div class="deck-bottom-actions">
+          ${linksHtml}
           <button class="btn-action" id="deck-card-details">Details</button>
         </div>
       </div>
+      ${discover ? `<div class="deck-frames" id="deck-frames" data-show="${esc(show.id)}" aria-label="Frames of the show"></div>` : ""}
     </div>`;
 
   $("#deck-card-details").onclick = () => openModal(show);
+  if (discover) {
+    paintDeckFrames();
+    loadPictures([show.id]);
+    preloadFrames(reviewQueue[reviewIndex + 1]);
+  }
   updateActiveTierButton(show.tier);
 }
 
@@ -3363,7 +3546,10 @@ async function loadDiscoverCards() {
     if (reviewFilter === "discover") {
       const have = new Set(reviewQueue.map((show) => show.id));
       discoverCounts = res.counts || discoverCounts;
-      reviewQueue.push(...(res.cards || []).filter((show) => !have.has(show.id)));
+      const cards = (res.cards || []).filter((show) => !have.has(show.id));
+      reviewQueue.push(...cards);
+      // One request gets the pictures of all new cards. The deck does not wait for it.
+      loadPictures(cards.map((show) => show.id));
     }
   } catch (e) {
     console.error("Failed to load the Discover deck", e);
@@ -3526,9 +3712,11 @@ function initReviewDeck() {
   $("#deck-undo").onclick = () => undoReview();
   $("#deck-skip").onclick = () => skipReview();
 
+  initViewer();
+
   document.addEventListener("keydown", (e) => {
     if ($("#tab-review").hidden) return;
-    if ($("#detail-modal").open) return;
+    if ($("#detail-modal").open || $("#frame-viewer").open) return;
     const tag = (document.activeElement && document.activeElement.tagName) || "";
     if (tag === "INPUT" || tag === "TEXTAREA") return;
 

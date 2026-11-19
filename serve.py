@@ -15,6 +15,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from anime_vec import frames
 from anime_vec.engine import Engine
 from anime_vec.store import Store
 
@@ -24,6 +25,8 @@ app = FastAPI()
 app.add_middleware(GZipMiddleware, minimum_size=2000)
 store = Store(ROOT / "anime_vec.db")
 engine = Engine(store)
+# The largest number of shows in one request for pictures
+FRAMES_MAX = 50
 
 
 @app.get("/api/profile")
@@ -155,6 +158,26 @@ def post_interest(payload: dict):
 def interest_results():
     """Return the answers of the Discover deck by the match of the shows."""
     return engine.interest_results()
+
+
+@app.get("/api/frames")
+def get_frames(ids: str = Query(..., max_length=2000)):
+    """Return pictures of some shows, by the id of the show: frames of the episodes and of the trailer.
+
+    `ids` has the ids of the shows, with a comma between two ids. The server asks AniList for
+    the pictures of a show one time, and keeps the answer in a file: see anime_vec/frames.py.
+    A show is not in the result if it has no AniList entry, or if AniList gave no answer.
+    """
+    wanted: dict[str, int] = {}
+    for show_id in ids.split(","):
+        if show_id in engine.by_id:
+            anilist_id = engine.public_row(engine.pos[show_id]).get("anilist_id")
+            if anilist_id is not None:
+                wanted[show_id] = int(anilist_id)
+    if len(wanted) > FRAMES_MAX:
+        raise HTTPException(400, f"too many shows: the limit is {FRAMES_MAX}")
+    found = frames.get_pictures(wanted.values()) if wanted else {}
+    return {show_id: found[i] for show_id, i in wanted.items() if i in found}
 
 
 @app.get("/api/similar")
