@@ -209,6 +209,43 @@ def test_layout_cache_keeps_the_map_and_the_grid(tmp_path):
     assert s.get_layout("sig") is not None
 
 
+def test_the_areas_of_the_map_are_kept_for_one_layout(tmp_path):
+    s = Store(tmp_path / "regions.db")
+    assert s.get_regions("sig") is None
+    areas = [{"x": 0.5, "y": 0.4, "gx": 0.5, "gy": 0.4, "label": "Mecha · Space", "count": 30, "level": 0}]
+    s.save_regions("sig", areas)
+    assert s.get_regions("sig") == areas
+    # The areas of a different layout are not the areas of this layout
+    assert s.get_regions("other") is None
+    # A read-only store does not write
+    Store(tmp_path / "regions.db", read_only=True).save_regions("other", [])
+    assert s.get_regions("sig") == areas
+
+
+def test_engine_keeps_the_areas_of_its_map(tmp_path):
+    import numpy as np
+
+    from anime_vec import layout
+    from anime_vec.engine import Engine
+
+    s = Store(tmp_path / "areas.db")
+    rng = np.random.default_rng(1)
+    rows = []
+    for i in range(layout.REGION_MIN_ROWS + 40):
+        kind = i % 4
+        rows.append({"id": f"al:{i}", "source": "anilist", "title": f"T{i}", "title_native": "", "year": 2020,
+                     "format": "tv", "genres": [f"G{kind}"], "tags": [f"tag {kind}", f"tag {kind} {i % 3}"],
+                     "tag_ranks": [80, 60], "studios": [], "overview": "", "score": 7.0,
+                     "owned": 1 if i < 10 else 0, "tmdbid": None, "anilist_id": i, "poster": None})
+    s.upsert_rows(rows)
+    centers = rng.normal(size=(4, 8)) * 3
+    for i, r in enumerate(rows):
+        s.save_embedding(r["id"], (centers[i % 4] + rng.normal(size=8)).astype(np.float32).tobytes())
+    e = Engine(s)
+    signature = s.con.execute("SELECT value FROM meta WHERE key='layout_signature'").fetchone()[0]
+    assert e.regions and s.get_regions(signature) == e.regions
+
+
 def test_log_of_recommendations(tmp_path):
     s = Store(tmp_path / "log.db")
     s.log_recommendations([("al:1", 0), ("al:2", 5)], "usual", "2026-11-16")

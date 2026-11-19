@@ -275,8 +275,13 @@ class Engine:
         # A change of the data of the user also holds the lock.
         self.lock = threading.RLock()
 
+        # The signature of the layout in the database, or None for a layout that the database does not keep
+        self.layout_signature: str | None = None
         self.coords_2d, self.grid_2d, self.cell = self._build_layout(unique)
         self.regions = self._build_regions(unique)
+        if self.layout_signature is not None:
+            # The Rust server reads the areas from the database: see Store.get_regions
+            self.store.save_regions(self.layout_signature, self.regions)
 
     def _build_regions(self, unique: list[int]) -> list[dict]:
         """Divide the map into areas on three levels and name each area after its most typical tags.
@@ -384,6 +389,7 @@ class Engine:
                 signature = hashlib.sha1(
                     layout.VERSION.encode() + "\n".join(ids).encode() + np.ascontiguousarray(X).tobytes()
                 ).hexdigest()
+                self.layout_signature = signature
                 cached = self.store.get_layout(signature)
                 if cached is not None and all(i in cached["coords"] and i in cached["grid"] for i in ids):
                     points = np.array([cached["coords"][i] for i in ids], dtype=np.float32)

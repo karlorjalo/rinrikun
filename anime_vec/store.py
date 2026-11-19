@@ -258,6 +258,28 @@ class Store:
                          (f"{float(cell[0])!r},{float(cell[1])!r}",))
         self.con.commit()
 
+    def get_regions(self, signature: str) -> list | None:
+        """Return the areas of the map that the engine keeps for the layout with this signature, or None.
+
+        The Rust server reads the areas here: the engine computes them with the random generator
+        of NumPy, which the Rust server does not have.
+        """
+        try:
+            meta = dict(self.con.execute("SELECT key, value FROM meta WHERE key IN ('regions', 'regions_signature')"))
+        except sqlite3.OperationalError:
+            return None
+        if meta.get("regions_signature") != signature or meta.get("regions") is None:
+            return None
+        return json.loads(meta["regions"])
+
+    def save_regions(self, signature: str, regions: list):
+        if self.read_only:
+            return
+        self.con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('regions', ?)",
+                         (json.dumps(regions, ensure_ascii=False),))
+        self.con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('regions_signature', ?)", (signature,))
+        self.con.commit()
+
     def upsert_rows(self, rows: list[dict]):
         updates = ", ".join(f"{c}=excluded.{c}" for c in COLUMNS if c not in ("id", "source"))
         sql = (f"INSERT INTO shows ({','.join(COLUMNS)}) VALUES ({','.join('?' * len(COLUMNS))}) "
