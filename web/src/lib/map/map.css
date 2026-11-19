@@ -111,3 +111,10 @@
 .vector-search-btn:hover { background: var(--hover); color: var(--text); }
 /* A phone makes the page larger when an input has small text. Text of 16 pixels prevents this. */
 @media (pointer: coarse) { .vector-search-input { font-size: 16px; } }
+
+/* The story of the list is open: the zoom buttons are not below its panel. The panel is the
+   component components/map/ListStory.svelte. */
+.vector-canvas-box.story-open .vector-zoom-controls { right: 288px; }
+@media (max-width: 680px) {
+  .vector-canvas-box.story-open .vector-zoom-controls, .vector-canvas-box.story-open .vector-hint-pill { display: none; }
+}

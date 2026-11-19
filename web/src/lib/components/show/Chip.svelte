@@ -22,5 +22,5 @@
 </script>
 
 <span class="inline-block rounded-sm px-[7px] py-px text-[11.5px] {LOOK[kind]}" {title}>
-	{#if kind === 'matched'}<i class="petal-mark mr-[5px]" aria-hidden="true"></i>{/if}{#if kind === 'linked'}⇄ {/if}{@render children()}
+	{#if kind === 'matched'}<i class="petal-mark mr-[5px]" aria-hidden="true"></i>{/if}{#if kind === 'linked'}<span class="mr-1" aria-hidden="true">⇄</span>{/if}{@render children()}
 </span>
