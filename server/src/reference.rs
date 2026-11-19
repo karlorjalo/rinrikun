@@ -6,7 +6,9 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
+use crate::api::RecommendOptions;
 use crate::engine::{Engine, display_similarity};
+use crate::lists::Random;
 use crate::math::round1;
 use crate::store::Store;
 
@@ -16,6 +18,51 @@ fn seeds(engine: &Engine) -> Vec<String> {
     let other: Vec<usize> = engine.unique_rows().into_iter().filter(|&i| !engine.rows[i].owned).collect();
     let other = other.into_iter().step_by(997).take(6).map(|i| engine.rows[i].id.clone());
     mine.chain(other).collect()
+}
+
+/// The answers of the API functions: the same keys as `api` of the Python script
+fn api(engine: &Engine) -> Result<Value> {
+    let all_seeds = seeds(engine);
+    let first_seed = all_seeds.last().cloned();
+    let options = |seed, diverse, new_only, usual, links| RecommendOptions { k: 40, seed, diverse, new_only, usual, links };
+    let mut recommend = Map::new();
+    recommend.insert("usual".into(), engine.api_recommend(&options(None, false, true, true, true))?);
+    recommend.insert("all, no links".into(), engine.api_recommend(&options(None, false, true, false, false))?);
+    recommend.insert("diverse".into(), engine.api_recommend(&options(None, true, true, true, true))?);
+    recommend.insert("sequels".into(), engine.api_recommend(&options(None, false, false, true, true))?);
+    recommend.insert("seed".into(), engine.api_recommend(&options(first_seed.as_deref(), false, true, true, true))?);
+    let mut steps = Map::new();
+    steps.insert("usual".into(), engine.api_steps(40, true, true, true));
+    steps.insert("all, no links".into(), engine.api_steps(40, false, false, true));
+    let mut show = Map::new();
+    let mut similar = Map::new();
+    for seed in &all_seeds {
+        show.insert(seed.clone(), engine.api_show(seed).unwrap_or(Value::Null));
+        similar.insert(seed.clone(), engine.api_similar(seed, 24)?);
+    }
+    let mut pool: Vec<String> =
+        engine.discover(usize::MAX, &mut Random::new(1)).into_iter().map(|(j, _)| engine.rows[j].id.clone()).collect();
+    pool.sort();
+    Ok(json!({
+        "profile": engine.api_profile(),
+        "titles": engine.api_titles(),
+        "ratings": engine.api_ratings(),
+        "watched": engine.api_watched(),
+        "dismissed": engine.api_dismissed(),
+        "review_unrated": engine.api_review_queue(true),
+        "review_all": engine.api_review_queue(false),
+        "interest": engine.api_watch_list(),
+        "interest_results": engine.api_interest_results(),
+        "rec_log": engine.api_rec_log(),
+        "recommend": recommend,
+        "steps": steps,
+        "show": show,
+        "similar": similar,
+        "map": engine.api_vector_map(),
+        "map_match": engine.api_map_match(),
+        "discover_pool": pool,
+        "weights": engine.api_weights(),
+    }))
 }
 
 pub fn run(args: &[String]) -> Result<()> {
@@ -51,6 +98,7 @@ pub fn run(args: &[String]) -> Result<()> {
             .map(|(r, &g)| if r.tier.is_some() { Value::Null } else { Engine::guess_letter(g).map(Value::from).unwrap_or(Value::Null) })
             .collect::<Vec<_>>(),
         "similar": similar,
+        "api": api(&engine)?,
     });
     std::fs::write(&args[1], serde_json::to_string(&out)?).with_context(|| format!("cannot write {}", args[1]))?;
     eprintln!("{}: {n} rows; load {:.2?}, match {:.2?}, all {:.2?}", args[1], loaded, matched - loaded, started.elapsed());

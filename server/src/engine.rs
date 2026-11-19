@@ -10,7 +10,7 @@ use nalgebra::{DMatrix, DVector};
 use rayon::prelude::*;
 
 use crate::math::{self, Sparse, dot};
-use crate::store::{Row, Store};
+use crate::store::{LogEntry, Row, Store};
 
 /// Centered cosine similarity at which the D-tier penalty starts
 const D_SIM_START: f64 = 0.5;
@@ -113,7 +113,21 @@ pub struct Engine {
     pub dismissed: HashSet<String>,
     /// The answers of the Discover deck (1 = interested, 0 = not interested), in the order of the ids
     pub interest: BTreeMap<String, i64>,
+    /// The source of each answer: "deck" or "page"
+    pub interest_source: HashMap<String, Option<String>>,
     pub has_places: bool,
+    /// The number of the shows that the user marked as watched by hand, as the database has them
+    pub manual_count: usize,
+    /// The tiers as the database has them: (id, tier, weight)
+    pub stored_weights: Vec<(String, String, f64)>,
+    /// The log of the recommendations
+    pub rec_log: Vec<LogEntry>,
+    /// The map position and the grid cell of each row, and the size of a cell
+    pub coords: Vec<(f32, f32)>,
+    pub grid: Vec<(f32, f32)>,
+    pub cell: (f64, f64),
+    /// The areas of the map, as the Python engine keeps them in the database
+    pub regions: serde_json::Value,
     /// For an AniList row of a library show: the library row
     pub duplicate_of: Vec<Option<usize>>,
     /// The rows that are the same show as the row: the AniList rows of a library row, and the
@@ -153,8 +167,9 @@ impl Engine {
         }
         let pos: HashMap<String, usize> = rows.iter().enumerate().map(|(i, r)| (r.id.clone(), i)).collect();
         let dismissed: HashSet<String> = store.dismissed_ids().into_iter().filter(|i| pos.contains_key(i)).collect();
-        let interest: BTreeMap<String, i64> =
-            store.interest().into_iter().filter(|(i, _)| pos.contains_key(i)).map(|(i, a)| (i, a.value)).collect();
+        let answers: Vec<(String, crate::store::Answer)> = store.interest().into_iter().filter(|(i, _)| pos.contains_key(i)).collect();
+        let interest: BTreeMap<String, i64> = answers.iter().map(|(i, a)| (i.clone(), a.value)).collect();
+        let interest_source: HashMap<String, Option<String>> = answers.into_iter().map(|(i, a)| (i, a.source)).collect();
         let has_places = rows.iter().any(|r| r.popularity_place.is_some_and(|p| p != 0.0));
 
         let dim = embeddings[&rows[0].id].len();
@@ -200,7 +215,8 @@ impl Engine {
             }
         }
         // A tier goes to the counterparts that have no tier
-        for (id, tier, weight) in store.weights()? {
+        let stored_weights = store.weights()?;
+        for (id, tier, weight) in stored_weights.clone() {
             if tier.is_empty() {
                 continue;
             }
@@ -251,7 +267,15 @@ impl Engine {
             pos,
             dismissed,
             interest,
+            interest_source,
             has_places,
+            manual_count: store.manual_watched_ids().len(),
+            stored_weights,
+            rec_log: store.rec_log(),
+            coords: Vec::new(),
+            grid: Vec::new(),
+            cell: (1.0, 1.4),
+            regions: serde_json::Value::Array(Vec::new()),
             duplicate_of,
             counterparts,
             owned_idx,
@@ -275,7 +299,35 @@ impl Engine {
         engine.build_links();
         engine.build_entry_rows();
         engine.build_kind_codes();
+        engine.read_layout(store);
         Ok(engine)
+    }
+
+    /// The map layout and the areas that the Python engine keeps in the database. A row
+    /// without a position is in the middle. The Rust engine does not compute the layout in this phase.
+    fn read_layout(&mut self, store: &Store) {
+        let n = self.len();
+        self.coords = vec![(0.5, 0.5); n];
+        self.grid = vec![(0.5, 0.5); n];
+        if let Some(layout) = store.layout() {
+            for i in 0..n {
+                if let Some(&(x, y)) = layout.coords.get(&self.rows[i].id) {
+                    self.coords[i] = (x as f32, y as f32);
+                }
+                if let Some(&(x, y)) = layout.grid.get(&self.rows[i].id) {
+                    self.grid[i] = (x as f32, y as f32);
+                }
+            }
+            self.cell = layout.cell;
+        }
+        // An AniList row of a library show is at the position of the library show
+        for i in 0..n {
+            if let Some(lib) = self.duplicate_of[i] {
+                self.coords[i] = self.coords[lib];
+                self.grid[i] = self.grid[lib];
+            }
+        }
+        self.regions = store.regions().unwrap_or(serde_json::Value::Array(Vec::new()));
     }
 
     pub fn len(&self) -> usize {
@@ -649,7 +701,7 @@ impl Engine {
                 }
             }
         }
-        scores
+        scores.into_iter().map(|v| v as f32 as f64).collect()
     }
 
     /// `_predicted_tier`: the tier that the tier model predicts for each row, as a number (4 = S, 0 = D)

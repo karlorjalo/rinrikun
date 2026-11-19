@@ -3,7 +3,9 @@
 //!
 //!   rinrikun reference <database> <out.json>   write the results of the engine as JSON
 
+mod api;
 mod engine;
+mod lists;
 mod math;
 mod reference;
 mod store;

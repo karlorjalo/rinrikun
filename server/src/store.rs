@@ -305,4 +305,13 @@ impl Store {
         };
         Some(Layout { coords: read("layout")?, grid: read("layout_grid")?, cell: (width.parse().ok()?, height.parse().ok()?) })
     }
+
+    /// The areas of the map that the Python engine keeps in the database, if they are for the layout of now
+    pub fn regions(&self) -> Option<Value> {
+        let value = |key: &str| -> Option<String> { self.con.query_row("SELECT value FROM meta WHERE key=?", [key], |row| row.get(0)).ok() };
+        if value("regions_signature")? != value("layout_signature")? {
+            return None;
+        }
+        serde_json::from_str(&value("regions")?).ok()
+    }
 }
