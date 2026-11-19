@@ -35,9 +35,19 @@
 		move(event.key === 'ArrowLeft' ? -1 : 1);
 	}
 
+	// The buttons show drawn icons, not the text characters ‹ › ✕: the font puts the arrows
+	// about 4 pixels below the center of the circle.
 	const round =
-		'absolute z-[1] flex size-10 cursor-pointer items-center justify-center rounded-full border border-white/35 bg-black/55 p-0 font-sans leading-none text-white hover:border-white hover:bg-black/80 focus-visible:border-white focus-visible:bg-black/80';
+		'absolute z-[1] flex size-10 cursor-pointer items-center justify-center rounded-full border border-white/35 bg-black/55 p-0 text-white hover:border-white hover:bg-black/80 focus-visible:border-white focus-visible:bg-black/80';
+	// The arrow buttons are at the middle of the picture, not of the picture and the text below it
+	const side = `${round} top-1/2 -translate-y-1/2`;
 </script>
+
+{#snippet icon(path: string, size: number)}
+	<svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+		<path d={path} />
+	</svg>
+{/snippet}
 
 <Dialog.Root
 	bind:open
@@ -59,23 +69,31 @@
 		data-testid="frame-viewer"
 	>
 		<Dialog.Title class="sr-only">Frames of the show</Dialog.Title>
-		<button bind:this={closeButton} type="button" class="{round} top-2.5 right-2.5 text-[16px]" aria-label="Close" onclick={() => (open = false)}>✕</button>
-		{#if frames.length > 1}
-			<button type="button" class="{round} top-[calc(50%-36px)] left-2.5 text-[22px]" aria-label="The frame before" onclick={() => move(-1)}>‹</button>
-			<button bind:this={nextButton} type="button" class="{round} top-[calc(50%-36px)] right-2.5 text-[22px]" aria-label="The next frame" onclick={() => move(1)}>›</button>
-		{/if}
+		<button bind:this={closeButton} type="button" class="{round} top-2.5 right-2.5" aria-label="Close" onclick={() => (open = false)}>
+			{@render icon('M6.5 6.5l11 11M17.5 6.5l-11 11', 16)}
+		</button>
 		{#if frame}
-			<img
-				use:fadeOnLoad
-				src={small ? frame.small : frame.large}
-				alt="{frame.label}: a frame of the show"
-				referrerpolicy="no-referrer"
-				class="block aspect-video max-h-[calc(100vh-110px)] w-full rounded-md bg-black object-contain"
-				onerror={() => (small = true)}
-				onload={(event) => {
-					if (isPlaceholder(event.currentTarget)) small = true;
-				}}
-			/>
+			<div class="relative">
+				<img
+					use:fadeOnLoad
+					src={small ? frame.small : frame.large}
+					alt="{frame.label}: a frame of the show"
+					referrerpolicy="no-referrer"
+					class="block aspect-video max-h-[calc(100vh-110px)] w-full rounded-md bg-black object-contain"
+					onerror={() => (small = true)}
+					onload={(event) => {
+						if (isPlaceholder(event.currentTarget)) small = true;
+					}}
+				/>
+				{#if frames.length > 1}
+					<button type="button" class="{side} left-2.5" aria-label="The frame before" onclick={() => move(-1)}>
+						{@render icon('M15 6l-6 6 6 6', 20)}
+					</button>
+					<button bind:this={nextButton} type="button" class="{side} right-2.5" aria-label="The next frame" onclick={() => move(1)}>
+						{@render icon('M9 6l6 6-6 6', 20)}
+					</button>
+				{/if}
+			</div>
 			<div class="mt-2.5 text-center text-[13px] text-[#ece6e8]" aria-live="polite">{frame.label} · {index + 1} of {frames.length}</div>
 		{/if}
 	</Dialog.Content>
