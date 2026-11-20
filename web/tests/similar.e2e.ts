@@ -2,7 +2,8 @@ import { apiRequests, expect, openTab, test } from './helpers.js';
 
 test('the tab without a show gets its examples from the ratings, not from the list of all titles', async ({ page, request }) => {
 	await page.goto('/settings');
-	await request.post('/api/__reset');
+	// The log of the requests starts here (a body of JSON: see helpers.ts)
+	expect((await request.post('/api/__reset', { data: {} })).ok()).toBe(true);
 	await openTab(page, 'Similar');
 	await expect(page.getByTestId('similar-examples').getByRole('link')).toHaveCount(5);
 	expect(await apiRequests(request, '/api/shows')).toHaveLength(0);

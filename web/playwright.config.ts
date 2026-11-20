@@ -19,7 +19,10 @@ export default defineConfig({
 		{
 			command: 'npm run build && node build',
 			port: PAGE_PORT,
-			env: { API_TARGET: `http://127.0.0.1:${MOCK_PORT}`, HOST: '127.0.0.1', PORT: String(PAGE_PORT) },
+			// ORIGIN: without it the server of the build takes "https://" as its own origin. The CSRF check
+			// of SvelteKit then refuses each DELETE of the page (for example the undo of a tier) with 403.
+			// In the live setup the Rust server answers /api itself, thus there this check does not apply.
+			env: { API_TARGET: `http://127.0.0.1:${MOCK_PORT}`, HOST: '127.0.0.1', PORT: String(PAGE_PORT), ORIGIN: `http://127.0.0.1:${PAGE_PORT}` },
 			reuseExistingServer: false,
 			timeout: 180_000
 		}

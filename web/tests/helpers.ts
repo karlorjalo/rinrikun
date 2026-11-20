@@ -5,7 +5,10 @@ import { test as base, expect, type APIRequestContext, type Page } from '@playwr
 export const test = base.extend<{ pageErrors: string[] }>({
 	pageErrors: [
 		async ({ page, request }, use) => {
-			await request.post('/api/__reset');
+			// A body of JSON: SvelteKit refuses a POST without a content type and without an origin (its
+			// check of form submissions), and the data of the mock then stayed from the test before
+			const reset = await request.post('/api/__reset', { data: {} });
+			expect(reset.ok(), 'the reset of the mock data').toBe(true);
 			const errors: string[] = [];
 			page.on('pageerror', (error) => errors.push(String(error)));
 			await use(errors);
