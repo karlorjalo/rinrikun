@@ -97,7 +97,7 @@ impl Engine {
     }
 
     /// `public_row`: a copy of a row for the API. A library row gets the AniList id and the
-    /// crowd score of its AniList entry; its own rating moves to `library_score`. The fields that
+    /// crowd score of its AniList entry. Its own rating moves to `library_score`. The fields that
     /// the page never reads (UNUSED_FIELDS) are not in the copy.
     pub fn public_row(&self, j: usize) -> Map<String, Value> {
         let r = &self.rows[j];
