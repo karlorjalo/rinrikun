@@ -198,6 +198,12 @@ function open(row, more = {}) {
 	for (const key of Object.keys(out)) if (key.startsWith('_')) delete out[key];
 	return out;
 }
+/** A show of a list of cards: without the long fields that only the detail window and the deck show */
+function card(row, more = {}) {
+	const out = open(row, more);
+	for (const key of ['overview', 'studios', 'tag_ranks']) delete out[key];
+	return out;
+}
 const byMatch = (a, b) => (b.match ?? 0) - (a.match ?? 0);
 const counts = () => ({
 	interested: rows.filter((row) => row.interest === 1).length,
@@ -211,7 +217,7 @@ function similarTo(seed, k) {
 		.map((row) => {
 			const tags = shared(seed, row);
 			const similarity = Math.min(99, 38 + tags.length * 14 + (row._kind === seed._kind ? 8 : 0) + (row._hue % 7));
-			return open(row, { similarity, shared_tags: tags.sort() });
+			return card(row, { similarity, shared_tags: tags.sort() });
 		})
 		.sort((a, b) => b.similarity - a.similarity)
 		.slice(0, k);
@@ -249,7 +255,7 @@ function recommend(query) {
 			for (const group of groups) if (group[n]) list.push(group[n]);
 		}
 	}
-	return list.slice(0, k).map(([row, more]) => open(row, more));
+	return list.slice(0, k).map(([row, more]) => card(row, more));
 }
 
 function steps(query) {
@@ -366,10 +372,10 @@ function answer(method, path, query, body) {
 	}
 	if (method === 'GET' && path.startsWith('/api/show/')) return open(known(decodeURIComponent(path.slice('/api/show/'.length))));
 	if (route === 'GET /api/ratings') {
-		return rows.filter((row) => row.owned && row.tier).sort((a, b) => TIERS.indexOf(a.tier) - TIERS.indexOf(b.tier) || byMatch(a, b)).map((row) => open(row));
+		return rows.filter((row) => row.owned && row.tier).sort((a, b) => TIERS.indexOf(a.tier) - TIERS.indexOf(b.tier) || byMatch(a, b)).map((row) => card(row));
 	}
-	if (route === 'GET /api/watched') return rows.filter((row) => row.manual_watched).map((row) => open(row));
-	if (route === 'GET /api/dismissed') return rows.filter(refused).map((row) => open(row));
+	if (route === 'GET /api/watched') return rows.filter((row) => row.manual_watched).map((row) => card(row));
+	if (route === 'GET /api/dismissed') return rows.filter(refused).map((row) => card(row));
 	if (route === 'GET /api/review-queue') {
 		const mine = rows.filter((row) => row.owned);
 		const unrated = mine.filter((row) => !row.tier).sort(byMatch);
@@ -407,7 +413,7 @@ function answer(method, path, query, body) {
 		while (cards.length < count && pool.length) cards.push(pool.splice(Math.floor(random() * pool.length), 1)[0]);
 		return { cards: cards.map((row) => open(row)), counts: counts() };
 	}
-	if (route === 'GET /api/interest') return rows.filter((row) => row.interest === 1 && !row.owned).sort(byMatch).map((row) => open(row));
+	if (route === 'GET /api/interest') return rows.filter((row) => row.interest === 1 && !row.owned).sort(byMatch).map((row) => card(row));
 	if (route === 'POST /api/interest') {
 		const row = known(body.id);
 		if (body.value == null) {

@@ -14,9 +14,13 @@ export interface Show {
 	format: string | null;
 	genres: string[];
 	tags: string[];
-	tag_ranks: number[];
-	studios: string[];
-	overview: string;
+	/**
+	 * The long fields: only /api/show and the cards of the decks (Discover, Review) have them. A
+	 * list of cards does not have them, and the detail window then gets the full show.
+	 */
+	tag_ranks?: number[];
+	studios?: string[];
+	overview?: string;
 	/** The crowd score of AniList, from 0 to 10 */
 	score: number | null;
 	/** The rating from Jellyfin, for a library show */

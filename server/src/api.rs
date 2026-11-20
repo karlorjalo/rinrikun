@@ -48,6 +48,12 @@ pub struct StepsKey {
     pub new_only: bool,
 }
 
+/// The fields of the data of a row that the page never reads: no answer has them
+const UNUSED_FIELDS: [&str; 3] = ["recommendations", "provider_ids", "added_at"];
+/// The long fields that a card in a list does not show. The answers with all fields:
+/// /api/show (the detail window), /api/discover and /api/review-queue (the cards of the decks).
+const CARD_LEFT_OUT: [&str; 3] = ["overview", "studios", "tag_ranks"];
+
 fn round_to(x: f64, places: usize) -> f64 {
     format!("{x:.places$}").parse().unwrap_or(x)
 }
@@ -91,10 +97,14 @@ impl Engine {
     }
 
     /// `public_row`: a copy of a row for the API. A library row gets the AniList id and the
-    /// crowd score of its AniList entry; its own rating moves to `library_score`.
+    /// crowd score of its AniList entry; its own rating moves to `library_score`. The fields that
+    /// the page never reads (UNUSED_FIELDS) are not in the copy.
     pub fn public_row(&self, j: usize) -> Map<String, Value> {
         let r = &self.rows[j];
         let mut out = r.data.clone();
+        for key in UNUSED_FIELDS {
+            out.remove(key);
+        }
         out.insert("owned".into(), Value::from(r.owned as i64));
         out.insert("manual_watched".into(), Value::from(r.manual_watched as i64));
         out.insert("tier".into(), r.tier.clone().map(Value::from).unwrap_or(Value::Null));
@@ -130,6 +140,16 @@ impl Engine {
         out
     }
 
+    /// A row of a list of cards: `result` without the long fields that a card does not show
+    /// (CARD_LEFT_OUT). The detail window of the page gets the full row from /api/show.
+    pub fn card(&self, j: usize, similarity: Option<f32>, seed: Option<usize>) -> Map<String, Value> {
+        let mut out = self.result(j, similarity, seed);
+        for key in CARD_LEFT_OUT {
+            out.remove(key);
+        }
+        out
+    }
+
     /// `with_match`: add the match, and for a row without a tier the letter of the tier guess
     pub fn with_match(&self, mut results: Vec<Map<String, Value>>) -> Vec<Value> {
         let matches = self.match_percent();
@@ -147,8 +167,14 @@ impl Engine {
             .collect()
     }
 
+    /// The rows with all their fields, for the cards of the Discover deck and of the Review tab
     fn listed(&self, rows: impl IntoIterator<Item = usize>) -> Vec<Value> {
         self.with_match(rows.into_iter().map(|j| self.result(j, None, None)).collect())
+    }
+
+    /// The rows for a list of cards
+    fn listed_cards(&self, rows: impl IntoIterator<Item = usize>) -> Vec<Value> {
+        self.with_match(rows.into_iter().map(|j| self.card(j, None, None)).collect())
     }
 
     /// GET /api/profile
@@ -198,7 +224,7 @@ impl Engine {
 
     /// GET /api/ratings: the rated shows of the user, by tier and then by match
     pub fn api_ratings(&self) -> Value {
-        let mut out = self.listed(self.owned_idx.iter().copied().filter(|&i| self.rows[i].tier.is_some()));
+        let mut out = self.listed_cards(self.owned_idx.iter().copied().filter(|&i| self.rows[i].tier.is_some()));
         let order = |t: Option<&str>| match t {
             Some("S") => 0,
             Some("A") => 1,
@@ -218,12 +244,12 @@ impl Engine {
 
     /// GET /api/watched: the shows that the user marked as watched by hand
     pub fn api_watched(&self) -> Value {
-        Value::from(self.listed((0..self.len()).filter(|&i| self.rows[i].manual_watched && !self.is_duplicate(i))))
+        Value::from(self.listed_cards((0..self.len()).filter(|&i| self.rows[i].manual_watched && !self.is_duplicate(i))))
     }
 
     /// GET /api/dismissed: the shows that the user does not want
     pub fn api_dismissed(&self) -> Value {
-        Value::from(self.listed(self.refused_ids().iter().map(|id| self.pos[id])))
+        Value::from(self.listed_cards(self.refused_ids().iter().map(|id| self.pos[id])))
     }
 
     /// GET /api/review-queue
@@ -234,7 +260,7 @@ impl Engine {
     /// GET /api/interest: the watch list, the highest match first
     pub fn api_watch_list(&self) -> Value {
         let rows = self.interest.iter().filter(|&(_, &v)| v != 0).map(|(id, _)| self.pos[id]).filter(|&j| !self.rows[j].owned);
-        let mut out = self.listed(rows);
+        let mut out = self.listed_cards(rows);
         out.sort_by(|a, b| b["match"].as_f64().unwrap_or(0.0).total_cmp(&a["match"].as_f64().unwrap_or(0.0)));
         Value::from(out)
     }
@@ -256,7 +282,7 @@ impl Engine {
     pub fn api_similar(&self, id: &str, k: usize) -> Result<Value> {
         let seed = self.pos[id];
         let list = self.similar_to(id, k)?;
-        Ok(Value::from(self.with_match(list.iter().map(|&(j, s)| self.result(j, Some(s), Some(seed))).collect())))
+        Ok(Value::from(self.with_match(list.iter().map(|&(j, s)| self.card(j, Some(s), Some(seed))).collect())))
     }
 
     /// GET /api/recommend. The server writes a list without a seed into the log (server.rs). The
@@ -274,7 +300,7 @@ impl Engine {
         let rows = list
             .iter()
             .map(|rec: &Recommendation| {
-                let mut out = self.result(rec.row, rec.similarity, None);
+                let mut out = self.card(rec.row, rec.similarity, None);
                 if let Some(f) = &rec.matched_favorite {
                     out.insert("matched_favorite".into(), Value::from(f.clone()));
                 }
