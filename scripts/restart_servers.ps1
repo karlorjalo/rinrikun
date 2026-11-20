@@ -16,6 +16,9 @@
 #
 # -WebOnly starts only the page server again, for example after a new build of the page.
 #
+# After the start, the script requests each page one time (not /recommendations), thus the first
+# visit of the user does not wait for the page server to load the code of a page.
+#
 # The PC has no Rust: build the program on a different computer (cargo build --release in server\)
 # and copy rinrikun.exe and DirectML.dll (the GPU of the embeddings) to server\target\release\.
 #
@@ -60,6 +63,34 @@ function Start-Detached($command) {
     (Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command; CurrentDirectory = $root }).ReturnValue
 }
 
+# Wait until an address answers: at most $Seconds, a new try each 0.5 s
+function Wait-Address([string]$Url, [int]$Seconds) {
+    $end = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $end) {
+        try {
+            $null = Invoke-WebRequest -UseBasicParsing $Url -TimeoutSec 5
+            return $true
+        } catch {
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    return $false
+}
+
+# The page server loads the code of a page at the first request of the page: the first visit
+# after a restart took about 1 s. Request each page one time after the start, thus the user does
+# not wait for it. Never /recommendations: each list of that page goes into the log of the user.
+function Request-Pages([int]$WebPort, [string]$Api) {
+    if (-not (Wait-Address "$Api/api/profile" 60)) { "the API does not answer: the page server is not warm"; return }
+    $web = "http://127.0.0.1:$WebPort"
+    if (-not (Wait-Address "$web/settings" 30)) { "the page server does not answer: it is not warm"; return }
+    $started = Get-Date
+    foreach ($path in "/", "/discover", "/ratings", "/review", "/similar", "/settings") {
+        try { $null = Invoke-WebRequest -UseBasicParsing "$web$path" -TimeoutSec 30 } catch { "the page $path gave an error: $($_.Exception.Message)" }
+    }
+    "page server warm in {0} ms" -f [int]((Get-Date) - $started).TotalMilliseconds
+}
+
 if (-not $WebOnly) {
     $options = ($Addresses | ForEach-Object { "--listen $_" }) -join " "
     $command = 'cmd /c ""{0}" serve "{1}" {2} --root "{3}" --web http://127.0.0.1:{4} >> "{5}" 2>&1"' -f $program, $Database, $options, $root, $WebPort, $Log
@@ -75,4 +106,5 @@ if (-not (Test-Path (Join-Path $root "web\build\index.js"))) {
     $apiHost = if ($firstHost -eq "0.0.0.0") { "127.0.0.1" } else { $firstHost }
     $command = 'cmd /c "set HOST=127.0.0.1&& set PORT={0}&& set API_TARGET=http://{1}:{2}&& "{3}" web\build >> "{4}" 2>&1"' -f $WebPort, $apiHost, $firstPort, $node, $WebLog
     "page server started on 127.0.0.1:{0} (return value {1})" -f $WebPort, (Start-Detached $command)
+    Request-Pages -WebPort $WebPort -Api "http://${apiHost}:${firstPort}"
 }
