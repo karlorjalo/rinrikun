@@ -295,7 +295,8 @@ impl Engine {
         self.cached_list(ListKey::of(o), || self.compute_recommend(o).map_err(|error| format!("{error:#}"))).map_err(anyhow::Error::msg)
     }
 
-    fn compute_recommend(&self, o: &RecommendOptions) -> Result<Value> {
+    /// The list without the cache (the timing command uses it)
+    pub(crate) fn compute_recommend(&self, o: &RecommendOptions) -> Result<Value> {
         let list = self.recommend(o.k, o.seed, o.diverse, o.new_only, o.usual, o.links)?;
         let rows = list
             .iter()
@@ -319,7 +320,8 @@ impl Engine {
         self.cached_steps(StepsKey { k, usual, links, new_only }, || self.compute_steps(k, usual, links, new_only))
     }
 
-    fn compute_steps(&self, k: usize, usual: bool, links: bool, new_only: bool) -> Value {
+    /// The steps without the cache (the timing command uses it)
+    pub(crate) fn compute_steps(&self, k: usize, usual: bool, links: bool, new_only: bool) -> Value {
         let (info, steps) = self.recommendation_steps(k, usual, links, new_only);
         json!({
             "kinds": if usual { "usual" } else { "all" },

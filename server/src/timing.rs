@@ -56,11 +56,13 @@ pub fn run(args: &[String]) -> Result<()> {
     line("content (candidates)", best(|| engine.content(&cand, &[]).scores));
     line("predicted tier (candidates)", best(|| engine.predicted_tier(&cand, LeaveOut::Nothing)));
 
-    // The default list of the Recommendations tab, and the list with more variety
+    // The default list of the Recommendations tab, and the list with more variety. The functions
+    // without the cache: the API keeps a list until the data changes, and runs 2 and 3 would only
+    // read the cache.
     let list = |diverse: bool| RecommendOptions { k: 40, seed: None, diverse, new_only: true, usual: true, links: true };
-    line("list", best(|| engine.api_recommend(&list(false)).map(|v| v.to_string().len())));
-    line("list with variety", best(|| engine.api_recommend(&list(true)).map(|v| v.to_string().len())));
-    line("steps", best(|| engine.api_steps(40, true, true, true)));
+    line("list", best(|| engine.compute_recommend(&list(false)).map(|v| v.to_string().len())));
+    line("list with variety", best(|| engine.compute_recommend(&list(true)).map(|v| v.to_string().len())));
+    line("steps", best(|| engine.compute_steps(40, true, true, true)));
     line("vector map JSON", best(|| serde_json::to_vec(&engine.api_vector_map()).map(|v| v.len())));
     line("titles JSON", best(|| serde_json::to_vec(&engine.api_titles()).map(|v| v.len())));
     Ok(())
