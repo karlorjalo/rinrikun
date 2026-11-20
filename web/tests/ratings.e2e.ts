@@ -52,6 +52,40 @@ test('the detail window of a rated show shows the overview', async ({ page }) =>
 	await expect(page.getByTestId('detail')).toContainText('An invented show for the tests');
 });
 
+test('the detail window opens before the answer of the server', async ({ page }) => {
+	await page.goto('/ratings');
+	const cards = page.getByTestId('show-card');
+	await expect(cards.first()).toBeVisible();
+	let id = '';
+	for (const card of await cards.all()) {
+		const candidate = (await card.getAttribute('data-id'))!;
+		const show = await (await page.request.get(`/api/show/${encodeURIComponent(candidate)}`)).json();
+		if (show.overview) {
+			id = candidate;
+			break;
+		}
+	}
+	await page.request.post('/api/__delay', { data: { ms: 700 } });
+	await page.locator(`[data-testid=show-card][data-id="${id}"]`).getByRole('heading').getByRole('button').click();
+	const detail = page.getByTestId('detail');
+	// The window is there at once with the data of the card, and the overview comes with the answer
+	await expect(detail).toBeVisible({ timeout: 300 });
+	await expect(detail).not.toContainText('An invented show for the tests', { timeout: 100 });
+	await expect(detail).toContainText('An invented show for the tests');
+});
+
+test('a late answer does not open the detail window again', async ({ page }) => {
+	await page.goto('/ratings');
+	const card = page.getByTestId('show-card').first();
+	await expect(card).toBeVisible();
+	await page.request.post('/api/__delay', { data: { ms: 500 } });
+	await card.getByRole('heading').getByRole('button').click();
+	await page.keyboard.press('Escape');
+	// The answer for the show comes after the user closed the window
+	await page.waitForTimeout(900);
+	await expect(page.getByTestId('detail')).toBeHidden();
+});
+
 test('the match of a card shows its tooltip', async ({ page }) => {
 	await page.goto('/ratings');
 	const card = page.getByTestId('show-card').first();
