@@ -69,3 +69,28 @@ test('the search of the map finds shows, goes to a show, and a click opens it', 
 	await expect(box).toHaveValue('');
 	await expect(count).toBeHidden();
 });
+
+test('a map that was hidden draws again when it comes back', async ({ page }) => {
+	// Count the draws of the map: a draw starts with clearRect on its canvas
+	await page.addInitScript(() => {
+		const w = window as unknown as { __draws: number };
+		w.__draws = 0;
+		const clear = CanvasRenderingContext2D.prototype.clearRect;
+		CanvasRenderingContext2D.prototype.clearRect = function (...args) {
+			if (this.canvas.width * this.canvas.height > 100000) w.__draws += 1;
+			return clear.apply(this, args);
+		};
+	});
+	await page.goto('/');
+	const map = page.getByTestId('vector-map');
+	await expect(map.locator('.vector-zoom-level')).toHaveText('100%');
+	await page.waitForTimeout(800);
+	const draws = () => page.evaluate(() => (window as unknown as { __draws: number }).__draws);
+	// Hidden: the box of the map has no size, and a draw does nothing
+	await map.evaluate((el) => ((el as HTMLElement).style.display = 'none'));
+	await page.waitForTimeout(300);
+	const hidden = await draws();
+	// Back with the same size as before: the map must draw again
+	await map.evaluate((el) => ((el as HTMLElement).style.display = ''));
+	await expect.poll(draws).toBeGreaterThan(hidden);
+});

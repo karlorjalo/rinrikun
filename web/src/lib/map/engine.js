@@ -769,6 +769,10 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
   }
 
   function draw() {
+    // A draw that does nothing forgets the size of the last draw: the map then draws again when
+    // its box comes back, also with the same size as before.
+    drawnW = -1;
+    drawnH = -1;
     if (!canvas.isConnected) return;
     const { w, h, side } = viewSize();
     if (w === 0 || h === 0) return;
