@@ -4,19 +4,21 @@
 //! each request. The ETag is a hash of the JSON: the browser asks with If-None-Match, and an
 //! answer that did not change is a 304 without a body.
 
-use std::io::Write;
+use std::io::{Read, Write};
 
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::Response;
 use flate2::Compression;
+use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use serde_json::Value;
 
-/// A large answer that stays the same until the data changes: the JSON, its gzip bytes and its ETag
+/// A large answer that stays the same until the data changes: its gzip bytes and its ETag. Each
+/// browser accepts gzip, thus the server keeps only these bytes, and an answer shares them (it
+/// does not copy them).
 pub struct Prepared {
-    pub json: Vec<u8>,
-    pub gzip: Vec<u8>,
+    pub gzip: Bytes,
     pub etag: String,
 }
 
@@ -25,9 +27,16 @@ impl Prepared {
         let json = serde_json::to_vec(value).expect("a JSON value always gives text");
         let mut encoder = GzEncoder::new(Vec::with_capacity(json.len() / 4), Compression::default());
         encoder.write_all(&json).expect("gzip into memory does not fail");
-        let gzip = encoder.finish().expect("gzip into memory does not fail");
+        let gzip = Bytes::from(encoder.finish().expect("gzip into memory does not fail"));
         let etag = format!("\"{}\"", sha1_smol::Sha1::from(&json).digest());
-        Prepared { json, gzip, etag }
+        Prepared { gzip, etag }
+    }
+
+    /// The JSON without gzip, for a client that does not accept gzip: unpacked for each call
+    pub fn json(&self) -> Vec<u8> {
+        let mut json = Vec::new();
+        GzDecoder::new(&self.gzip[..]).read_to_end(&mut json).expect("the gzip bytes of this program are valid");
+        json
     }
 }
 
@@ -52,11 +61,11 @@ fn accepts_gzip(request: &HeaderMap) -> bool {
 /// The answer to a request: 304 if the browser has this version, else the gzip bytes or the JSON
 pub fn answer(prepared: &Prepared, request: &HeaderMap) -> Response {
     let (status, body, gzip) = if not_changed(&prepared.etag, request) {
-        (StatusCode::NOT_MODIFIED, Vec::new(), false)
+        (StatusCode::NOT_MODIFIED, Bytes::new(), false)
     } else if accepts_gzip(request) {
         (StatusCode::OK, prepared.gzip.clone(), true)
     } else {
-        (StatusCode::OK, prepared.json.clone(), false)
+        (StatusCode::OK, Bytes::from(prepared.json()), false)
     };
     let mut response = Response::new(Body::from(body));
     *response.status_mut() = status;
@@ -120,7 +129,7 @@ mod tests {
         let old = Prepared::new(&map("A"));
         let response = answer(&prepared, &request(&[(header::IF_NONE_MATCH, &old.etag)]));
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(body(response).await, prepared.json);
+        assert_eq!(body(response).await, prepared.json());
     }
 
     #[tokio::test]
@@ -134,7 +143,22 @@ mod tests {
         assert_eq!(response.headers()[header::ETAG], prepared.etag.as_str());
         let mut unpacked = Vec::new();
         flate2::read::GzDecoder::new(&body(response).await[..]).read_to_end(&mut unpacked).unwrap();
-        assert_eq!(unpacked, prepared.json);
+        assert_eq!(unpacked, prepared.json());
+    }
+
+    #[tokio::test]
+    async fn answer_does_not_copy_the_gzip_body() {
+        let prepared = Prepared::new(&map("S"));
+        let response = answer(&prepared, &request(&[(header::ACCEPT_ENCODING, "gzip")]));
+        let sent = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        // The same memory as the kept bytes: a 1.7 MB map is not copied for each request
+        assert_eq!(sent.as_ptr(), prepared.gzip.as_ptr());
+    }
+
+    #[test]
+    fn prepared_json_is_the_json_of_the_value() {
+        let value = map("S");
+        assert_eq!(Prepared::new(&value).json(), serde_json::to_vec(&value).unwrap());
     }
 
     #[tokio::test]
@@ -143,7 +167,7 @@ mod tests {
         for accept in ["identity", "gzip;q=0", "br"] {
             let response = answer(&prepared, &request(&[(header::ACCEPT_ENCODING, accept)]));
             assert!(response.headers().get(header::CONTENT_ENCODING).is_none(), "{accept}");
-            assert_eq!(body(response).await, prepared.json, "{accept}");
+            assert_eq!(body(response).await, prepared.json(), "{accept}");
         }
     }
 }
