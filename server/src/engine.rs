@@ -115,8 +115,7 @@ struct Cache {
     lists: MemoMap<ListKey, Result<Value, String>>,
     /// The steps of the lists, as the API gives them
     steps: MemoMap<StepsKey, Value>,
-    /// The answers of /api/vector-map and /api/shows, with their gzip bytes and ETags
-    vector_map: Memo<Arc<Prepared>>,
+    /// The answer of /api/shows, with its gzip bytes and its ETag
     titles: Memo<Arc<Prepared>>,
 }
 
@@ -172,6 +171,8 @@ pub struct Engine {
     /// The text similarity of each show to the liked shows and the D shows (simcache.rs). The
     /// vectors do not change while this engine lives, thus a change of the user does not clear it.
     sims: SimColumns,
+    /// The answer for the fixed part of the map (see `prepared_vector_map`)
+    fixed_map: Memo<Arc<Prepared>>,
     /// The match of each card that the Discover deck gave, until the user answers it
     pub deck_match: Mutex<HashMap<String, f32>>,
 }
@@ -311,6 +312,7 @@ impl Engine {
             kind_codes: Vec::new(),
             cache: Resettable::default(),
             sims: SimColumns::default(),
+            fixed_map: Memo::default(),
             deck_match: Mutex::new(HashMap::new()),
         };
         engine.build_tag_matrix();
@@ -361,9 +363,10 @@ impl Engine {
         self.sims.len()
     }
 
-    /// The answer of /api/vector-map: from the cache, or made and kept
+    /// The answer of /api/vector-map (the fixed part of the map), made one time and kept while
+    /// this engine lives: a change of the user does not change it
     pub(crate) fn prepared_vector_map(&self) -> Arc<Prepared> {
-        self.cache.get().vector_map.get_or_compute(|| Arc::new(Prepared::new(&self.api_vector_map())))
+        self.fixed_map.get_or_compute(|| Arc::new(Prepared::new(&self.api_vector_map())))
     }
 
     /// The answer of /api/shows: from the cache, or made and kept

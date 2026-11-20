@@ -592,25 +592,4 @@ impl Engine {
         }
         order
     }
-
-    /// `taste_center`: the mean direction of the shows of the user, weighted by their tiers
-    pub fn taste_center(&self) -> Option<Vec<f32>> {
-        if self.owned_idx.is_empty() {
-            return None;
-        }
-        let has_rated = self.owned_idx.iter().any(|&i| self.weights.contains_key(&self.rows[i].id));
-        let default = if has_rated { 0.0 } else { 1.0 };
-        let mut weights: Vec<f64> = self.owned_idx.iter().map(|&i| self.weights.get(&self.rows[i].id).copied().unwrap_or(default)).collect();
-        if weights.iter().all(|&w| w <= 0.0) {
-            weights = vec![1.0; weights.len()];
-        }
-        let mut v = vec![0f64; self.dim];
-        for (&i, &w) in self.owned_idx.iter().zip(&weights) {
-            for (k, x) in self.eff_row(i).iter().enumerate() {
-                v[k] += *x as f64 * (w as f32) as f64;
-            }
-        }
-        let norm = v.iter().map(|x| x * x).sum::<f64>().sqrt().max(1e-9);
-        Some(v.iter().map(|x| (x / norm) as f32).collect())
-    }
 }

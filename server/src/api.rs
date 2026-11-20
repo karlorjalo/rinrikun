@@ -381,18 +381,9 @@ impl Engine {
         })
     }
 
-    /// `center_2d`: the map position of the taste of the user: the mean position of the 5 nearest shows
-    fn center_2d(&self) -> Option<(f64, f64)> {
-        let center = self.taste_center()?;
-        let unique = self.unique_rows();
-        let sims: Vec<f64> = unique.iter().map(|&i| crate::math::dot(self.eff_row(i), &center) as f64).collect();
-        let nearest: Vec<usize> = crate::math::argsort_desc(&sims).into_iter().take(5).map(|k| unique[k]).collect();
-        let (x, y) = nearest.iter().fold((0f64, 0f64), |(x, y), &i| (x + self.coords[i].0 as f64, y + self.coords[i].1 as f64));
-        let count = nearest.len() as f64;
-        Some(((x / count) as f32 as f64, (y / count) as f32 as f64))
-    }
-
-    /// GET /api/vector-map: the points of the map, the areas and the size of a cell
+    /// GET /api/vector-map: the fixed part of the map: the points, the areas and the size of a
+    /// cell. It has no data of the user, thus it stays the same until the engine loads again. The
+    /// engine keeps its answer for that time (`prepared_vector_map`), and the browser keeps it too.
     pub fn api_vector_map(&self) -> Value {
         let mut points = Vec::new();
         for i in self.unique_rows() {
@@ -403,7 +394,7 @@ impl Engine {
                 "x": round_to(self.coords[i].0 as f64, 4), "y": round_to(self.coords[i].1 as f64, 4),
                 "gx": round_to(self.grid[i].0 as f64, 5), "gy": round_to(self.grid[i].1 as f64, 5),
                 "title": r.data["title"], "title_native": r.data["title_native"], "year": r.data["year"],
-                "poster": self.poster_of(i), "genres": genres, "owned": r.owned as i64, "tier": r.tier,
+                "poster": self.poster_of(i), "genres": genres,
                 "score": self.rows[self.tag_source(i)].data["score"],
             });
             let aka = self.other_titles(i);
@@ -413,11 +404,24 @@ impl Engine {
             points.push(point);
         }
         json!({
-            "center": self.center_2d().map(|(x, y)| json!({"x": round_to(x, 4), "y": round_to(y, 4)})),
             "points": points,
             "regions": self.regions,
             "cell": {"w": self.cell.0, "h": self.cell.1},
         })
+    }
+
+    /// GET /api/vector-map/user: the part of the user of the map: the points of the shows that
+    /// the user has or that have a tier, by the id of the show. Each other point is a catalog
+    /// show. The answer is small, and the page asks for it at each load.
+    pub fn api_map_user(&self) -> Value {
+        let shows: Map<String, Value> = self
+            .unique_rows()
+            .into_iter()
+            .map(|i| &self.rows[i])
+            .filter(|r| r.owned || r.tier.is_some())
+            .map(|r| (r.id.clone(), json!({"owned": r.owned as i64, "tier": r.tier})))
+            .collect();
+        json!({"shows": shows})
     }
 
     /// GET /api/vector-map/match: the match of each point of the map

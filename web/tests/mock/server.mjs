@@ -436,16 +436,20 @@ function answer(method, path, query, body) {
 	}
 	if (route === 'GET /api/recommend/steps') return steps(query);
 	if (route === 'GET /api/rec-log') return recLog();
+	// The fixed part of the map: it does not change with the data of the user
 	if (route === 'GET /api/vector-map') {
 		return {
-			center: { x: 0.32, y: 0.36 },
 			points: points.map((row) => ({
 				id: row.id, x: row._x, y: row._y, gx: row._gx, gy: row._gy, title: row.title, title_native: row.title_native, year: row.year,
-				poster: row.poster, genres: row.genres.slice(0, 2), owned: row.owned, tier: row.tier, score: row.score, aka: [row.title_english]
+				poster: row.poster, genres: row.genres.slice(0, 2), score: row.score, aka: [row.title_english]
 			})),
 			regions,
 			cell: CELL
 		};
+	}
+	// The part of the user: only the shows that the user has or that have a tier
+	if (route === 'GET /api/vector-map/user') {
+		return { shows: Object.fromEntries(points.filter((row) => row.owned || row.tier).map((row) => [row.id, { owned: row.owned, tier: row.tier }])) };
 	}
 	if (route === 'GET /api/vector-map/match') return points.map((row) => row.match);
 	throw new Refusal(404, 'Not Found');

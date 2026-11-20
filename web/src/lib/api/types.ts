@@ -162,11 +162,30 @@ export interface MapRegion {
 	level: number;
 }
 
+/** The map as the page uses it: the fixed part with the data of the user in its points (see lib/map/merge.ts) */
 export interface VectorMap {
-	center: { x: number; y: number } | null;
 	points: MapPoint[];
 	regions: MapRegion[];
 	cell: { w: number; h: number };
+}
+
+/**
+ * The fixed part of the map (/api/vector-map): the points without the data of the user, the
+ * areas and the size of a cell. It is large, and it changes only with the weekly build: the
+ * browser keeps it.
+ */
+export interface MapBase {
+	points: Omit<MapPoint, 'owned' | 'tier' | 'match'>[];
+	regions: MapRegion[];
+	cell: { w: number; h: number };
+}
+
+/**
+ * The part of the user (/api/vector-map/user): the shows that the user has or that have a tier,
+ * by the id of the show. It is small, and the page gets it for each load.
+ */
+export interface MapUser {
+	shows: Record<string, { owned: number; tier: Tier | null }>;
 }
 
 export interface StorySteps {

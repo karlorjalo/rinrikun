@@ -10,6 +10,7 @@
 import { api } from '#lib/api/client.js';
 import type { MapPoint, Tier, VectorMap } from '#lib/api/types.js';
 import type { MapController } from '#lib/map/engine.js';
+import { mergeMap } from '#lib/map/merge.js';
 import { settings } from './settings.svelte.js';
 
 /** A change of some points: the answer of the server to a change of a tier or of the watched state */
@@ -43,9 +44,11 @@ class MapStore {
 	load(): Promise<VectorMap | null> {
 		if (!this.request) {
 			this.late = [];
-			this.request = api
-				.vectorMap()
-				.then((data) => {
+			// The two parts of the map at the same time: the fixed part (from the cache of the browser
+			// after the first visit) and the shows of the user
+			this.request = Promise.all([api.vectorMap(), api.mapUser()])
+				.then(([base, user]) => {
+					const data = mergeMap(base, user);
 					this.points.clear();
 					for (const point of data.points) this.points.set(point.id, point);
 					this.late.forEach((change) => this.apply(change));

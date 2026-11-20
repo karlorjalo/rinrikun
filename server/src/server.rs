@@ -471,6 +471,7 @@ fn router(app: Shared) -> Router {
         .route("/api/profile", get(|s| simple(s, Engine::api_profile)))
         .route("/api/vector-map", get(|s, h| prepared(s, h, Engine::prepared_vector_map)))
         .route("/api/vector-map/match", get(|s| simple(s, Engine::api_map_match)))
+        .route("/api/vector-map/user", get(|s| simple(s, Engine::api_map_user)))
         .route("/api/weights", get(|s| simple(s, Engine::api_weights)).post(post_weights).delete(delete_weights))
         .route("/api/review-queue", get(review_queue))
         .route("/api/ratings", get(|s| simple(s, Engine::api_ratings)))
@@ -509,12 +510,15 @@ fn stamp(db: &Path) -> Vec<Option<(SystemTime, u64)>> {
         .collect()
 }
 
-/// Load the engine, and compute the match and the tier guess: almost each answer needs them
+/// Load the engine, and compute the match, the tier guess and the fixed part of the map: the
+/// first requests do not wait for them
 fn load(db: &Path) -> Result<Engine> {
     let store = Store::open_read_only(db)?;
     let engine = Engine::load(&store)?;
     engine.match_percent();
     engine.tier_guess();
+    // The fixed part of the map takes about 0.4 s to make: the first visit of the Profile tab does not wait for it
+    engine.prepared_vector_map();
     Ok(engine)
 }
 

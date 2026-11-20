@@ -94,3 +94,40 @@ test('a map that was hidden draws again when it comes back', async ({ page }) =>
 	await map.evaluate((el) => ((el as HTMLElement).style.display = ''));
 	await expect.poll(draws).toBeGreaterThan(hidden);
 });
+
+test('the map has the tier of a show after a full load, also after a change of the tier', async ({ page }) => {
+	// A rated show of the library that the search of the map finds as the only show
+	const rated: { id: string; title: string; tier: string }[] = await (await page.request.get('/api/ratings')).json();
+	await page.goto('/');
+	const map = page.getByTestId('vector-map');
+	const box = map.getByLabel('Find a show on the map');
+	const count = map.locator('.vector-search-count');
+	let show = rated[0];
+	for (const candidate of rated.filter((r) => r.tier === 'S')) {
+		await box.fill(candidate.title);
+		await expect(count).toHaveText(/^\d+ found$/);
+		if ((await count.textContent()) === '1 found') {
+			show = candidate;
+			break;
+		}
+	}
+	const tooltipOfShow = async () => {
+		await box.fill(show.title);
+		await expect(count).toHaveText('1 found');
+		await box.press('Enter');
+		const canvas = map.locator('canvas');
+		await expect.poll(async () => numbers(await map.locator('.vector-zoom-level').textContent())[0]).toBeGreaterThan(300);
+		await page.waitForTimeout(700);
+		await canvas.scrollIntoViewIfNeeded();
+		const area = (await canvas.boundingBox())!;
+		await page.mouse.move(area.x + area.width / 2 - 4, area.y + area.height / 2 - 4);
+		await page.mouse.move(area.x + area.width / 2, area.y + area.height / 2);
+		return map.locator('.vector-map-tooltip');
+	};
+	await expect(await tooltipOfShow()).toContainText('Tier S');
+
+	// The tier changes on the server, and the page loads again: the map has the new tier
+	await page.request.post('/api/weights', { data: { id: show.id, tier: 'C' } });
+	await page.reload();
+	await expect(await tooltipOfShow()).toContainText('Tier C');
+});

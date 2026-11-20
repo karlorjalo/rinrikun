@@ -3,14 +3,15 @@ import type {
 	InterestCounts,
 	InterestResults,
 	Kinds,
+	MapBase,
+	MapUser,
 	Pictures,
 	Profile,
 	RecLog,
 	Show,
 	StorySteps,
 	Tier,
-	Title,
-	VectorMap
+	Title
 } from './types';
 
 /** The server answered with an error. */
@@ -127,7 +128,10 @@ export function makeApi(fetcher: typeof fetch) {
 			),
 		recLog: () => request<RecLog>('/api/rec-log'),
 
-		vectorMap: () => request<VectorMap>('/api/vector-map'),
+		/** The fixed part of the map. It is large: the browser keeps it, and the server answers 304 while it is the same. */
+		vectorMap: () => request<MapBase>('/api/vector-map'),
+		/** The shows of the user on the map */
+		mapUser: () => request<MapUser>('/api/vector-map/user'),
 		/** The match of each point of the map, in the order of the points */
 		mapMatch: () => request<(number | null)[]>('/api/vector-map/match')
 	};
