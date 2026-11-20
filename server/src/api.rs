@@ -18,6 +18,36 @@ pub struct RecommendOptions<'a> {
     pub links: bool,
 }
 
+/// The options of a list without a seed: the key of the list in the cache of the engine
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ListKey {
+    pub k: usize,
+    pub diverse: bool,
+    pub new_only: bool,
+    pub usual: bool,
+    pub links: bool,
+}
+
+impl ListKey {
+    pub fn of(o: &RecommendOptions) -> ListKey {
+        ListKey { k: o.k, diverse: o.diverse, new_only: o.new_only, usual: o.usual, links: o.links }
+    }
+
+    /// The options of the list of this key
+    pub fn options(&self) -> RecommendOptions<'static> {
+        RecommendOptions { k: self.k, seed: None, diverse: self.diverse, new_only: self.new_only, usual: self.usual, links: self.links }
+    }
+}
+
+/// The options of the steps of a list: the key of the steps in the cache of the engine
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct StepsKey {
+    pub k: usize,
+    pub usual: bool,
+    pub links: bool,
+    pub new_only: bool,
+}
+
 fn round_to(x: f64, places: usize) -> f64 {
     format!("{x:.places$}").parse().unwrap_or(x)
 }
@@ -229,8 +259,17 @@ impl Engine {
         Ok(Value::from(self.with_match(list.iter().map(|&(j, s)| self.result(j, Some(s), Some(seed))).collect())))
     }
 
-    /// GET /api/recommend. The server writes a list without a seed into the log (server.rs).
+    /// GET /api/recommend. The server writes a list without a seed into the log (server.rs). The
+    /// engine keeps a list without a seed until the data changes. A list with a seed is fast
+    /// (about 6 ms), and it is not kept.
     pub fn api_recommend(&self, o: &RecommendOptions) -> Result<Value> {
+        if o.seed.is_some() {
+            return self.compute_recommend(o);
+        }
+        self.cached_list(ListKey::of(o), || self.compute_recommend(o).map_err(|error| format!("{error:#}"))).map_err(anyhow::Error::msg)
+    }
+
+    fn compute_recommend(&self, o: &RecommendOptions) -> Result<Value> {
         let list = self.recommend(o.k, o.seed, o.diverse, o.new_only, o.usual, o.links)?;
         let rows = list
             .iter()
@@ -249,8 +288,12 @@ impl Engine {
         Ok(Value::from(self.with_match(rows)))
     }
 
-    /// GET /api/recommend/steps
+    /// GET /api/recommend/steps. The engine keeps the steps until the data changes.
     pub fn api_steps(&self, k: usize, usual: bool, links: bool, new_only: bool) -> Value {
+        self.cached_steps(StepsKey { k, usual, links, new_only }, || self.compute_steps(k, usual, links, new_only))
+    }
+
+    fn compute_steps(&self, k: usize, usual: bool, links: bool, new_only: bool) -> Value {
         let (info, steps) = self.recommendation_steps(k, usual, links, new_only);
         json!({
             "kinds": if usual { "usual" } else { "all" },

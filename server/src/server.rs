@@ -24,7 +24,7 @@ use axum::routing::get;
 use serde_json::{Map, Value, json};
 use tower_http::compression::CompressionLayer;
 
-use crate::api::RecommendOptions;
+use crate::api::{ListKey, RecommendOptions};
 use crate::changes::Refused;
 use crate::engine::Engine;
 use crate::frames;
@@ -49,6 +49,8 @@ struct App {
     own_stamp: Mutex<Vec<Option<(SystemTime, u64)>>>,
     /// The number of changes of this server (see warm_later)
     changes: AtomicU64,
+    /// The options of the last list without a seed: warm_later computes this list again after a change
+    last_list: Mutex<Option<ListKey>>,
     random: Mutex<Random>,
     root: PathBuf,
     db: PathBuf,
@@ -149,9 +151,10 @@ async fn change(app: &Shared, work: impl FnOnce(&mut Engine, &mut Store) -> Resu
     answer
 }
 
-/// Compute the match and the tier guess again in the background, when no new change comes in
-/// WARM_QUIET. Almost each answer needs them, and the computation takes some hundred milliseconds:
-/// the next request of the page then finds them ready. A new change starts its own wait.
+/// Compute the match, the tier guess and the last list without a seed again in the background,
+/// when no new change comes in WARM_QUIET. Almost each answer needs the match, and the
+/// computations take some hundred milliseconds: the next request of the page then finds them
+/// ready. A new change starts its own wait.
 fn warm_later(app: &Shared) {
     let app = app.clone();
     let seen = app.changes.load(Ordering::SeqCst);
@@ -160,9 +163,13 @@ fn warm_later(app: &Shared) {
         if app.changes.load(Ordering::SeqCst) != seen {
             return;
         }
-        compute(&app, |engine| {
+        let last = *app.last_list.lock().unwrap();
+        compute(&app, move |engine| {
             engine.match_percent();
             engine.tier_guess();
+            if let Some(key) = last {
+                let _ = engine.api_recommend(&key.options());
+            }
         })
         .await;
     });
@@ -281,7 +288,11 @@ async fn recommend(State(app): State<Shared>, Query(p): Params) -> Answer {
         e.api_recommend(&options).map(Json).map_err(|err| ApiError(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
     })
     .await?;
-    // The log of a list without a seed, with its formula (the API of the Recommendations tab shows it)
+    // The log of a list without a seed, with its formula (the API of the Recommendations tab shows
+    // it). A list from the cache of the engine goes into the log too.
+    if !has_seed {
+        *app.last_list.lock().unwrap() = Some(ListKey { k, diverse, new_only, usual, links });
+    }
     if !has_seed && app.store.is_some() {
         let shows = list.0.clone();
         let kinds = format!("{}{}", if usual { "usual" } else { "all" }, if links { "" } else { ", no links" });
@@ -578,6 +589,7 @@ pub fn run(args: &[String]) -> Result<()> {
         store,
         own_stamp,
         changes: AtomicU64::new(0),
+        last_list: Mutex::new(None),
         random: Mutex::new(Random::from_time()),
         root,
         db,

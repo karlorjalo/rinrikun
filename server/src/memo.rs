@@ -55,14 +55,12 @@ impl<K, V> Default for MemoMap<K, V> {
 
 impl<K: Eq + Hash + Clone, V: Clone> MemoMap<K, V> {
     /// The value of a key. The first caller computes it, and the callers at the same time wait for it.
-    #[allow(dead_code)]
     pub fn get_or_compute(&self, key: &K, compute: impl FnOnce() -> V) -> V {
         let cell = self.cells.lock().unwrap().entry(key.clone()).or_default().clone();
         cell.get_or_init(compute).clone()
     }
 
     /// Forget all values: the data changed
-    #[allow(dead_code)]
     pub fn clear(&self) {
         *self.cells.lock().unwrap() = HashMap::new();
     }

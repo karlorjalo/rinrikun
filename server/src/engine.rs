@@ -8,9 +8,11 @@ use std::sync::Mutex;
 use anyhow::{Context, Result, bail};
 use nalgebra::{DMatrix, DVector};
 use rayon::prelude::*;
+use serde_json::Value;
 
+use crate::api::{ListKey, StepsKey};
 use crate::math::{self, Sparse, dot};
-use crate::memo::Memo;
+use crate::memo::{Memo, MemoMap};
 use crate::store::{LogEntry, Row, Store};
 
 /// Centered cosine similarity at which the D-tier penalty starts
@@ -106,6 +108,10 @@ pub struct Content {
 struct Cache {
     matches: Memo<Vec<f32>>,
     guesses: Memo<Vec<f32>>,
+    /// The lists of recommendations without a seed, as the API gives them
+    lists: MemoMap<ListKey, Result<Value, String>>,
+    /// The steps of the lists, as the API gives them
+    steps: MemoMap<StepsKey, Value>,
 }
 
 pub struct Engine {
@@ -338,6 +344,18 @@ impl Engine {
     pub fn clear_cache(&self) {
         self.cache.matches.clear();
         self.cache.guesses.clear();
+        self.cache.lists.clear();
+        self.cache.steps.clear();
+    }
+
+    /// A list of recommendations without a seed: from the cache, or computed and kept
+    pub(crate) fn cached_list(&self, key: ListKey, compute: impl FnOnce() -> Result<Value, String>) -> Result<Value, String> {
+        self.cache.lists.get_or_compute(&key, compute)
+    }
+
+    /// The steps of a list: from the cache, or computed and kept
+    pub(crate) fn cached_steps(&self, key: StepsKey, compute: impl FnOnce() -> Value) -> Value {
+        self.cache.steps.get_or_compute(&key, compute)
     }
 
     pub fn len(&self) -> usize {
