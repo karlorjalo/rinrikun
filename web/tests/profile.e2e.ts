@@ -167,3 +167,39 @@ test('a drag of the map does not build the dots again for each frame', async ({ 
 	expect(arcs).toBeGreaterThan(0);
 	expect(arcs).toBeLessThan(map.points.length * 3);
 });
+
+test('only a drag makes the kept picture of the dots', async ({ page }) => {
+	// The map paints its kept picture with drawImage from a canvas. A poster is an image, not a canvas.
+	await page.addInitScript(() => {
+		const w = window as unknown as { __pictures: number };
+		w.__pictures = 0;
+		const drawImage = CanvasRenderingContext2D.prototype.drawImage;
+		CanvasRenderingContext2D.prototype.drawImage = function (...args: unknown[]) {
+			if (args[0] instanceof HTMLCanvasElement) w.__pictures += 1;
+			return (drawImage as (...a: unknown[]) => void).apply(this, args);
+		};
+	});
+	const pictures = () => page.evaluate(() => (window as unknown as { __pictures: number }).__pictures);
+	await page.goto('/');
+	const box = page.getByTestId('vector-map');
+	await expect(box.locator('.vector-zoom-level')).toHaveText('100%');
+	const canvas = box.locator('canvas');
+	await canvas.scrollIntoViewIfNeeded();
+	// The load, with its posters, and the pointer on some shows: no kept picture. To make the
+	// picture costs more than one draw, and only a drag wins that time back.
+	await page.waitForTimeout(1200);
+	const area = (await canvas.boundingBox())!;
+	for (let k = 0; k < 12; k++) {
+		await page.mouse.move(area.x + 40 + k * 60, area.y + 60 + k * 30);
+		await page.waitForTimeout(30);
+	}
+	expect(await pictures()).toBe(0);
+	// A drag makes the picture and paints it
+	await page.mouse.down();
+	for (let k = 1; k <= 4; k++) {
+		await page.mouse.move(area.x + 700 + k * 6, area.y + 390 + k * 4);
+		await page.waitForTimeout(40);
+	}
+	await page.mouse.up();
+	expect(await pictures()).toBeGreaterThan(0);
+});

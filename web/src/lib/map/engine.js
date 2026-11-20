@@ -143,8 +143,9 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
   let dotLayerMargin = 0;
   // True when the dots can be different from the kept picture
   let dotsStale = true;
-  // True when a caller of the frame that waits needs new dots
+  // What the callers of the frame that waits need of the dots (see scheduleDraw)
   let fullDrawPending = false;
+  let movedDrawPending = false;
   let destroyed = false;
 
   const PAD = 24;
@@ -288,24 +289,34 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
   }
 
   // Draw the map in the next frame. In the far view the dots are most of the work of a draw
-  // (about 20 000 circles), and a drag draws the map for each frame. Thus the map keeps the dots
-  // as a picture, with some area around the view: see paintKeptDots.
+  // (about 20 000 circles), and a drag draws the map for each frame. Thus a drag keeps the dots
+  // as a picture, with some area around the view, and paints the picture at its new place: see
+  // paintKeptDots.
   //
-  // `keepDots` is true for a draw that changes nothing of the dots: the map moved (a drag), a
-  // poster loaded, or a different show is under the pointer. Such a draw paints the kept picture
-  // at its new place. Each other caller gives no value: the draw then makes the dots again. If
-  // one caller of a frame needs new dots, the frame makes them. The end of a drag also asks for
-  // new dots: the picture that stays on the screen is always a full draw.
-  function scheduleDraw(keepDots) {
+  // `dots` tells what the draw needs of the dots:
+  //   no value  The dots can be different (zoom, search, a new tier, a new size, ...): the draw
+  //             makes them again. The end of a drag also asks for this: the picture that stays
+  //             on the screen is always a full draw.
+  //   "moved"   Only the place of the map changed (a drag). The draw paints the kept picture,
+  //             and it makes the picture first if it is not there.
+  //   "same"    Nothing of the dots changed (a poster loaded, a different show is under the
+  //             pointer). The draw paints the kept picture if it is there. If not, it draws the
+  //             dots directly: to make the picture costs more than one direct draw, because the
+  //             browser must turn all dots into pixels at once. A drag wins this time back in
+  //             its next frames, and one draw for a poster does not.
+  // The frame does the most work that one of its callers needs.
+  function scheduleDraw(dots) {
     // A poster that loads late must not draw a map that is replaced
     if (destroyed) return;
-    if (keepDots !== true) fullDrawPending = true;
+    if (dots === "moved") movedDrawPending = true;
+    else if (dots !== "same") fullDrawPending = true;
     if (!animFrame) {
       animFrame = requestAnimationFrame(() => {
         animFrame = null;
-        const keep = !fullDrawPending;
+        const need = fullDrawPending ? "full" : movedDrawPending ? "moved" : "same";
         fullDrawPending = false;
-        draw(keep);
+        movedDrawPending = false;
+        draw(need);
       });
     }
   }
@@ -318,7 +329,7 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
     if (destroyed || posterTimer) return;
     posterTimer = setTimeout(() => {
       posterTimer = null;
-      scheduleDraw(true);
+      scheduleDraw("same");
     }, POSTER_DRAW_DELAY);
   }
 
@@ -852,15 +863,18 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
     }
   }
 
-  // Paint the kept picture of the dots at the place of the map of now. The picture is made again
-  // when it is not there, when something of the dots can be different (dotsStale, or a different
-  // key), or when the map moved more than the area around the view that the picture has.
-  function paintKeptDots(ctx, w, h, dpr, colors, fade, special) {
+  // Paint the kept picture of the dots at the place of the map of now, and tell if it is painted.
+  // The picture is not good when it is not there, when something of the dots can be different
+  // (dotsStale, or a different key), or when the map moved more than the area around the view
+  // that the picture has. With `make`, a picture that is not good is made again. Without it,
+  // the function paints nothing and gives false.
+  function paintKeptDots(ctx, w, h, dpr, colors, fade, special, make) {
     const key = [w, h, dpr, scale, viewMode(), drawGradient, fade, highlightKind, colors.catalog, colors.library, colors.dot, DOT_TIERS.map((t) => colors.tier[t]).join()].join("|");
     if (
       dotsStale || !dotLayer || key !== dotLayerKey ||
       Math.abs(panX - dotLayerPanX) > dotLayerMargin || Math.abs(panY - dotLayerPanY) > dotLayerMargin
     ) {
+      if (!make) return false;
       // The margin is a whole number of device pixels, as the place of the picture below: each
       // dot of the picture then has the same pixels as a dot that is drawn directly
       const margin = Math.round(Math.min(w, h) * DOT_LAYER_MARGIN * dpr) / dpr;
@@ -887,10 +901,11 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
     ctx.globalAlpha = 1;
     ctx.drawImage(dotLayer, x, y, dotLayer.width / dpr, dotLayer.height / dpr);
     ctx.globalAlpha = fade;
+    return true;
   }
 
-  // `keepDots`: the draw can paint the kept picture of the dots (see scheduleDraw)
-  function draw(keepDots = false) {
+  // `need`: what the draw needs of the dots: "full", "moved" or "same" (see scheduleDraw)
+  function draw(need = "full") {
     // A draw that does nothing forgets the size of the last draw: the map then draws again when
     // its box comes back, also with the same size as before.
     drawnW = -1;
@@ -992,9 +1007,7 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
       // 1 and 2. The dots of the catalog and of the shows of the user. A draw that only moves the
       // map, or that changes only a poster or the show under the pointer, paints the kept picture
       // of the dots. The story of the list has its own dots below them: it draws them directly.
-      if (keepDots && !story) {
-        paintKeptDots(ctx, w, h, dpr, colors, fade, special);
-      } else {
+      if (need === "full" || story || !paintKeptDots(ctx, w, h, dpr, colors, fade, special, need === "moved")) {
         dotsStale = true;
         drawDots(ctx, w, h, 0, colors, fade, special);
       }
@@ -1272,7 +1285,7 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
       dragStartY = e.clientY;
       tooltip.hidden = true;
       tooltip.style.display = "none";
-      scheduleDraw(true);
+      scheduleDraw("moved");
       return;
     }
 
@@ -1280,7 +1293,7 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
     const pt = story ? null : findNearest(mx, my);
     if (pt !== hoveredPoint) {
       hoveredPoint = pt;
-      scheduleDraw(true);
+      scheduleDraw("same");
     }
 
     if (pt) {
@@ -1391,7 +1404,7 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
       dragStartX = e.touches[0].clientX;
       dragStartY = e.touches[0].clientY;
       tooltip.hidden = true;
-      scheduleDraw(true);
+      scheduleDraw("moved");
     } else if (e.touches.length === 2 && pinchStartDist > 0) {
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
