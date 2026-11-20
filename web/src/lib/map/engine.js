@@ -38,6 +38,8 @@ const posterListeners = new Map();
 // The cache keeps this number of posters. The close view of the map asks for the posters of all
 // shows in view (about 700 when the posters appear), and the catalog has thousands of shows.
 const POSTER_CACHE_MAX = 1600;
+// The posters that load in this time (in milliseconds) after the first one use one draw of the map
+const POSTER_DRAW_DELAY = 150;
 
 function getPosterImage(url, onLoaded) {
   if (!url) return null;
@@ -122,6 +124,8 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
   let pinchStartDist = 0;
   let pinchStartScale = 1.0;
   let animFrame = null;
+  // The timer of the draw for the posters that load (schedulePosterDraw)
+  let posterTimer = null;
   let destroyed = false;
 
   const PAD = 24;
@@ -273,6 +277,18 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
         draw();
       });
     }
+  }
+
+  // A poster that loads asks for one draw POSTER_DRAW_DELAY later, and the posters that load in
+  // that time use the same draw. A draw of the full map takes some ten milliseconds (more on a
+  // phone), and the posters of a map load one after the other. Zoom, pan and resize draw in the
+  // next frame (scheduleDraw).
+  function schedulePosterDraw() {
+    if (destroyed || posterTimer) return;
+    posterTimer = setTimeout(() => {
+      posterTimer = null;
+      scheduleDraw();
+    }, POSTER_DRAW_DELAY);
   }
 
   // Inject Zoom Controls into canvas box if not present
@@ -519,10 +535,10 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
     if (!pt.poster) return null;
     const dpr = window.devicePixelRatio || 1;
     if (pw * dpr > 110 && pt.poster.includes("/cover/small/")) {
-      const large = getPosterImage(pt.poster.replace("/cover/small/", "/cover/medium/"), scheduleDraw);
+      const large = getPosterImage(pt.poster.replace("/cover/small/", "/cover/medium/"), schedulePosterDraw);
       if (large) return large;
     }
-    return getPosterImage(pt.poster, scheduleDraw);
+    return getPosterImage(pt.poster, schedulePosterDraw);
   }
 
   // Divide a title into lines of the given width. A title that is too long ends with "…".
@@ -1350,6 +1366,7 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
     destroy: () => {
       destroyed = true;
       if (animFrame) cancelAnimationFrame(animFrame);
+      clearTimeout(posterTimer);
       clearTimeout(searchTimer);
       stopFlight();
       canvas.removeEventListener("wheel", onWheel);
