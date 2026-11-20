@@ -27,14 +27,24 @@ export class ReviewDeck {
 	 * server one after the other: a tier and its undo reach the server in the order of the keys.
 	 */
 	private saving: Promise<void> = Promise.resolve();
+	/**
+	 * The tier that the user wants for each show, by the id of the show. The answer of a request
+	 * sets the tier of the show to the tier of that request, and a later key can already have
+	 * changed it: after each answer, the show gets the tier that the user wants again.
+	 */
+	private wanted = new Map<string, Tier | null>();
 
 	/** Send a tier to the server after the requests before it */
 	private save(show: Show, tier: Tier | null, failure: string) {
-		this.saving = this.saving.then(() =>
-			library.setTier(show, tier).catch((error) => {
+		this.wanted.set(show.id, tier);
+		this.saving = this.saving.then(async () => {
+			try {
+				await library.setTier(show, tier);
+			} catch (error) {
 				console.error(failure, error);
-			})
-		);
+			}
+			show.tier = this.wanted.get(show.id) ?? null;
+		});
 	}
 
 	constructor(data: ReviewData) {
