@@ -1,3 +1,4 @@
+import { matchAbout } from '../src/lib/format.js';
 import { expect, numbers, test } from './helpers.js';
 
 test('the tier filter shows only the shows of the tier', async ({ page }) => {
@@ -49,6 +50,38 @@ test('the detail window of a rated show shows the overview', async ({ page }) =>
 	expect(id).not.toBe('');
 	await page.locator(`[data-testid=show-card][data-id="${id}"]`).getByRole('heading').getByRole('button').click();
 	await expect(page.getByTestId('detail')).toContainText('An invented show for the tests');
+});
+
+test('the match of a card shows its tooltip', async ({ page }) => {
+	await page.goto('/ratings');
+	const card = page.getByTestId('show-card').first();
+	await expect(card).toBeVisible();
+	// The cards have no tooltip component of their own: one tooltip of the page serves them all
+	await expect(page.getByTestId('ratings-grid').locator('[data-slot="tooltip-trigger"]')).toHaveCount(0);
+	const id = (await card.getAttribute('data-id'))!;
+	const show = await (await page.request.get(`/api/show/${encodeURIComponent(id)}`)).json();
+	const match = card.getByTestId('match');
+	await match.hover();
+	const tooltip = page.getByRole('tooltip');
+	await expect(tooltip).toHaveCount(1);
+	await expect(tooltip).toBeVisible();
+	await expect(tooltip).toHaveText(matchAbout(show));
+	await expect(match).toHaveAttribute('aria-describedby', (await tooltip.getAttribute('id'))!);
+	// The pointer leaves: the tooltip closes
+	await page.mouse.move(0, 0);
+	await expect(tooltip).toHaveCount(0);
+});
+
+test('the keyboard focus on a match shows its tooltip, and Escape closes it', async ({ page }) => {
+	await page.goto('/ratings');
+	const match = page.getByTestId('show-card').first().getByTestId('match');
+	await expect(match).toBeVisible();
+	await match.focus();
+	const tooltip = page.getByRole('tooltip');
+	await expect(tooltip).toBeVisible();
+	await page.keyboard.press('Escape');
+	await expect(tooltip).toHaveCount(0);
+	await expect(match).toBeFocused();
 });
 
 test('"Not interested" has the shows that the user removed', async ({ page }) => {

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import './layout.css';
 	import favicon from '#lib/assets/favicon.svg';
+	import HintLayer from '#lib/components/HintLayer.svelte';
 	import Brand from '#lib/components/shell/Brand.svelte';
 	import LoadingBar from '#lib/components/shell/LoadingBar.svelte';
 	import MobileMenu from '#lib/components/shell/MobileMenu.svelte';
@@ -78,4 +79,5 @@
 	</main>
 	<MobileMenu />
 	<DetailDialog />
+	<HintLayer />
 </Tooltip.Provider>
