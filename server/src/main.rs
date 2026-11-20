@@ -23,6 +23,7 @@ mod math;
 mod memo;
 mod prepared;
 mod server;
+mod simcache;
 mod store;
 mod timing;
 

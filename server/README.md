@@ -51,6 +51,11 @@ More:
   days; a file without frames, or of a show that is not finished, for 7 days.
 - The poster of a library show without an AniList entry (`/api/poster/{id}`): the server passes it
   on from Jellyfin, as a small picture.
+- The server keeps its results in memory until the data changes: the match, the tier guess, the
+  lists without a seed, and the answers for the map and the titles (with gzip bytes and an ETag).
+  It also keeps the text similarity of each show to each liked show (`src/simcache.rs`, about
+  85 KB for each liked show): the vectors change only with a new load of the data. After a change
+  of the user, the match takes about 50 ms (the first match after the start: about 330 ms).
 
 ## The weekly rebuild
 

@@ -14,6 +14,7 @@ use crate::api::{ListKey, StepsKey};
 use crate::math::{self, Sparse, dot};
 use crate::memo::{Memo, MemoMap};
 use crate::prepared::Prepared;
+use crate::simcache::SimColumns;
 use crate::store::{LogEntry, Row, Store};
 
 /// Centered cosine similarity at which the D-tier penalty starts
@@ -167,6 +168,9 @@ pub struct Engine {
     /// The group of each row for the year, the format, the number of episodes and the crowd score. -1 = not known.
     pub kind_codes: Vec<[i64; 4]>,
     cache: Cache,
+    /// The text similarity of each show to the liked shows and the D shows (simcache.rs). The
+    /// vectors do not change while this engine lives, thus a change of the user does not clear it.
+    sims: SimColumns,
     /// The match of each card that the Discover deck gave, until the user answers it
     pub deck_match: Mutex<HashMap<String, f32>>,
 }
@@ -305,6 +309,7 @@ impl Engine {
             entry_row: Vec::new(),
             kind_codes: Vec::new(),
             cache: Cache::default(),
+            sims: SimColumns::default(),
             deck_match: Mutex::new(HashMap::new()),
         };
         engine.build_tag_matrix();
@@ -352,6 +357,11 @@ impl Engine {
         self.cache.steps.clear();
         self.cache.vector_map.clear();
         self.cache.titles.clear();
+    }
+
+    /// The number of similarity columns that the engine keeps (for the timing command)
+    pub(crate) fn sim_column_count(&self) -> usize {
+        self.sims.len()
     }
 
     /// The answer of /api/vector-map: from the cache, or made and kept
@@ -855,33 +865,36 @@ impl Engine {
     /// `_content`: the content score of each candidate, and of each extra row on the scale of the candidates
     pub fn content(&self, cand: &[usize], extra: &[usize]) -> Content {
         let d_rows: Vec<usize> = self.owned_idx.iter().copied().filter(|&i| self.rows[i].tier.as_deref() == Some("D")).collect();
+        let (liked, liked_w) = self.liked();
+        // The text similarity of each show to each D show and to each liked show. The engine keeps
+        // these columns (simcache.rs): `column[j]` is the similarity of show j to the show of the
+        // column, with the same bits as `dot(self.eff_row(j), self.eff_row(show))`.
+        let d_columns = self.sims.get(&self.eff, self.dim, &d_rows);
+        let liked_columns = self.sims.get(&self.eff, self.dim, &liked);
         let penalty = |best: f32| (0f64).max(best as f64 - D_SIM_START) / (1.0 - D_SIM_START);
         let mut d_penalty = vec![0f64; cand.len()];
         let mut extra_d = vec![0f64; extra.len()];
         if !d_rows.is_empty() {
-            d_penalty = cand
-                .par_iter()
-                .map(|&c| penalty(d_rows.iter().map(|&d| dot(self.eff_row(c), self.eff_row(d))).fold(f32::NEG_INFINITY, f32::max)))
-                .collect();
+            d_penalty = cand.par_iter().map(|&c| penalty(d_columns.iter().map(|column| column[c]).fold(f32::NEG_INFINITY, f32::max))).collect();
             extra_d = extra
                 .par_iter()
                 .map(|&e| {
                     let best = d_rows
                         .iter()
-                        .filter(|&&d| self.row_fr[d] != self.row_fr[e])
-                        .map(|&d| dot(self.eff_row(e), self.eff_row(d)))
+                        .zip(&d_columns)
+                        .filter(|&(&d, _)| self.row_fr[d] != self.row_fr[e])
+                        .map(|(_, column)| column[e])
                         .fold(f32::NEG_INFINITY, f32::max);
                     if best == f32::NEG_INFINITY { 0.0 } else { penalty(best) }
                 })
                 .collect();
         }
-        let (liked, liked_w) = self.liked();
         let size = self.tag_size();
         let liked_tags: Vec<Vec<f32>> = liked.iter().map(|&l| self.tags[l].to_dense(size)).collect();
         let text_sim = |rows: &[usize]| {
             let rows = rows.to_vec();
-            let liked = liked.clone();
-            move |c: usize, l: usize| dot(self.eff_row(rows[c]), self.eff_row(liked[l]))
+            let liked_columns = &liked_columns;
+            move |c: usize, l: usize| liked_columns[l][rows[c]]
         };
         let tag_sim = |rows: &[usize]| {
             let rows = rows.to_vec();

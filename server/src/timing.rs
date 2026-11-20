@@ -2,7 +2,8 @@
 //! data. It reads only. Use it before and after a change that must make the server faster.
 //!
 //! Each value is the best of 3 runs, in milliseconds. The engine forgets the match and the tier
-//! guess before each run of these two stages, thus each run computes them.
+//! guess before each run of these two stages, thus each run computes them. It keeps the
+//! similarity columns, as the server does after a change of the user.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -37,6 +38,12 @@ pub fn run(args: &[String]) -> Result<()> {
     let engine = Engine::load(&store)?;
     line("load", started.elapsed().as_secs_f64() * 1000.0);
 
+    // The first match computes the similarity columns of the liked shows (simcache.rs). The engine
+    // keeps them, thus the match after a change of the user is faster: the lines below show it.
+    let started = Instant::now();
+    engine.match_percent();
+    line("match (first, at the start)", started.elapsed().as_secs_f64() * 1000.0);
+    println!("{:<30}{:>10}", "similarity columns kept", engine.sim_column_count());
     line("match", best(|| {
         engine.clear_cache();
         engine.match_percent()

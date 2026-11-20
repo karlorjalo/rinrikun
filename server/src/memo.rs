@@ -60,6 +60,16 @@ impl<K: Eq + Hash + Clone, V: Clone> MemoMap<K, V> {
         cell.get_or_init(compute).clone()
     }
 
+    /// The value of a key, if it is computed. A look does not start a computation.
+    pub fn get(&self, key: &K) -> Option<V> {
+        self.cells.lock().unwrap().get(key).and_then(|cell| cell.get().cloned())
+    }
+
+    /// The number of keys with a value or with a computation that runs
+    pub fn len(&self) -> usize {
+        self.cells.lock().unwrap().len()
+    }
+
     /// Forget all values: the data changed
     pub fn clear(&self) {
         *self.cells.lock().unwrap() = HashMap::new();
@@ -130,6 +140,17 @@ mod tests {
         // The caller of the old computation gets its own value, but the memo keeps the new value
         assert_eq!(old.join().unwrap(), 1);
         assert_eq!(memo.get(), Some(2));
+    }
+
+    #[test]
+    fn memo_map_get_gives_only_a_computed_value() {
+        let map = MemoMap::<u8, String>::default();
+        assert_eq!(map.get(&1), None);
+        map.get_or_compute(&1, || "one".into());
+        assert_eq!(map.get(&1), Some("one".to_string()));
+        assert_eq!(map.get(&2), None);
+        // A look at a key does not make a cell that a later computation would skip
+        assert_eq!(map.get_or_compute(&2, || "two".into()), "two");
     }
 
     #[test]
