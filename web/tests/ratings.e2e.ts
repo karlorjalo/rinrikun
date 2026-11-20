@@ -72,11 +72,28 @@ test('the match of a card shows its tooltip', async ({ page }) => {
 	await expect(tooltip).toHaveCount(0);
 });
 
-test('the keyboard focus on a match shows its tooltip, and Escape closes it', async ({ page }) => {
+test('a click on the match does not keep its tooltip open', async ({ page }) => {
 	await page.goto('/ratings');
 	const match = page.getByTestId('show-card').first().getByTestId('match');
 	await expect(match).toBeVisible();
-	await match.focus();
+	await match.hover();
+	const tooltip = page.getByRole('tooltip');
+	await expect(tooltip).toBeVisible();
+	// The click gives the button the focus. The pointer then leaves, and the tooltip must close.
+	await match.click();
+	await page.mouse.move(0, 0);
+	await expect(tooltip).toHaveCount(0);
+});
+
+test('the keyboard focus on a match shows its tooltip, and Escape closes it', async ({ page }) => {
+	await page.goto('/ratings');
+	const card = page.getByTestId('show-card').first();
+	const match = card.getByTestId('match');
+	await expect(match).toBeVisible();
+	// The Tab key moves the focus from the title of the card to its match
+	await card.getByRole('heading').getByRole('button').focus();
+	for (let n = 0; n < 4 && !(await match.evaluate((el) => el === document.activeElement)); n++) await page.keyboard.press('Tab');
+	await expect(match).toBeFocused();
 	const tooltip = page.getByRole('tooltip');
 	await expect(tooltip).toBeVisible();
 	await page.keyboard.press('Escape');

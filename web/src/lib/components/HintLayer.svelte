@@ -71,7 +71,9 @@
 		};
 		const focusIn = (event: FocusEvent) => {
 			const trigger = triggerOf(event.target);
-			if (trigger) show(trigger, 'focus');
+			// Only the focus of the keyboard opens the tooltip. A click also gives the focus, and the
+			// tooltip would then stay open when the pointer leaves.
+			if (trigger?.matches(':focus-visible')) show(trigger, 'focus');
 		};
 		const focusOut = (event: FocusEvent) => {
 			const trigger = triggerOf(event.target);
@@ -102,7 +104,7 @@
 
 <Tooltip.Root bind:open disableHoverableContent>
 	{#if anchor}
-		<!-- role="tooltip": bits-ui gives the box no role; the element names the box in aria-describedby -->
+		<!-- bits-ui gives the box no role, thus the role is set here. The element names the box in aria-describedby. -->
 		<Tooltip.Content
 			id={ID}
 			role="tooltip"
