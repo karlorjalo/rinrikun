@@ -40,6 +40,11 @@ const posterListeners = new Map();
 const POSTER_CACHE_MAX = 1600;
 // The posters that load in this time (in milliseconds) after the first one use one draw of the map
 const POSTER_DRAW_DELAY = 150;
+// The tiers of the dots of the user in the order of their draw: S is last, on top
+const DOT_TIERS = [null, "D", "C", "B", "A", "S"];
+// The kept picture of the dots has this part of the smaller side of the view as area around the
+// view. A drag that goes farther makes the picture again.
+const DOT_LAYER_MARGIN = 0.35;
 
 function getPosterImage(url, onLoaded) {
   if (!url) return null;
@@ -129,6 +134,17 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
   // The size of the box at the last draw (see the ResizeObserver below)
   let drawnW = -1;
   let drawnH = -1;
+  // The kept picture of the dots (see scheduleDraw and paintKeptDots): the canvas, the state that
+  // it was made for, the place of the map at that time, and its area around the view
+  let dotLayer = null;
+  let dotLayerKey = "";
+  let dotLayerPanX = 0;
+  let dotLayerPanY = 0;
+  let dotLayerMargin = 0;
+  // True when the dots can be different from the kept picture
+  let dotsStale = true;
+  // True when a caller of the frame that waits needs new dots
+  let fullDrawPending = false;
   let destroyed = false;
 
   const PAD = 24;
@@ -271,13 +287,25 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
     return base + (CARD_MIN - base) * t;
   }
 
-  function scheduleDraw() {
+  // Draw the map in the next frame. In the far view the dots are most of the work of a draw
+  // (about 20 000 circles), and a drag draws the map for each frame. Thus the map keeps the dots
+  // as a picture, with some area around the view: see paintKeptDots.
+  //
+  // `keepDots` is true for a draw that changes nothing of the dots: the map moved (a drag), a
+  // poster loaded, or a different show is under the pointer. Such a draw paints the kept picture
+  // at its new place. Each other caller gives no value: the draw then makes the dots again. If
+  // one caller of a frame needs new dots, the frame makes them. The end of a drag also asks for
+  // new dots: the picture that stays on the screen is always a full draw.
+  function scheduleDraw(keepDots) {
     // A poster that loads late must not draw a map that is replaced
     if (destroyed) return;
+    if (keepDots !== true) fullDrawPending = true;
     if (!animFrame) {
       animFrame = requestAnimationFrame(() => {
         animFrame = null;
-        draw();
+        const keep = !fullDrawPending;
+        fullDrawPending = false;
+        draw(keep);
       });
     }
   }
@@ -290,7 +318,7 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
     if (destroyed || posterTimer) return;
     posterTimer = setTimeout(() => {
       posterTimer = null;
-      scheduleDraw();
+      scheduleDraw(true);
     }, POSTER_DRAW_DELAY);
   }
 
@@ -768,7 +796,101 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
     ctx.globalAlpha = 1;
   }
 
-  function draw() {
+  // The dots of the far view: the catalog (step 1) and the shows of the user (step 2). `margin`
+  // is the area outside the view that also gets its dots, for the kept picture.
+  function drawDots(ctx, w, h, margin, colors, fade, special) {
+    const low = -20 - margin;
+    const right = w + 20 + margin;
+    const bottom = h + 20 + margin;
+    // One pass over the shows: the catalog dots in the steps of the match gradient, and the
+    // shows of the user by their tier
+    const steps = [];
+    for (let k = 0; k < (drawGradient ? GRADIENT_STEPS : 1); k++) steps.push([]);
+    const mine = DOT_TIERS.map(() => []);
+    for (let i = 0; i < n; i++) {
+      if (sx[i] < low || sx[i] > right || sy[i] < low || sy[i] > bottom) continue;
+      if (special(i)) continue;
+      const pt = points[i];
+      if (pt.owned) {
+        const t = DOT_TIERS.indexOf(pt.tier || null);
+        if (t >= 0) mine[t].push(i);
+        continue;
+      }
+      const k = drawGradient ? Math.floor(matchBrightness(pt.match ?? 0) * GRADIENT_STEPS) : 0;
+      steps[Math.min(steps.length - 1, k)].push(i);
+    }
+
+    // 1. The dots of the catalog. With the match gradient a dot is stronger and larger for a
+    // higher match. The dots are in steps, and each step is one path: one path for each dot is slow.
+    ctx.globalAlpha = fade;
+    const catR = dotRadius(false);
+    ctx.fillStyle = drawGradient ? colors.dot : colors.catalog;
+    for (let k = 0; k < steps.length; k++) {
+      const part = (k + 0.5) / steps.length;
+      const r = drawGradient ? catR * (0.8 + 0.6 * part) : catR;
+      if (drawGradient) ctx.globalAlpha = fade * (0.05 + 0.9 * part);
+      ctx.beginPath();
+      for (const i of steps[k]) {
+        ctx.moveTo(sx[i] + r, sy[i]);
+        ctx.arc(sx[i], sy[i], r, 0, Math.PI * 2);
+      }
+      ctx.fill();
+    }
+    ctx.globalAlpha = fade;
+
+    // 2. The dots of the shows of the user. A rated show has the color of its tier. S is last, on top.
+    const libR = dotRadius(true);
+    for (let t = 0; t < DOT_TIERS.length; t++) {
+      const tier = DOT_TIERS[t];
+      ctx.fillStyle = (tier && colors.tier[tier]) || colors.library;
+      ctx.beginPath();
+      for (const i of mine[t]) {
+        ctx.moveTo(sx[i] + libR, sy[i]);
+        ctx.arc(sx[i], sy[i], libR, 0, Math.PI * 2);
+      }
+      ctx.fill();
+    }
+  }
+
+  // Paint the kept picture of the dots at the place of the map of now. The picture is made again
+  // when it is not there, when something of the dots can be different (dotsStale, or a different
+  // key), or when the map moved more than the area around the view that the picture has.
+  function paintKeptDots(ctx, w, h, dpr, colors, fade, special) {
+    const key = [w, h, dpr, scale, viewMode(), drawGradient, fade, highlightKind, colors.catalog, colors.library, colors.dot, DOT_TIERS.map((t) => colors.tier[t]).join()].join("|");
+    if (
+      dotsStale || !dotLayer || key !== dotLayerKey ||
+      Math.abs(panX - dotLayerPanX) > dotLayerMargin || Math.abs(panY - dotLayerPanY) > dotLayerMargin
+    ) {
+      // The margin is a whole number of device pixels, as the place of the picture below: each
+      // dot of the picture then has the same pixels as a dot that is drawn directly
+      const margin = Math.round(Math.min(w, h) * DOT_LAYER_MARGIN * dpr) / dpr;
+      if (!dotLayer) dotLayer = document.createElement("canvas");
+      const layerW = Math.ceil((w + 2 * margin) * dpr);
+      const layerH = Math.ceil((h + 2 * margin) * dpr);
+      if (dotLayer.width !== layerW || dotLayer.height !== layerH) {
+        dotLayer.width = layerW;
+        dotLayer.height = layerH;
+      }
+      const layer = dotLayer.getContext("2d");
+      layer.setTransform(1, 0, 0, 1, 0, 0);
+      layer.clearRect(0, 0, layerW, layerH);
+      layer.setTransform(dpr, 0, 0, dpr, margin * dpr, margin * dpr);
+      drawDots(layer, w, h, margin, colors, fade, special);
+      dotLayerKey = key;
+      dotLayerPanX = panX;
+      dotLayerPanY = panY;
+      dotLayerMargin = margin;
+      dotsStale = false;
+    }
+    const x = Math.round((panX - dotLayerPanX - dotLayerMargin) * dpr) / dpr;
+    const y = Math.round((panY - dotLayerPanY - dotLayerMargin) * dpr) / dpr;
+    ctx.globalAlpha = 1;
+    ctx.drawImage(dotLayer, x, y, dotLayer.width / dpr, dotLayer.height / dpr);
+    ctx.globalAlpha = fade;
+  }
+
+  // `keepDots`: the draw can paint the kept picture of the dots (see scheduleDraw)
+  function draw(keepDots = false) {
     // A draw that does nothing forgets the size of the last draw: the map then draws again when
     // its box comes back, also with the same size as before.
     drawnW = -1;
@@ -867,47 +989,14 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
       const usual = story ? (story.last ? story.ease : 0) : 1;
       if (story) drawStoryDots(ctx, w, h, colors, 1 - usual);
       const fade = (searching ? SEARCH_FADE : 1) * usual;
-      ctx.globalAlpha = fade;
-
-      // 1. The dots of the catalog. With the match gradient a dot is stronger and larger for a
-      // higher match. The dots are in steps, and each step is one path: one path for each dot is slow.
-      const catR = dotRadius(false);
-      const steps = [];
-      for (let k = 0; k < (drawGradient ? GRADIENT_STEPS : 1); k++) steps.push([]);
-      for (let i = 0; i < n; i++) {
-        const pt = points[i];
-        if (pt.owned || special(i)) continue;
-        if (sx[i] < -20 || sx[i] > w + 20 || sy[i] < -20 || sy[i] > h + 20) continue;
-        const k = drawGradient ? Math.floor(matchBrightness(pt.match ?? 0) * GRADIENT_STEPS) : 0;
-        steps[Math.min(steps.length - 1, k)].push(i);
-      }
-      ctx.fillStyle = drawGradient ? colors.dot : colors.catalog;
-      for (let k = 0; k < steps.length; k++) {
-        const part = (k + 0.5) / steps.length;
-        const r = drawGradient ? catR * (0.8 + 0.6 * part) : catR;
-        if (drawGradient) ctx.globalAlpha = fade * (0.05 + 0.9 * part);
-        ctx.beginPath();
-        for (const i of steps[k]) {
-          ctx.moveTo(sx[i] + r, sy[i]);
-          ctx.arc(sx[i], sy[i], r, 0, Math.PI * 2);
-        }
-        ctx.fill();
-      }
-      ctx.globalAlpha = fade;
-
-      // 2. The dots of the shows of the user. A rated show has the color of its tier. S is last, on top.
-      const libR = dotRadius(true);
-      for (const tier of [null, "D", "C", "B", "A", "S"]) {
-        ctx.fillStyle = (tier && colors.tier[tier]) || colors.library;
-        ctx.beginPath();
-        for (let i = 0; i < n; i++) {
-          const pt = points[i];
-          if (!pt.owned || special(i) || (pt.tier || null) !== tier) continue;
-          if (sx[i] < -20 || sx[i] > w + 20 || sy[i] < -20 || sy[i] > h + 20) continue;
-          ctx.moveTo(sx[i] + libR, sy[i]);
-          ctx.arc(sx[i], sy[i], libR, 0, Math.PI * 2);
-        }
-        ctx.fill();
+      // 1 and 2. The dots of the catalog and of the shows of the user. A draw that only moves the
+      // map, or that changes only a poster or the show under the pointer, paints the kept picture
+      // of the dots. The story of the list has its own dots below them: it draws them directly.
+      if (keepDots && !story) {
+        paintKeptDots(ctx, w, h, dpr, colors, fade, special);
+      } else {
+        dotsStale = true;
+        drawDots(ctx, w, h, 0, colors, fade, special);
       }
 
       // 3. The highlighted shows
@@ -1183,7 +1272,7 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
       dragStartY = e.clientY;
       tooltip.hidden = true;
       tooltip.style.display = "none";
-      scheduleDraw();
+      scheduleDraw(true);
       return;
     }
 
@@ -1191,7 +1280,7 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
     const pt = story ? null : findNearest(mx, my);
     if (pt !== hoveredPoint) {
       hoveredPoint = pt;
-      scheduleDraw();
+      scheduleDraw(true);
     }
 
     if (pt) {
@@ -1246,6 +1335,8 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
     if (!isDragging) return;
     isDragging = false;
     canvas.classList.remove("is-dragging");
+    // The end of a drag: a full draw (see scheduleDraw)
+    if (hasDragged) scheduleDraw();
     if (!hasDragged && hoveredPoint) {
       onOpen(hoveredPoint);
     }
@@ -1300,7 +1391,7 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
       dragStartX = e.touches[0].clientX;
       dragStartY = e.touches[0].clientY;
       tooltip.hidden = true;
-      scheduleDraw();
+      scheduleDraw(true);
     } else if (e.touches.length === 2 && pinchStartDist > 0) {
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
@@ -1318,6 +1409,8 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
 
   function onTouchEnd(e) {
     if (e.touches.length === 0) {
+      // The end of a drag: a full draw (see scheduleDraw)
+      if (isDragging && hasDragged) scheduleDraw();
       isDragging = false;
       pinchStartDist = 0;
     }

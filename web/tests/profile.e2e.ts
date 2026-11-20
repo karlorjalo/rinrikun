@@ -131,3 +131,39 @@ test('the map has the tier of a show after a full load, also after a change of t
 	await page.reload();
 	await expect(await tooltipOfShow()).toContainText('Tier C');
 });
+
+test('a drag of the map does not build the dots again for each frame', async ({ page }) => {
+	// Count the circles that the map adds to its paths: each dot is one circle
+	await page.addInitScript(() => {
+		const w = window as unknown as { __arcs: number };
+		w.__arcs = 0;
+		const arc = CanvasRenderingContext2D.prototype.arc;
+		CanvasRenderingContext2D.prototype.arc = function (...args) {
+			w.__arcs += 1;
+			return arc.apply(this, args);
+		};
+	});
+	const map: { points: unknown[] } = await (await page.request.get('/api/vector-map')).json();
+	await page.goto('/');
+	const box = page.getByTestId('vector-map');
+	await expect(box.locator('.vector-zoom-level')).toHaveText('100%');
+	const canvas = box.locator('canvas');
+	await canvas.scrollIntoViewIfNeeded();
+	await page.waitForTimeout(800);
+	const area = (await canvas.boundingBox())!;
+	const x = area.x + area.width / 2;
+	const y = area.y + area.height / 2;
+	await page.mouse.move(x, y);
+	await page.mouse.down();
+	await page.evaluate(() => ((window as unknown as { __arcs: number }).__arcs = 0));
+	// 12 steps with a pause: each step is one draw of the map
+	for (let k = 1; k <= 12; k++) {
+		await page.mouse.move(x + k * 5, y + k * 3);
+		await page.waitForTimeout(40);
+	}
+	const arcs = await page.evaluate(() => (window as unknown as { __arcs: number }).__arcs);
+	await page.mouse.up();
+	// One draw of all dots at the start of the drag, and not one for each of the 12 steps
+	expect(arcs).toBeGreaterThan(0);
+	expect(arcs).toBeLessThan(map.points.length * 3);
+});
