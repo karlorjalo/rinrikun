@@ -19,5 +19,6 @@ ureq = { version = "3.5.2", default-features = false, features = ["rustls"] }
 regex = "1.13.2"
 unicode-normalization = "0.1.26"
 sha1_smol = "1.0.1"
+flate2 = "1.1.11"
 ort = { version = "=2.0.0-rc.13", features = ["directml"] }
 tokenizers = { version = "0.22.2", default-features = false, features = ["fancy-regex"] }

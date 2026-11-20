@@ -18,7 +18,7 @@ use axum::Json;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Path as UrlPath, Query, Request, State};
-use axum::http::{HeaderValue, Method, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde_json::{Map, Value, json};
@@ -29,6 +29,7 @@ use crate::changes::Refused;
 use crate::engine::Engine;
 use crate::frames;
 use crate::lists::Random;
+use crate::prepared::Prepared;
 use crate::store::{Store, truthy};
 
 /// The headers of a request that go on to the page server, and the headers of its answer that come back
@@ -243,6 +244,12 @@ async fn post_interest(State(app): State<Shared>, Json(body): Json<Value>) -> An
 
 async fn simple(State(app): State<Shared>, work: fn(&Engine) -> Value) -> Json<Value> {
     Json(compute(&app, work).await)
+}
+
+/// A large answer that the engine keeps with its gzip bytes and its ETag (see prepared.rs)
+async fn prepared(State(app): State<Shared>, headers: HeaderMap, work: fn(&Engine) -> Arc<Prepared>) -> Response {
+    let prepared = compute(&app, work).await;
+    crate::prepared::answer(&prepared, &headers)
 }
 
 async fn review_queue(State(app): State<Shared>, Query(p): Params) -> Answer {
@@ -462,7 +469,7 @@ async fn wrong_method() -> ApiError {
 fn router(app: Shared) -> Router {
     Router::new()
         .route("/api/profile", get(|s| simple(s, Engine::api_profile)))
-        .route("/api/vector-map", get(|s| simple(s, Engine::api_vector_map)))
+        .route("/api/vector-map", get(|s, h| prepared(s, h, Engine::prepared_vector_map)))
         .route("/api/vector-map/match", get(|s| simple(s, Engine::api_map_match)))
         .route("/api/weights", get(|s| simple(s, Engine::api_weights)).post(post_weights).delete(delete_weights))
         .route("/api/review-queue", get(review_queue))
@@ -478,7 +485,7 @@ fn router(app: Shared) -> Router {
         .route("/api/recommend", get(recommend))
         .route("/api/recommend/steps", get(steps))
         .route("/api/rec-log", get(|s| simple(s, Engine::api_rec_log)))
-        .route("/api/shows", get(|s| simple(s, Engine::api_titles)))
+        .route("/api/shows", get(|s, h| prepared(s, h, Engine::prepared_titles)))
         .route("/api/poster/{*id}", get(poster))
         // A wildcard does not match an empty rest: "/next/" needs its own route
         .route("/next", get(old_address))

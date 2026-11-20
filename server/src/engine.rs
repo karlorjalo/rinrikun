@@ -3,7 +3,7 @@
 //! reference of this code. The git history of that version tells why each formula is as it is.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, bail};
 use nalgebra::{DMatrix, DVector};
@@ -13,6 +13,7 @@ use serde_json::Value;
 use crate::api::{ListKey, StepsKey};
 use crate::math::{self, Sparse, dot};
 use crate::memo::{Memo, MemoMap};
+use crate::prepared::Prepared;
 use crate::store::{LogEntry, Row, Store};
 
 /// Centered cosine similarity at which the D-tier penalty starts
@@ -112,6 +113,9 @@ struct Cache {
     lists: MemoMap<ListKey, Result<Value, String>>,
     /// The steps of the lists, as the API gives them
     steps: MemoMap<StepsKey, Value>,
+    /// The answers of /api/vector-map and /api/shows, with their gzip bytes and ETags
+    vector_map: Memo<Arc<Prepared>>,
+    titles: Memo<Arc<Prepared>>,
 }
 
 pub struct Engine {
@@ -346,6 +350,18 @@ impl Engine {
         self.cache.guesses.clear();
         self.cache.lists.clear();
         self.cache.steps.clear();
+        self.cache.vector_map.clear();
+        self.cache.titles.clear();
+    }
+
+    /// The answer of /api/vector-map: from the cache, or made and kept
+    pub(crate) fn prepared_vector_map(&self) -> Arc<Prepared> {
+        self.cache.vector_map.get_or_compute(|| Arc::new(Prepared::new(&self.api_vector_map())))
+    }
+
+    /// The answer of /api/shows: from the cache, or made and kept
+    pub(crate) fn prepared_titles(&self) -> Arc<Prepared> {
+        self.cache.titles.get_or_compute(|| Arc::new(Prepared::new(&self.api_titles())))
     }
 
     /// A list of recommendations without a seed: from the cache, or computed and kept

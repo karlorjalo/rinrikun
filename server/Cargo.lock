@@ -1289,6 +1289,7 @@ dependencies = [
  "anyhow",
  "axum",
  "chrono",
+ "flate2",
  "nalgebra",
  "ort",
  "rayon",
