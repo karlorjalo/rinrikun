@@ -47,6 +47,14 @@ export class ReviewDeck {
 		});
 	}
 
+	/**
+	 * Wait until the server has each tier of this deck. A new deck gets its queue from the server,
+	 * thus the page waits for this before it asks for a new deck.
+	 */
+	saved(): Promise<void> {
+		return this.saving;
+	}
+
 	constructor(data: ReviewData) {
 		this.queue = data.queue;
 		this.rated = data.rated;

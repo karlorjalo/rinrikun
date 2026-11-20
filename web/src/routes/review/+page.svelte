@@ -17,6 +17,7 @@
 	import { countOf } from '#lib/format.js';
 	import { keysBusy, tierOfKey } from '#lib/keys.js';
 	import { FILTER_NAVIGATION, withQuery } from '#lib/links.js';
+	import { progress as loading } from '#lib/state/progress.svelte.js';
 	import { ReviewDeck, type ReviewMode } from '#lib/state/review.svelte.js';
 	import type { PageProps } from './$types';
 
@@ -24,8 +25,12 @@
 	// A new deck for each visit of the tab and for each mode: the queue of now, from its first card
 	const deck = $derived(new ReviewDeck(data));
 
-	function setMode(mode: ReviewMode) {
-		goto(withQuery(page.url, { mode }, { mode: 'unrated' }), FILTER_NAVIGATION);
+	// The new deck gets its queue from the server: wait until the server has the tiers of this
+	// deck. Without the wait, a show with a tier that is not saved yet came back without a tier.
+	async function setMode(mode: ReviewMode) {
+		const url = withQuery(page.url, { mode }, { mode: 'unrated' });
+		await loading.track(deck.saved());
+		goto(url, FILTER_NAVIGATION);
 	}
 
 	const progress = $derived(deck.total > 0 ? `${deck.rated} of ${deck.total} rated` : countOf(deck.queue.length, 'show'));
