@@ -1,40 +1,110 @@
-# Stop the rinrikun server and start it again.
-# The server has no window, and it continues to run when this script ends.
+# Stop the rinrikun servers and start them again.
+# The servers have no window, and they continue to run when this script ends.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\restart_servers.ps1
+#   powershell -ExecutionPolicy Bypass -File scripts\restart_servers.ps1 -WebOnly
 #
-# One server process listens on all addresses. Each address is "address:port". The first default
-# address accepts connections only from this computer. The second default address accepts
-# connections from other computers.
+# There are two servers:
+#   - The Rust server (server\target\release\rinrikun.exe serve): the API, and the address of the
+#     page. One process listens on all addresses. Each address is "address:port". The first
+#     default address accepts connections only from this computer. The second default address
+#     accepts connections from other computers.
+#   - The page server: the server of the SvelteKit build (node web\build). It renders the pages,
+#     and it listens only on this computer, on the port -WebPort. The Rust server passes each
+#     request that is not for /api on to it. It starts only if the build of the page is there
+#     (scripts\build_web.ps1).
 #
-# Do not start one process for each address. A server keeps your tiers and your answers in
-# memory, and it reads the database only when it starts. Thus two processes do not agree after
-# you change a tier through one of them.
+# -WebOnly starts only the page server again, for example after a new build of the page.
+#
+# After the start, the script requests each page one time (not /recommendations), thus the first
+# visit of the user does not wait for the page server to load the code of a page.
+#
+# The PC has no Rust: build the program on a different computer (cargo build --release in server\)
+# and copy rinrikun.exe and DirectML.dll (the GPU of the embeddings) to server\target\release\.
+#
+# Start one Rust process for all addresses: the server keeps your data in memory, and two
+# processes would not agree after a change through one of them.
 param(
     [string[]]$Addresses = @("127.0.0.1:8765", "0.0.0.0:8771"),
-    [string]$Log = "serve.log"
+    [string]$Database = "anime_vec.db",
+    [string]$Log = "serve.log",
+    [int]$WebPort = 8780,
+    [string]$WebLog = "web.log",
+    [switch]$WebOnly
 )
 
 # "powershell -File" gives a list with commas as one text: -Addresses 127.0.0.1:8765,0.0.0.0:8771
 $Addresses = @($Addresses | ForEach-Object { $_ -split "," } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
 $root = Split-Path -Parent $PSScriptRoot
-$python = (Get-Command python -ErrorAction SilentlyContinue).Source
-if (-not $python) { $python = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\python.exe" }
+$program = Join-Path $root "server\target\release\rinrikun.exe"
+$node = (Get-Command node -ErrorAction SilentlyContinue).Source
+$first = $Addresses[0]
+$split = $first.LastIndexOf(":")
+$firstHost = $first.Substring(0, $split)
+$firstPort = $first.Substring($split + 1)
 
-# Stop the processes that listen on the ports of the addresses
-$ports = $Addresses | ForEach-Object { [int]($_ -split ":")[-1] }
+if (-not $WebOnly -and -not (Test-Path $program)) {
+    "the Rust program is not at ${program}: nothing was stopped"
+    exit 1
+}
+
+# Stop the processes that listen on the ports
+$ports = @($WebPort)
+if (-not $WebOnly) { $ports += $Addresses | ForEach-Object { [int]($_ -split ":")[-1] } }
 $old = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
     Where-Object { $_.LocalPort -in $ports } | Select-Object -ExpandProperty OwningProcess -Unique
 if ($old) { Stop-Process -Id $old -Force -Confirm:$false }
 Start-Sleep -Seconds 2
 
-$first = $Addresses[0]
-$split = $first.LastIndexOf(":")
-$options = "--no-browser --host {0} --port {1}" -f $first.Substring(0, $split), $first.Substring($split + 1)
-foreach ($address in ($Addresses | Select-Object -Skip 1)) { $options += " --also $address" }
-$command = 'cmd /c ""{0}" serve.py {1} >> "{2}" 2>&1"' -f $python, $options, $Log
-# WMI starts the process. The process is not a child of this script, thus it continues to run
-# when the script ends.
-$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command; CurrentDirectory = $root }
-"server started on {0} (return value {1})" -f ($Addresses -join " and "), $result.ReturnValue
+# WMI starts the processes. A process is not a child of this script, thus it continues to run
+# when the script ends. "set" gives the process its environment.
+function Start-Detached($command) {
+    (Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command; CurrentDirectory = $root }).ReturnValue
+}
+
+# Wait until an address answers: at most $Seconds, a new try each 0.5 s
+function Wait-Address([string]$Url, [int]$Seconds) {
+    $end = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $end) {
+        try {
+            $null = Invoke-WebRequest -UseBasicParsing $Url -TimeoutSec 5
+            return $true
+        } catch {
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    return $false
+}
+
+# The page server loads the code of a page at the first request of the page: the first visit
+# after a restart took about 1 s. Request each page one time after the start, thus the user does
+# not wait for it. Never /recommendations: each list of that page goes into the log of the user.
+function Request-Pages([int]$WebPort, [string]$Api) {
+    if (-not (Wait-Address "$Api/api/profile" 60)) { "the API does not answer: the page server is not warm"; return }
+    $web = "http://127.0.0.1:$WebPort"
+    if (-not (Wait-Address "$web/settings" 30)) { "the page server does not answer: it is not warm"; return }
+    $started = Get-Date
+    foreach ($path in "/", "/discover", "/ratings", "/review", "/similar", "/settings") {
+        try { $null = Invoke-WebRequest -UseBasicParsing "$web$path" -TimeoutSec 30 } catch { "the page $path gave an error: $($_.Exception.Message)" }
+    }
+    "page server warm in {0} ms" -f [int]((Get-Date) - $started).TotalMilliseconds
+}
+
+if (-not $WebOnly) {
+    $options = ($Addresses | ForEach-Object { "--listen $_" }) -join " "
+    $command = 'cmd /c ""{0}" serve "{1}" {2} --root "{3}" --web http://127.0.0.1:{4} >> "{5}" 2>&1"' -f $program, $Database, $options, $root, $WebPort, $Log
+    "server started on {0} (return value {1})" -f ($Addresses -join " and "), (Start-Detached $command)
+}
+
+if (-not (Test-Path (Join-Path $root "web\build\index.js"))) {
+    "the page is not built: no page server (see scripts\build_web.ps1)"
+} elseif (-not $node) {
+    "Node.js is not installed: no page server"
+} else {
+    # The API at the first address of the Rust server. An address for all networks is also on this computer.
+    $apiHost = if ($firstHost -eq "0.0.0.0") { "127.0.0.1" } else { $firstHost }
+    $command = 'cmd /c "set HOST=127.0.0.1&& set PORT={0}&& set API_TARGET=http://{1}:{2}&& "{3}" web\build >> "{4}" 2>&1"' -f $WebPort, $apiHost, $firstPort, $node, $WebLog
+    "page server started on 127.0.0.1:{0} (return value {1})" -f $WebPort, (Start-Detached $command)
+    Request-Pages -WebPort $WebPort -Api "http://${apiHost}:${firstPort}"
+}

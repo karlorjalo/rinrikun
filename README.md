@@ -16,68 +16,66 @@ The name is the nickname 倫理君 (rinri-kun) that Utaha Kasumigaoka gives to T
 - **Map** — a 2D t-SNE layout of the index. Shows that are neighbors in the embedding space are neighbors on the map. In the far view each show is a dot. When you zoom in, each show moves to its own cell of a grid and becomes a poster, so that no poster covers another poster and you can see which shows are near a show. At the largest zoom a poster has its title. A show of yours has a frame in the color of its tier and a badge with the tier letter. A recommendation has a badge with a petal. Labels name the areas of the map by their typical tags. The far view has the labels of the large areas. The smaller areas get their labels when you zoom in. Each map has a search box: type a part of a title, in romaji, in English or in Japanese. The map shows the found shows with a frame and makes the other shows faint. Enter moves the view to the next found show, and Shift+Enter to the one before. The button "Match gradient" makes the brightness of a poster show its match: a show with a high match is bright, and a show with a low match is dark. In the far view the dots of the catalog are stronger for a higher match. The pointer on a show then also gives its match.
 - **Settings** — choices for the look of the interface. The browser keeps them. The typeface setting has two options: serif titles (Noto Serif JP for titles and headings), and Noto Sans JP for all text. A second setting turns the cherry blossom petals of the page header on or off. A third setting turns the match gradient of the maps on or off. A setting has no text: the "i" mark of a setting, and the pointer on its options, show a tooltip with a picture of each option.
 
+## Parts
+
+- `server/`: the program `rinrikun` in Rust. `rinrikun serve` is the server (the API, and the address of the page), `rinrikun build` builds the index, and `rinrikun evaluate` is the offline test of the recommendations. See `server/README.md`.
+- `web/`: the page (SvelteKit, Tailwind CSS, components of shadcn-svelte). A small Node server renders it with the data. See `web/README.md`.
+- `scripts/`: PowerShell scripts for the PC of the server: start the servers, build the page, and the weekly rebuild.
+
 ## Setup
 
-```
-python -m pip install -r requirements.txt
-# secrets.json (gitignored): {"jellyfin_api_key": "...", "jellyfin_user_id": "..."}
-# or set JELLYFIN_API_KEY + JELLYFIN_USER_ID env vars.
-# Jellyfin URL / user id live in anime_vec/jellyfin_pull.py (localhost by default).
-```
+- Rust (for `cargo build --release` in `server/`). The build of the program downloads ONNX Runtime one time and links it into the program. A computer without Rust can use the program from a different computer: copy `rinrikun.exe` and `DirectML.dll` to `server\target\release\`.
+- Node.js (for the page).
+- `secrets.json` in the project folder (gitignored): `{"jellyfin_api_key": "...", "jellyfin_user_id": "..."}`, or the environment variables `JELLYFIN_API_KEY` and `JELLYFIN_USER_ID`. The Jellyfin server is `http://localhost:8096` (`server/src/build/jellyfin.rs`).
 
-First build downloads the ~1.1 GB local embedding model (EmbeddingGemma 2, the ONNX build `onnx-community/embeddinggemma-2-ONNX`, run with onnxruntime — no API keys, fully offline). The model is multilingual, because the Jellyfin rows are in Japanese and the AniList rows are in English.
-
-### GPU (optional)
-
-The build uses an NVIDIA GPU when the GPU packages are installed. A full build of 4300 titles then takes less than 1 minute.
-
-```
-python -m pip uninstall -y onnxruntime
-python -m pip install "onnxruntime-gpu[cuda,cudnn]"
-```
-
-Without these packages the build uses the CPU. A full build is then much slower, but later builds embed only the changed rows.
+The first build downloads the embedding model of about 1.1 GB (EmbeddingGemma 2, the ONNX build `onnx-community/embeddinggemma-2-ONNX`, with ONNX Runtime: no API keys, and the text stays on the computer). It uses the cache of Hugging Face if the model is there. The model is multilingual, because the Jellyfin rows are in Japanese and the AniList rows are in English. The build embeds on the GPU with DirectML (DirectX 12: an NVIDIA, AMD or Intel card), about 0.04 seconds for each text on an RTX 3070: a weekly build has a few new texts, and the first build of about 21 000 titles takes about 15 minutes. Without a usable GPU (or without `DirectML.dll` next to the program) the build uses the CPU, about 4 times slower. `RINRIKUN_EMBED=cpu` selects the CPU.
 
 ## Run
 
 ```
-python build.py                # pull Jellyfin + AniList pool, embed, persist to anime_vec.db
-python build.py --refresh-anilist   # force re-pull of the AniList pool
-python build.py --pool-only    # only the 5000 most popular anime (quicker first build)
-python serve.py                # serves http://localhost:8765 and opens it
-python serve.py --also 0.0.0.0:8771   # the same server also accepts connections from other computers, on port 8771
-python evaluate.py --tiers     # offline test of the recommendations (read-only)
-python scripts/benchmark.py after   # write the results of the offline tests to scratch/bench-after.json (read-only)
+cd server && cargo build --release            # the program: server\target\release\rinrikun.exe
+rinrikun build                                # Jellyfin + AniList, embeddings, map -> anime_vec.db (in the folder of now)
+rinrikun build --refresh-anilist              # ask AniList again for all data
+rinrikun build --pool-only                    # only the 5000 most popular anime (a quicker first build)
+rinrikun serve anime_vec.db --listen 127.0.0.1:8765 --listen 0.0.0.0:8771   # the server; the page needs the page server too
+rinrikun evaluate --tiers --recent 20         # the offline test of the recommendations (reads only)
+rinrikun evaluate --benchmark after           # the results of each show to scratch/bench-after.json, to compare two versions
 ```
 
-Use one server process. The server keeps your tiers and your answers in memory, and it reads the database only when it starts. Two processes thus do not agree after you change a tier through one of them. `--also` gives one process more than one address. `--no-browser` starts the server without the browser.
+On the PC of the server, the scripts start everything:
 
-Rebuilds are incremental: unchanged rows keep their cached embeddings. A change of the model or of the prompt in `anime_vec/embed.py` makes all embeddings stale. The build also computes the map layout (about 1 minute) and keeps it in the database until the embeddings change.
+```
+powershell -ExecutionPolicy Bypass -File scripts\build_web.ps1                # install the packages and build the page to web\build
+powershell -ExecutionPolicy Bypass -File scripts\restart_servers.ps1          # start the Rust server and the page server again
+powershell -ExecutionPolicy Bypass -File scripts\restart_servers.ps1 -WebOnly # only the page server, after a new build of the page
+```
+
+`restart_servers.ps1` starts one Rust process that listens on two addresses: `127.0.0.1:8765` and `0.0.0.0:8771` (`-Addresses` selects other addresses), and the page server on `127.0.0.1:8780` (`-WebPort`). The Rust server passes each request that is not for `/api` on to the page server, thus the browser sees one address. The logs are `serve.log` and `web.log`. Use one server process: the server keeps your data in memory, and two processes would not agree after a change through one of them.
+
+Rebuilds are incremental: unchanged rows keep their embeddings. A change of the model or of the prompt (`server/src/build/embed.rs`) makes all embeddings old. The build also computes the map layout (about 30 seconds) and keeps it in the database until the embeddings change. The server loads the data again by itself when a build changed the database.
 
 ### Automatic rebuild (Windows)
 
-A new anime has few links on AniList at first, and it gets more with time. A build each week keeps the catalog and the links fresh. The folder `scripts/` has three PowerShell scripts for this:
+A new anime has few links on AniList at first, and it gets more with time. A build each week keeps the catalog and the links fresh:
 
 ```
 powershell -ExecutionPolicy Bypass -File scripts\install_weekly_task.ps1    # create the scheduled task (Monday 04:30)
-powershell -ExecutionPolicy Bypass -File scripts\weekly_rebuild.ps1         # what the task runs: build, then start the server again
-powershell -ExecutionPolicy Bypass -File scripts\restart_servers.ps1        # only start the server again
+powershell -ExecutionPolicy Bypass -File scripts\weekly_rebuild.ps1         # what the task runs: rinrikun build
 ```
 
 - The task runs as your user, also when you are not logged on. If the computer is off at the time of the task, the task runs when the computer is on again.
 - `install_weekly_task.ps1 -Day Sunday -Time 03:00` selects a different time. `Unregister-ScheduledTask -TaskName "rinrikun weekly rebuild"` removes the task.
 - The build keeps one copy of the database from before the build in `scratch\anime_vec.db.bak-weekly`. Its log is `scratch\rebuild.log`.
 - If the build fails, the server continues with the old index.
-- `restart_servers.ps1` starts one server process that listens on two addresses: `127.0.0.1:8765` and `0.0.0.0:8771`. Its parameter `-Addresses` selects other addresses. The log of the server is `serve.log`.
 - When the build adds shows, it computes the map again. The positions of the shows on the map can then be different.
 
 ## Notes
 
+- The first version of the app was in Python (a FastAPI server, a NumPy engine, and a page in plain HTML, JavaScript and CSS). The git history has it. The Rust code has the same formulas: before the switch, each answer of the API, each change of the data, the build and the offline test gave the same results as the Python version on a copy of the real data.
 - The build connects each library show to its AniList entries with the public id map of the Fribb/anime-lists project (TMDB, TVDB and IMDb ids, with season numbers). The file stays in `idmap_cache/` for 7 days. A title match finds the shows that the id map does not have.
 - The catalog is all anime that the build can find: the 5000 most popular anime on AniList (the maximum for one query), all anime of the public id map, and the anime that these point to with a user recommendation or a franchise relation. That is about 21 000 anime. A show that is not released and a music video are in the catalog but not in the recommendations. The first build asks AniList for about 450 pages, which takes about 20 minutes. Later builds use the cache. The cache of a page is good for 30 days, and the cache of an anime that is not finished for 7 days.
 - Two Jellyfin items with the same type and the same TMDB id are one show (for example two files of one movie). A show that Jellyfin does not have now goes out of the index at the next build. Its tier stays in the database.
-- AniList pages are cached in `anilist_cache/` (corrupt files are refetched automatically; requires a browser User-Agent, which is handled for you).
-- Index + cache + secrets are gitignored. The default host is 127.0.0.1 and the API has no auth. With `--host 0.0.0.0` or `--also 0.0.0.0:8771`, each computer that can connect to the port can read and change the ratings, so use it only on a network that you trust (for example behind a firewall rule for your VPN).
-- Scale target: ~20k titles (brute-force numpy cosine).
+- The answers of AniList stay in `anilist_cache/` (a file that is not correct is asked for again).
+- The index, the caches and the secrets are gitignored. The API has no login. With an address for all networks (`0.0.0.0:8771`), each computer that can connect to the port can read and change the ratings, so use it only on a network that you trust (for example behind a firewall rule for your VPN).
 - All similarities use mean-centered vectors: the engine subtracts the corpus mean before it computes a cosine.
-- Without scikit-learn, or with less than 100 titles, the map uses PCA.
+- With less than 100 titles, the map uses PCA in place of t-SNE.

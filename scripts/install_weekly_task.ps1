@@ -24,5 +24,5 @@ $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType S4U -RunLevel L
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 3)
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings `
-    -Description "Builds the rinrikun index again and starts its server again." -Force | Out-Null
+    -Description "Builds the rinrikun index again." -Force | Out-Null
 Get-ScheduledTask -TaskName $TaskName | Get-ScheduledTaskInfo | Select-Object TaskName, NextRunTime | Format-List

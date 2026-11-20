@@ -1,11 +1,11 @@
-__pycache__/
-*.pyc
-.pytest_cache/
-anilist_cache/
+# The data of the user and the files that the build and the servers make
 anime_vec.db
-anime.db
-serve.log
+anime_vec.db-*
 secrets.json
-.superpowers/
-scratch/
+anilist_cache/
 idmap_cache/
+model_cache/
+scratch/
+serve.log
+web.log
+.superpowers/

@@ -1,10 +1,11 @@
-# Build the index again, then start the server again.
-# The scheduled task from install_weekly_task.ps1 runs this script one time each week.
-#
-# The build gets the new anime and the new links from AniList, and the changes of the Jellyfin
-# library. Your tiers and your other data stay. The log is scratch\rebuild.log.
+# Build the index again: the new anime and the new links from AniList, and the changes of the
+# Jellyfin library. Your tiers and your other data stay. The scheduled task from
+# install_weekly_task.ps1 runs this script one time each week. The log is scratch\rebuild.log.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\weekly_rebuild.ps1
+#
+# The build is the Rust program (server\target\release\rinrikun.exe build): see server\README.md.
+# The server needs no restart: it loads the data again when the database changes.
 
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
@@ -17,21 +18,20 @@ function Write-Log($text) {
     "{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $text | Out-File -FilePath $log -Append -Encoding utf8
 }
 
-$python = (Get-Command python -ErrorAction SilentlyContinue).Source
-if (-not $python) { $python = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\python.exe" }
+$program = Join-Path $root "server\target\release\rinrikun.exe"
+if (-not (Test-Path $program)) {
+    Write-Log "the Rust program is not at $program. The server continues with the old index."
+    exit 1
+}
 
 Write-Log "rebuild started"
 # One copy of the database from before the build
 if (Test-Path anime_vec.db) { Copy-Item anime_vec.db scratch\anime_vec.db.bak-weekly -Force }
 
 # cmd writes the output of the build to the log
-cmd /c "`"$python`" -u build.py >> `"$log`" 2>&1"
+cmd /c "`"$program`" build --root `"$root`" >> `"$log`" 2>&1"
 if ($LASTEXITCODE -ne 0) {
     Write-Log "the build failed with code $LASTEXITCODE. The server continues with the old index."
     exit 1
 }
-Write-Log "build done"
-
-# The server reads the index only when it starts
-& (Join-Path $PSScriptRoot "restart_servers.ps1") | Out-File -FilePath $log -Append -Encoding utf8
 Write-Log "rebuild finished"
