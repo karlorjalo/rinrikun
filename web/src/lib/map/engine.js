@@ -126,6 +126,9 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
   let animFrame = null;
   // The timer of the draw for the posters that load (schedulePosterDraw)
   let posterTimer = null;
+  // The size of the box at the last draw (see the ResizeObserver below)
+  let drawnW = -1;
+  let drawnH = -1;
   let destroyed = false;
 
   const PAD = 24;
@@ -769,6 +772,8 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
     if (!canvas.isConnected) return;
     const { w, h, side } = viewSize();
     if (w === 0 || h === 0) return;
+    drawnW = w;
+    drawnH = h;
 
     if (zoomLevelEl) {
       zoomLevelEl.textContent = `${Math.round(scale * 100)}%`;
@@ -1324,7 +1329,13 @@ export function createVectorMap(canvas, tooltip, data, options = {}) {
   canvas.addEventListener("touchmove", onTouchMove, { passive: false });
   canvas.addEventListener("touchend", onTouchEnd);
 
-  const ro = new ResizeObserver(() => scheduleDraw());
+  // A ResizeObserver calls one time at its start, also when the size did not change: the map then
+  // drew two times at its start. A new size draws the map again.
+  const ro = new ResizeObserver((entries) => {
+    const size = entries[0]?.borderBoxSize?.[0];
+    if (size && Math.abs(size.inlineSize - drawnW) < 0.5 && Math.abs(size.blockSize - drawnH) < 0.5) return;
+    scheduleDraw();
+  });
   ro.observe(box);
 
   scheduleDraw();
