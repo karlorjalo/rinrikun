@@ -7,38 +7,28 @@ use std::sync::{Arc, Mutex, OnceLock};
 /// A value that is computed one time. Callers at the same time wait for the same computation,
 /// thus the server does not compute the same value two times in parallel.
 ///
-/// `clear` forgets the value. A computation that started before `clear` fills a cell that no
-/// caller reads again: a caller after `clear` never gets a value of the old data.
-///
 /// Do not call `get_or_compute` in a rayon closure: a rayon thread that waits can block the work
 /// that it waits for.
 pub struct Memo<T> {
-    cell: Mutex<Arc<OnceLock<T>>>,
+    cell: OnceLock<T>,
 }
 
 impl<T> Default for Memo<T> {
     fn default() -> Self {
-        Memo { cell: Mutex::new(Arc::new(OnceLock::new())) }
+        Memo { cell: OnceLock::new() }
     }
 }
 
 impl<T: Clone> Memo<T> {
     /// The value. The first caller computes it, and the callers at the same time wait for it.
     pub fn get_or_compute(&self, compute: impl FnOnce() -> T) -> T {
-        // The lock is held only to take the cell, not during the computation
-        let cell = self.cell.lock().unwrap().clone();
-        cell.get_or_init(compute).clone()
+        self.cell.get_or_init(compute).clone()
     }
 
     /// The value, if it is computed
     #[allow(dead_code)]
     pub fn get(&self) -> Option<T> {
-        self.cell.lock().unwrap().get().cloned()
-    }
-
-    /// Forget the value: the data changed
-    pub fn clear(&self) {
-        *self.cell.lock().unwrap() = Arc::new(OnceLock::new());
+        self.cell.get().cloned()
     }
 }
 
@@ -56,6 +46,7 @@ impl<K, V> Default for MemoMap<K, V> {
 impl<K: Eq + Hash + Clone, V: Clone> MemoMap<K, V> {
     /// The value of a key. The first caller computes it, and the callers at the same time wait for it.
     pub fn get_or_compute(&self, key: &K, compute: impl FnOnce() -> V) -> V {
+        // The code holds the lock only to take the cell, not during the computation
         let cell = self.cells.lock().unwrap().entry(key.clone()).or_default().clone();
         cell.get_or_init(compute).clone()
     }
@@ -69,10 +60,33 @@ impl<K: Eq + Hash + Clone, V: Clone> MemoMap<K, V> {
     pub fn len(&self) -> usize {
         self.cells.lock().unwrap().len()
     }
+}
 
-    /// Forget all values: the data changed
-    pub fn clear(&self) {
-        *self.cells.lock().unwrap() = HashMap::new();
+/// A group of kept values that the owner forgets all at the same time: `reset` puts a new, empty
+/// group in place. A new field of the group needs no line in a "clear" function, thus no kept
+/// value can stay by mistake after the data changed.
+///
+/// A computation that started before `reset` fills the old group. No caller reads the old group
+/// again: a caller after `reset` never gets a value of the old data.
+pub struct Resettable<T> {
+    current: Mutex<Arc<T>>,
+}
+
+impl<T: Default> Default for Resettable<T> {
+    fn default() -> Self {
+        Resettable { current: Mutex::new(Arc::new(T::default())) }
+    }
+}
+
+impl<T: Default> Resettable<T> {
+    /// The group of now. The code holds the lock only to take it, not while a caller uses it.
+    pub fn get(&self) -> Arc<T> {
+        self.current.lock().unwrap().clone()
+    }
+
+    /// Forget each value of the group: the data changed
+    pub fn reset(&self) {
+        *self.current.lock().unwrap() = Arc::new(T::default());
     }
 }
 
@@ -81,6 +95,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
 
@@ -106,40 +121,45 @@ mod tests {
     }
 
     #[test]
-    fn memo_computes_again_after_clear() {
-        let memo = Memo::<i32>::default();
+    fn resettable_gives_a_new_group_after_reset() {
+        let kept = Resettable::<Memo<i32>>::default();
         let count = AtomicUsize::new(0);
         let compute = || {
             count.fetch_add(1, Ordering::SeqCst);
             5
         };
-        assert_eq!(memo.get_or_compute(compute), 5);
-        assert_eq!(memo.get_or_compute(compute), 5);
+        assert_eq!(kept.get().get_or_compute(compute), 5);
+        assert_eq!(kept.get().get_or_compute(compute), 5);
         assert_eq!(count.load(Ordering::SeqCst), 1);
-        memo.clear();
-        assert_eq!(memo.get(), None);
-        assert_eq!(memo.get_or_compute(compute), 5);
+        kept.reset();
+        assert_eq!(kept.get().get(), None);
+        assert_eq!(kept.get().get_or_compute(compute), 5);
         assert_eq!(count.load(Ordering::SeqCst), 2);
     }
 
     #[test]
     fn memo_drops_value_of_old_generation() {
-        let memo = Arc::new(Memo::<i32>::default());
+        let kept = Arc::new(Resettable::<Memo<i32>>::default());
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
         let old = {
-            let memo = memo.clone();
+            let kept = kept.clone();
             thread::spawn(move || {
-                memo.get_or_compute(|| {
-                    thread::sleep(Duration::from_millis(100));
+                kept.get().get_or_compute(|| {
+                    started_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
                     1
                 })
             })
         };
-        thread::sleep(Duration::from_millis(20));
-        memo.clear();
-        assert_eq!(memo.get_or_compute(|| 2), 2);
-        // The caller of the old computation gets its own value, but the memo keeps the new value
+        // The old computation runs now. The data changes before it ends.
+        started_rx.recv().unwrap();
+        kept.reset();
+        assert_eq!(kept.get().get_or_compute(|| 2), 2);
+        release_tx.send(()).unwrap();
+        // The caller of the old computation gets its own value, but the new group keeps the new value
         assert_eq!(old.join().unwrap(), 1);
-        assert_eq!(memo.get(), Some(2));
+        assert_eq!(kept.get().get(), Some(2));
     }
 
     #[test]
@@ -159,8 +179,6 @@ mod tests {
         assert_eq!(map.get_or_compute(&1, || "one".into()), "one");
         assert_eq!(map.get_or_compute(&2, || "two".into()), "two");
         assert_eq!(map.get_or_compute(&1, || "other".into()), "one");
-        map.clear();
-        assert_eq!(map.get_or_compute(&1, || "new".into()), "new");
-        assert_eq!(map.get_or_compute(&2, || "new two".into()), "new two");
+        assert_eq!(map.len(), 2);
     }
 }

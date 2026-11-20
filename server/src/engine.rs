@@ -12,7 +12,7 @@ use serde_json::Value;
 
 use crate::api::{ListKey, StepsKey};
 use crate::math::{self, Sparse, dot};
-use crate::memo::{Memo, MemoMap};
+use crate::memo::{Memo, MemoMap, Resettable};
 use crate::prepared::Prepared;
 use crate::simcache::SimColumns;
 use crate::store::{LogEntry, Row, Store};
@@ -105,7 +105,8 @@ pub struct Content {
 }
 
 /// The results that the engine keeps until the data of the user changes. Requests at the same
-/// time wait for one computation of a value (see memo.rs).
+/// time wait for one computation of a value (see memo.rs). The engine forgets all of them at the
+/// same time (`clear_cache` puts a new, empty Cache in place): a new field needs no other code.
 #[derive(Default)]
 struct Cache {
     matches: Memo<Vec<f32>>,
@@ -167,7 +168,7 @@ pub struct Engine {
     pub entry_row: Vec<Option<usize>>,
     /// The group of each row for the year, the format, the number of episodes and the crowd score. -1 = not known.
     pub kind_codes: Vec<[i64; 4]>,
-    cache: Cache,
+    cache: Resettable<Cache>,
     /// The text similarity of each show to the liked shows and the D shows (simcache.rs). The
     /// vectors do not change while this engine lives, thus a change of the user does not clear it.
     sims: SimColumns,
@@ -308,7 +309,7 @@ impl Engine {
             links: Vec::new(),
             entry_row: Vec::new(),
             kind_codes: Vec::new(),
-            cache: Cache::default(),
+            cache: Resettable::default(),
             sims: SimColumns::default(),
             deck_match: Mutex::new(HashMap::new()),
         };
@@ -349,14 +350,10 @@ impl Engine {
         self.regions = store.regions().unwrap_or(serde_json::Value::Array(Vec::new()));
     }
 
-    /// Forget the match and the tier guess: the data of the user changed
+    /// Forget each kept result (the match, the tier guess, the lists, the large answers): the data
+    /// of the user changed. The similarity columns stay: they do not depend on the user.
     pub fn clear_cache(&self) {
-        self.cache.matches.clear();
-        self.cache.guesses.clear();
-        self.cache.lists.clear();
-        self.cache.steps.clear();
-        self.cache.vector_map.clear();
-        self.cache.titles.clear();
+        self.cache.reset();
     }
 
     /// The number of similarity columns that the engine keeps (for the timing command)
@@ -366,22 +363,22 @@ impl Engine {
 
     /// The answer of /api/vector-map: from the cache, or made and kept
     pub(crate) fn prepared_vector_map(&self) -> Arc<Prepared> {
-        self.cache.vector_map.get_or_compute(|| Arc::new(Prepared::new(&self.api_vector_map())))
+        self.cache.get().vector_map.get_or_compute(|| Arc::new(Prepared::new(&self.api_vector_map())))
     }
 
     /// The answer of /api/shows: from the cache, or made and kept
     pub(crate) fn prepared_titles(&self) -> Arc<Prepared> {
-        self.cache.titles.get_or_compute(|| Arc::new(Prepared::new(&self.api_titles())))
+        self.cache.get().titles.get_or_compute(|| Arc::new(Prepared::new(&self.api_titles())))
     }
 
     /// A list of recommendations without a seed: from the cache, or computed and kept
     pub(crate) fn cached_list(&self, key: ListKey, compute: impl FnOnce() -> Result<Value, String>) -> Result<Value, String> {
-        self.cache.lists.get_or_compute(&key, compute)
+        self.cache.get().lists.get_or_compute(&key, compute)
     }
 
     /// The steps of a list: from the cache, or computed and kept
     pub(crate) fn cached_steps(&self, key: StepsKey, compute: impl FnOnce() -> Value) -> Value {
-        self.cache.steps.get_or_compute(&key, compute)
+        self.cache.get().steps.get_or_compute(&key, compute)
     }
 
     pub fn len(&self) -> usize {
@@ -923,7 +920,7 @@ impl Engine {
 
     /// `match_percent`: the match of each row in percent, NaN for a row without a match
     pub fn match_percent(&self) -> Vec<f32> {
-        self.cache.matches.get_or_compute(|| self.compute_match())
+        self.cache.get().matches.get_or_compute(|| self.compute_match())
     }
 
     fn compute_match(&self) -> Vec<f32> {
@@ -978,7 +975,7 @@ impl Engine {
 
     /// `tier_guess`: the tier that the tier model predicts for each row, NaN if the user has too few ratings
     pub fn tier_guess(&self) -> Vec<f32> {
-        self.cache.guesses.get_or_compute(|| self.compute_guess())
+        self.cache.get().guesses.get_or_compute(|| self.compute_guess())
     }
 
     fn compute_guess(&self) -> Vec<f32> {
