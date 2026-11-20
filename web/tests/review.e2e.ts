@@ -69,6 +69,19 @@ test('a late answer of the server does not change the tier that the user chose',
 	expect(show.tier).toBe(before);
 });
 
+test('the tooltip of the match closes when a key changes the card', async ({ page }) => {
+	await page.goto('/review');
+	const card = page.getByTestId('deck-card');
+	const match = card.getByTestId('match');
+	await expect(match).toBeVisible();
+	await match.hover();
+	const tooltip = page.getByRole('tooltip');
+	await expect(tooltip).toBeVisible();
+	// The pointer stays at its place, and the key gives a new card: the element of the tooltip is gone
+	await page.keyboard.press('Space');
+	await expect(tooltip).toHaveCount(0);
+});
+
 test('the deck ends with a message, and "Review all" shows the rated shows', async ({ page }) => {
 	await page.goto('/review');
 	const card = page.getByTestId('deck-card');
