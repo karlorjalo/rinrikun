@@ -28,6 +28,18 @@ fn best<T>(mut work: impl FnMut() -> T) -> f64 {
         .fold(f64::INFINITY, f64::min)
 }
 
+/// As `best`, for work that can fail. An error of a run ends the command: a time for work that
+/// failed would look like a fast result.
+fn best_ok<T>(mut work: impl FnMut() -> Result<T>) -> Result<f64> {
+    let mut least = f64::INFINITY;
+    for _ in 0..RUNS {
+        let started = Instant::now();
+        std::hint::black_box(work()?);
+        least = least.min(started.elapsed().as_secs_f64() * 1000.0);
+    }
+    Ok(least)
+}
+
 pub fn run(args: &[String]) -> Result<()> {
     let [db] = args else { bail!("usage: rinrikun timing <database>") };
     let db = PathBuf::from(db);
@@ -67,10 +79,28 @@ pub fn run(args: &[String]) -> Result<()> {
     // without the cache: the API keeps a list until the data changes, and runs 2 and 3 would only
     // read the cache.
     let list = |diverse: bool| RecommendOptions { k: 40, seed: None, diverse, new_only: true, usual: true, links: true };
-    line("list", best(|| engine.compute_recommend(&list(false)).map(|v| v.to_string().len())));
-    line("list with variety", best(|| engine.compute_recommend(&list(true)).map(|v| v.to_string().len())));
+    line("list", best_ok(|| engine.compute_recommend(&list(false)).map(|v| v.to_string().len()))?);
+    line("list with variety", best_ok(|| engine.compute_recommend(&list(true)).map(|v| v.to_string().len()))?);
     line("steps", best(|| engine.compute_steps(40, true, true, true)));
-    line("vector map JSON", best(|| serde_json::to_vec(&engine.api_vector_map()).map(|v| v.len())));
-    line("titles JSON", best(|| serde_json::to_vec(&engine.api_titles()).map(|v| v.len())));
+    line("vector map JSON", best_ok(|| Ok(serde_json::to_vec(&engine.api_vector_map())?.len()))?);
+    line("titles JSON", best_ok(|| Ok(serde_json::to_vec(&engine.api_titles())?.len()))?);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::anyhow;
+
+    #[test]
+    fn best_ok_gives_the_error_of_the_work() {
+        let result = best_ok(|| -> Result<u8> { Err(anyhow!("no rated shows")) });
+        assert_eq!(result.unwrap_err().to_string(), "no rated shows");
+    }
+
+    #[test]
+    fn best_ok_gives_a_time_for_work_without_an_error() {
+        let time = best_ok(|| Ok(1)).unwrap();
+        assert!(time.is_finite() && time >= 0.0);
+    }
 }
