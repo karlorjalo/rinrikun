@@ -5,21 +5,45 @@
 #
 # The script requests lists of recommendations without a seed and changes a tier (to the tier
 # that the show has already). On the live server, each such list would go into the log of the
-# user. Thus the script stops if the server at -Base does not run from the folder rinrikun-dev.
+# user. Thus the script stops before its first request if one of these is not true:
+#   - The server at -Base runs from the folder rinrikun-dev.
+#   - The page server at -Web, and the page server that the server at -Base passes its pages on
+#     to (its option --web), use the server at -Base as their API (API_TARGET in their start
+#     command). The script requests /recommendations on both.
+# -CheckOnly makes only these checks and sends no request.
 #
 # Each line: the time of the first request, the times of the next requests, the time to the
 # first byte of the last request, the size with gzip and the size without gzip.
 param(
     [string]$Base = "http://127.0.0.1:8773",
-    [string]$Web = "http://127.0.0.1:8781"
+    [string]$Web = "http://127.0.0.1:8781",
+    [switch]$CheckOnly
 )
 $ProgressPreference = "SilentlyContinue"
 
+function Get-Listener([int]$Port) {
+    $listener = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $listener) { throw "nothing listens on port $Port" }
+    Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)"
+}
+
+# The page server at an address must use the API at -Base. restart_servers.ps1 starts it with
+# "cmd /c set API_TARGET=...": that command is the parent process of the page server.
+function Assert-DevPage([string]$Address, [int]$ApiPort) {
+    $process = Get-Listener ([uri]$Address).Port
+    $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.ParentProcessId)"
+    $wanted = "API_TARGET=http://(127\.0\.0\.1|localhost):$ApiPort(?!\d)"
+    if (-not $parent -or $parent.CommandLine -notmatch $wanted) {
+        throw "the page server at $Address does not use the API on port ${ApiPort}: $($parent.CommandLine)"
+    }
+}
+
 $port = ([uri]$Base).Port
-$listener = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $listener) { throw "nothing listens on port $port" }
-$command = (Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)").CommandLine
+$command = (Get-Listener $port).CommandLine
 if ($command -notmatch "rinrikun-dev") { throw "the server on port $port is not the dev copy: $command" }
+Assert-DevPage $Web $port
+if ($command -match "--web\s+(\S+)") { Assert-DevPage $Matches[1] $port } else { throw "the server on port $port has no --web option: $command" }
+if ($CheckOnly) { "the checks pass: $Base and $Web are the dev copy"; exit 0 }
 
 $rated = Invoke-RestMethod "$Base/api/ratings"
 $id = [uri]::EscapeDataString($rated[0].id)
